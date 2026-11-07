@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 
 import { resolveAPIURL } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -24,10 +24,12 @@ export function EndpointBadge({
   name,
   logoUrl,
   className,
+  fallback,
 }: {
   name: string
   logoUrl?: string
   className?: string
+  fallback?: ReactNode
 }) {
   const [failedUrl, setFailedUrl] = useState("")
   const showLogo = Boolean(logoUrl) && failedUrl !== logoUrl
@@ -52,7 +54,7 @@ export function EndpointBadge({
         className
       )}
     >
-      {endpointInitials(name)}
+      {fallback ?? endpointInitials(name)}
     </span>
   )
 }

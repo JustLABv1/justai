@@ -4449,4 +4449,35 @@ export const de = {
   "Endpoint pagination": "Endpunkt-Seitennavigation",
   "Text-to-speech": "Sprachausgabe",
   Own: "Eigene",
+  "Check & save": "Prüfen & speichern",
+  "What do you want to connect?": "Was möchtest du verbinden?",
+  "Where is it, and who may use it?": "Wo läuft es, und wer darf es nutzen?",
+  "Check the connection, then save.": "Verbindung prüfen, dann speichern.",
+  "Language model": "Sprachmodell",
+  "Chat, vision, embeddings, images, transcription and speech.":
+    "Chat, Bildverständnis, Embeddings, Bilder, Transkription und Sprache.",
+  "Tells speakers apart in transcriptions.":
+    "Unterscheidet Sprecher in Transkriptionen.",
+  "Logo, routing, models, timeouts and defaults.":
+    "Logo, Routing, Modelle, Zeitlimits und Standards.",
+  Behavior: "Verhalten",
+  "Save anyway": "Trotzdem speichern",
+  "Choose the model used for chat.": "Wähle das Modell für Chats.",
+  "A dedicated pyannote.audio speaker-diarization service.":
+    "Ein eigener pyannote.audio-Dienst zur Sprechertrennung.",
+  "Selected at request time": "Wird bei der Anfrage ausgewählt",
+  "Service-selected pipeline": "Wird vom Dienst ausgewählt",
+  "Saving checks the connection first. You can also test it here.":
+    "Beim Speichern wird die Verbindung zuerst geprüft. Du kannst sie auch hier testen.",
+  "LiteLLM, vLLM, LM Studio, OpenRouter, or another gateway.":
+    "LiteLLM, vLLM, LM Studio, OpenRouter oder ein anderes Gateway.",
+  "Verification skipped": "Überprüfung übersprungen",
+  "You can save this endpoint without a successful preflight. JustAI will use the saved connection as configured.":
+    "Du kannst diesen Endpunkt ohne erfolgreiche Verbindungsprüfung speichern. JustAI verwendet die Verbindung wie eingerichtet.",
+  "Optional capabilities, API routing and runtime limits.":
+    "Optionale Funktionen, API-Routing und Laufzeitgrenzen.",
+  "Choose discovered model": "Erkanntes Modell auswählen",
+  "Browse models": "Modelle durchsuchen",
+  "Choose whether this endpoint is available and used by default for new chats.":
+    "Lege fest, ob dieser Endpunkt verfügbar ist und standardmäßig für neue Chats verwendet wird.",
 } as const

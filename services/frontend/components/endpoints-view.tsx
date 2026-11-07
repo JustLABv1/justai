@@ -59,6 +59,7 @@ import { Spinner } from "@/components/panelui/spinner"
 import { Switch } from "@/components/panelui/switch"
 import { Menu } from "@/components/panelui/menu"
 import { EndpointCreationWizard } from "@/components/endpoint-creation-wizard"
+import { EndpointBadge } from "@/components/endpoint-badge"
 
 type Props = {
   endpoints: Endpoint[]
@@ -904,9 +905,14 @@ function EndpointTable({
               >
                 <Card.Header>
                   <div className="flex items-start gap-3">
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground [&_svg]:size-5">
-                      <ProviderIcon provider={endpoint.providerType} />
-                    </span>
+                    <EndpointBadge
+                      name={endpoint.name}
+                      logoUrl={endpoint.logoUrl}
+                      fallback={
+                        <ProviderIcon provider={endpoint.providerType} />
+                      }
+                      className="size-10 shrink-0 rounded-xl bg-muted text-muted-foreground [&_svg]:size-5"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                         {manageable ? (

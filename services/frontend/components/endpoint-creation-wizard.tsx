@@ -1,9 +1,6 @@
 "use client"
 
-import {
-  useTranslations,
-  useTranslatedConfig,
-} from "@/components/locale-provider"
+import { useTranslations } from "@/components/locale-provider"
 import {
   useCallback,
   useEffect,
@@ -17,24 +14,16 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   CheckCircle2,
+  ChevronDown,
   CircleAlert,
   ImagePlus,
   KeyRound,
-  Layers3,
-  Link2,
-  ListChecks,
   MessageSquare,
   Mic2,
   RefreshCw,
-  Server,
-  Settings2,
-  ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   Trash2,
-  WandSparkles,
 } from "lucide-react"
 
 import { api } from "@/lib/api"
@@ -52,44 +41,37 @@ import {
   type SupportedProvider,
 } from "@/lib/endpoint-logic"
 import { cn } from "@/lib/utils"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Alert as PuAlert } from "@/components/panelui/alert"
+import { ChoiceCards } from "@/components/panelui/choice-cards"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Sheet } from "@/components/panelui/sheet"
+import { Button } from "@/components/panelui/button"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+} from "@/components/panelui/card"
+import { Dialog } from "@/components/panelui/dialog"
+import { Field } from "@/components/panelui/field"
+import { Frame } from "@/components/panelui/frame"
+import { RadioGroup } from "@/components/panelui/radio-group"
+import { Input } from "@/components/panelui/input"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Progress } from "@/components/ui/progress"
-import { Separator } from "@/components/ui/separator"
+} from "@/components/panelui/select"
 import { Spinner } from "@/components/panelui/spinner"
-import { Switch } from "@/components/ui/switch"
+import { Switch } from "@/components/panelui/switch"
 
-type WizardStep = "type" | "connection" | "configure" | "behavior" | "review"
+type WizardStep = "type" | "connection" | "review"
 
 type PreflightState = "idle" | "checking" | "passed" | "failed"
 
@@ -126,55 +108,10 @@ type Props = {
   onClose: () => void
 }
 
-const stepsMessages: Array<{
-  id: WizardStep
-  label: string
-  description: string
-  icon: typeof WandSparkles
-}> = [
-  {
-    id: "type",
-    label: "Choose a lane",
-    description: "Tell JustAI what this endpoint is for.",
-    icon: WandSparkles,
-  },
-  {
-    id: "connection",
-    label: "Connect provider",
-    description: "Add the URL, scope, and credential.",
-    icon: Link2,
-  },
-  {
-    id: "configure",
-    label: "Configure models",
-    description: "Map only the models and capabilities you need.",
-    icon: SlidersHorizontal,
-  },
-  {
-    id: "behavior",
-    label: "Set behavior",
-    description: "Choose runtime limits and routing defaults.",
-    icon: Settings2,
-  },
-  {
-    id: "review",
-    label: "Verify & review",
-    description: "Check the provider before saving.",
-    icon: ShieldCheck,
-  },
-]
-
-const stepIndex = (step: WizardStep) =>
-  stepsMessages.findIndex((item) => item.id === step)
+const stepOrder: WizardStep[] = ["type", "connection", "review"]
 
 function displayProvider(provider: SupportedProvider) {
   return provider.name ?? providerDetails[provider.id]?.label ?? provider.id
-}
-
-function capabilityLabel(capability: string) {
-  return capability
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function modelOptions(models: DiscoveredChatModel[], configured: string) {
@@ -232,25 +169,27 @@ function CapabilitySwitch({
   disabled?: boolean
 }) {
   return (
-    <label
-      className={cn(
-        "flex items-start justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5",
-        disabled && "opacity-55"
-      )}
-    >
-      <span className="min-w-0">
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="mt-1 block text-xs text-muted-foreground">
+    <Frame.Row className={cn(disabled && "opacity-55")}>
+      <Frame.Content>
+        <Frame.Title
+          as="p"
+          className="overflow-visible! text-clip! whitespace-normal!"
+        >
+          {label}
+        </Frame.Title>
+        <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
           {description}
-        </span>
-      </span>
-      <Switch
-        aria-label={label}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onCheckedChange}
-      />
-    </label>
+        </Frame.Description>
+      </Frame.Content>
+      <Frame.Actions>
+        <Switch
+          aria-label={label}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onCheckedChange}
+        />
+      </Frame.Actions>
+    </Frame.Row>
   )
 }
 
@@ -276,16 +215,13 @@ export function EndpointCreationWizard({
   onSave,
   onClose,
 }: Props) {
-  const steps = useTranslatedConfig(stepsMessages)
-
   const { t } = useTranslations()
 
   const [step, setStep] = useState<WizardStep>(
-    editingEndpoint ? "connection" : "type"
+    editingEndpoint ? "review" : "type"
   )
-  const [maxVisitedStep, setMaxVisitedStep] = useState(() =>
-    editingEndpoint ? steps.length - 1 : 0
-  )
+  const formRef = useRef<HTMLFormElement>(null)
+  const pendingAutoSave = useRef(false)
   const [preflightState, setPreflightState] = useState<PreflightState>("idle")
   const [preflightMessage, setPreflightMessage] = useState("")
   const [validationMessage, setValidationMessage] = useState("")
@@ -320,7 +256,15 @@ export function EndpointCreationWizard({
   const canSave =
     verificationIsCurrent &&
     (preflightState === "passed" || verificationOverride)
-  const currentIndex = stepIndex(step)
+  // Wait for the verified model and form state to commit before submitting.
+  useEffect(() => {
+    if (open && canSave && pendingAutoSave.current) {
+      pendingAutoSave.current = false
+      formRef.current?.requestSubmit()
+    }
+  }, [open, canSave, signature])
+
+  const currentIndex = stepOrder.indexOf(step)
   const options = modelOptions(preflightModels, form.chatModel)
   const selectedProvider =
     providerDetails[form.providerType] ?? providerDetails["openai-compatible"]
@@ -343,23 +287,17 @@ export function EndpointCreationWizard({
   }
 
   function goTo(nextStep: WizardStep) {
-    const nextIndex = stepIndex(nextStep)
     setStep(nextStep)
-    setMaxVisitedStep((current) => Math.max(current, nextIndex))
   }
 
   function nextStep() {
-    if (step === "type") return goTo("connection")
-    if (step === "connection") return goTo("configure")
-    if (step === "configure") return goTo("behavior")
-    if (step === "behavior") return goTo("review")
+    const next = stepOrder[stepOrder.indexOf(step) + 1]
+    if (next) goTo(next)
   }
 
   function previousStep() {
-    if (step === "connection") return goTo("type")
-    if (step === "configure") return goTo("connection")
-    if (step === "behavior") return goTo("configure")
-    if (step === "review") return goTo("behavior")
+    const previous = stepOrder[stepOrder.indexOf(step) - 1]
+    if (previous) goTo(previous)
   }
 
   function validateConnectionStep() {
@@ -408,8 +346,6 @@ export function EndpointCreationWizard({
 
   function validateBeforeNext() {
     if (step === "connection" && !validateConnectionStep()) return false
-    if (step === "configure" && !validateConfigureStep()) return false
-    if (step === "behavior" && !validateBehaviorStep()) return false
     setValidationMessage("")
     return true
   }
@@ -422,7 +358,8 @@ export function EndpointCreationWizard({
     return true
   }
 
-  async function checkConnection() {
+  async function checkConnection(): Promise<boolean> {
+    if (!validateBeforeSave()) return false
     setPreflightState("checking")
     setPreflightMessage("")
     setValidationMessage("")
@@ -461,6 +398,7 @@ export function EndpointCreationWizard({
           setForm(verifiedForm)
         }
         setVerifiedSignature(formSignature(verifiedForm))
+        return true
       } else {
         setPreflightState("failed")
         setVerifiedSignature(signature)
@@ -468,24 +406,27 @@ export function EndpointCreationWizard({
           result.checks?.connection?.message ??
             t("The provider could not be verified.")
         )
+        return false
       }
     } catch (caught) {
+      setVerifiedSignature(signature)
       setPreflightState("failed")
       setPreflightMessage(
         caught instanceof Error
           ? caught.message
           : t("The provider could not be verified.")
       )
+      return false
     }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    if (step !== "review") {
+    if (!isEditing && step !== "review") {
       event.preventDefault()
       if (validateBeforeNext()) nextStep()
       return
     }
-    if (!validateBeforeSave()) {
+    if (saving || preflightState === "checking" || !validateBeforeSave()) {
       event.preventDefault()
       return
     }
@@ -503,6 +444,22 @@ export function EndpointCreationWizard({
     void onSave(event)
   }
 
+  /** Save: check the connection first when it has not been checked since the last change. */
+  async function saveNow() {
+    if (!validateBeforeSave()) return
+    if (canSave) {
+      formRef.current?.requestSubmit()
+      return
+    }
+    pendingAutoSave.current = true
+    if (!(await checkConnection())) pendingAutoSave.current = false
+  }
+
+  function saveWithoutVerification() {
+    pendingAutoSave.current = true
+    continueWithoutVerification()
+  }
+
   function continueWithoutVerification() {
     setVerificationOverride(true)
     setVerifiedSignature(signature)
@@ -511,220 +468,315 @@ export function EndpointCreationWizard({
     )
   }
 
-  const stepContent =
-    step === "type" ? (
-      <TypeStep
-        endpointKind={form.endpointKind}
-        locked={isEditing}
-        onSelect={selectKind}
-      />
-    ) : step === "connection" ? (
-      <ConnectionStep
-        form={form}
-        update={update}
-        providers={availableProviders}
-        selectedProvider={selectedProvider}
-        canManageOrganization={canManageOrganization}
-        platformAdmin={platformAdmin}
-        isPlatformCatalog={isPlatformCatalog}
-        isEditing={isEditing}
-        existingLogoUrl={logoRemoved ? undefined : editingEndpoint?.logoUrl}
-        logoFile={logoFile}
-        onLogoChange={onLogoChange}
-        onLogoRemove={onLogoRemove}
-        onSelectProvider={onSelectProvider}
-      />
-    ) : step === "configure" ? (
-      <ConfigureStep
-        form={form}
-        setForm={setForm}
-        update={update}
-        supports={supports}
-        preflightModels={preflightModels}
-        options={options}
-      />
-    ) : step === "behavior" ? (
-      <BehaviorStep form={form} update={update} />
-    ) : (
-      <ReviewStep
-        form={form}
-        endpointKind={form.endpointKind}
-        providerLabel={selectedProvider.label}
-        isEditing={isEditing}
-        capabilities={capabilities}
-        preflightState={preflightState}
-        preflightMessage={preflightMessage}
-        validationMessage={validationMessage}
-        modelCount={preflightModels.length}
-        verificationOverride={verificationOverride}
-        verificationIsCurrent={verificationIsCurrent}
-        notice={notice}
-        onCheck={checkConnection}
-        onContinueWithoutVerification={continueWithoutVerification}
-      />
+  const connectionProps = {
+    form,
+    update,
+    providers: availableProviders,
+    selectedProvider,
+    canManageOrganization,
+    platformAdmin,
+    isPlatformCatalog,
+    isEditing,
+    existingLogoUrl: logoRemoved ? undefined : editingEndpoint?.logoUrl,
+    logoFile,
+    onLogoChange,
+    onLogoRemove,
+    onSelectProvider,
+  }
+  const advancedSettings = (
+    <Collapsible>
+      <Frame variant="plain">
+        <Frame.Header>
+          <Frame.Title>{t("Advanced settings")}</Frame.Title>
+          <Frame.Description>
+            {t("Optional capabilities, API routing and runtime limits.")}
+          </Frame.Description>
+          <Frame.Action>
+            <CollapsibleTrigger
+              render={<Button variant="ghost" size="sm" />}
+              className="group/advanced"
+              aria-label={t("Advanced settings")}
+            >
+              <ChevronDown
+                aria-hidden="true"
+                className="size-4 transition-transform group-data-[panel-open]/advanced:rotate-180"
+              />
+            </CollapsibleTrigger>
+          </Frame.Action>
+        </Frame.Header>
+      </Frame>
+      <CollapsibleContent>
+        <div className="flex flex-col gap-6 pt-5">
+          <ConnectionStep part="advanced" {...connectionProps} />
+          <ConfigureStep
+            part="advanced"
+            compact
+            form={form}
+            options={options}
+            preflightModels={preflightModels}
+            setForm={setForm}
+            supports={supports}
+            update={update}
+          />
+          <BehaviorStep compact form={form} update={update} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+  const verification = (
+    <ReviewStep
+      form={form}
+      endpointKind={form.endpointKind}
+      providerLabel={selectedProvider.label}
+      isEditing={isEditing}
+      preflightState={preflightState}
+      preflightMessage={preflightMessage}
+      validationMessage={validationMessage}
+      modelCount={preflightModels.length}
+      verificationOverride={verificationOverride}
+      verificationIsCurrent={verificationIsCurrent}
+      notice={notice}
+      onCheck={() => void checkConnection()}
+      onContinueWithoutVerification={continueWithoutVerification}
+    />
+  )
+  const stepLabels: Record<WizardStep, string> = {
+    type: t("Endpoint type"),
+    connection: t("Connection"),
+    review: t("Check & save"),
+  }
+  const stepDescriptions: Record<WizardStep, string> = {
+    type: t("What do you want to connect?"),
+    connection: t("Where is it, and who may use it?"),
+    review: t("Check the connection, then save."),
+  }
+
+  const validationAlert = validationMessage &&
+    (isEditing || step !== "review") && (
+      <PuAlert tone="destructive" variant="plain">
+        <PuAlert.Title>{t("Check this step")}</PuAlert.Title>
+        <PuAlert.Description>{t(validationMessage)}</PuAlert.Description>
+      </PuAlert>
     )
+
+  if (isEditing) {
+    const failed = preflightState === "failed" && verificationIsCurrent
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange} side="right">
+        <Sheet.Content className="w-[min(40rem,calc(100vw-2*var(--sheet-gap)))]!">
+          <Sheet.Header>
+            <Sheet.Title>{t("Edit endpoint")}</Sheet.Title>
+            <Sheet.Description>
+              {form.name || editingEndpoint?.name} · {selectedProvider.label}
+            </Sheet.Description>
+          </Sheet.Header>
+          <form
+            className="contents"
+            id="endpoint-edit-form"
+            onSubmit={handleSubmit}
+            ref={formRef}
+          >
+            <fieldset
+              disabled={saving || preflightState === "checking"}
+              className="contents"
+            >
+              <Sheet.Body className="flex flex-col gap-7">
+                {validationAlert}
+                <section className="flex flex-col gap-4">
+                  <h3 className="text-sm font-semibold">{t("Connection")}</h3>
+                  <ConnectionStep part="core" {...connectionProps} />
+                </section>
+                {
+                  <section className="flex flex-col gap-4">
+                    <h3 className="text-sm font-semibold">{t("Models")}</h3>
+                    <ConfigureStep
+                      compact
+                      form={form}
+                      options={options}
+                      preflightModels={preflightModels}
+                      setForm={setForm}
+                      supports={supports}
+                      update={update}
+                    />
+                  </section>
+                }
+                <AvailabilitySettings form={form} update={update} />
+                {advancedSettings}
+                {preflightState === "passed" && verificationIsCurrent ? (
+                  <PuAlert tone="success" variant="plain">
+                    <PuAlert.Description>
+                      {t(preflightMessage || "Provider is reachable.")}
+                    </PuAlert.Description>
+                  </PuAlert>
+                ) : failed ? (
+                  <PuAlert tone="destructive" variant="plain">
+                    <PuAlert.Title>
+                      {t("The provider could not be verified.")}
+                    </PuAlert.Title>
+                    <PuAlert.Description>
+                      {preflightMessage}
+                    </PuAlert.Description>
+                    <PuAlert.Actions>
+                      <Button
+                        onClick={saveWithoutVerification}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        {t("Save anyway")}
+                      </Button>
+                    </PuAlert.Actions>
+                  </PuAlert>
+                ) : null}
+                {notice && (
+                  <PuAlert tone="destructive" variant="plain">
+                    <PuAlert.Description>{notice}</PuAlert.Description>
+                  </PuAlert>
+                )}
+              </Sheet.Body>
+            </fieldset>
+          </form>
+          <Sheet.Footer className="sm:flex-row sm:items-center">
+            <Button
+              disabled={preflightState === "checking" || saving}
+              onClick={() => void checkConnection()}
+              className="sm:mr-auto"
+              type="button"
+              variant="outline"
+            >
+              {preflightState === "checking" ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <RefreshCw data-icon="inline-start" aria-hidden="true" />
+              )}
+              {t("Test connection")}
+            </Button>
+            <Button onClick={onClose} type="button" variant="secondary">
+              {t("Cancel")}
+            </Button>
+            <Button
+              disabled={saving || preflightState === "checking"}
+              onClick={() => void saveNow()}
+              type="button"
+            >
+              {saving ? t("Saving…") : t("Save changes")}
+            </Button>
+          </Sheet.Footer>
+        </Sheet.Content>
+      </Sheet>
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-5xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-5xl">
-        <DialogHeader className="border-b px-5 pt-5 pb-4 sm:px-6">
-          <div className="flex items-start gap-3 pr-8">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              {form.endpointKind === "diarization" ? (
-                <Mic2 aria-hidden="true" />
-              ) : (
-                <Sparkles aria-hidden="true" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <DialogTitle>
-                  {isEditing ? t("Edit endpoint") : t("Add an endpoint")}
-                </DialogTitle>
-                <Badge variant={isEditing ? "outline" : "secondary"}>
-                  {isEditing ? t("Editing existing") : t("New endpoint")}
-                </Badge>
-              </div>
-              <DialogDescription>
-                {isEditing
-                  ? t(
-                      "Update the connection, model mappings, runtime behavior, or defaults. The endpoint lane and visibility stay fixed."
-                    )
-                  : t(
-                      "Follow the setup from connection to verification. Every endpoint option is visible in the step where it belongs."
-                    )}
-              </DialogDescription>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-            <Progress
-              aria-label={t(
-                "Endpoint setup progress: step {value0} of {value1}",
-                { value0: currentIndex + 1, value1: steps.length }
-              )}
-              value={((currentIndex + 1) / steps.length) * 100}
-            />
-            <p className="text-xs text-muted-foreground sm:text-right">
-              <span className="font-medium text-foreground">
-                {t("Step")} {currentIndex + 1} {t("of")} {steps.length}
-              </span>
-              <span className="mx-1.5" aria-hidden="true">
-                ·
-              </span>
-              {steps[currentIndex]?.label}
-            </p>
-          </div>
-        </DialogHeader>
-
+      <Dialog.Content className="sm:max-w-2xl">
+        <Dialog.Header
+          title={t("Add an endpoint")}
+          description={stepDescriptions[step]}
+        />
         <form
+          className="contents"
           id="endpoint-creation-form"
-          className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background md:grid-cols-[13rem_minmax(0,1fr)] md:grid-rows-1"
           onSubmit={handleSubmit}
+          ref={formRef}
         >
-          <nav
-            aria-label={t("Endpoint setup steps")}
-            className="border-b bg-muted/20 px-4 py-3 md:border-r md:border-b-0 md:px-3 md:py-5"
+          <fieldset
+            disabled={saving || preflightState === "checking"}
+            className="contents"
           >
-            <div className="flex gap-1 overflow-x-auto md:flex-col md:gap-1.5">
-              {steps.map((item, index) => {
-                const Icon = item.icon
-                const active = item.id === step
-                const available = index <= maxVisitedStep || index === 0
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    disabled={!available}
-                    autoFocus={active}
-                    aria-current={active ? "step" : undefined}
-                    onClick={() => available && goTo(item.id)}
-                    className={cn(
-                      "group flex min-h-9 min-w-[8.75rem] items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99] md:min-w-0",
-                      active
-                        ? "bg-primary/10 text-foreground"
-                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                      !available && "pointer-events-none opacity-45"
-                    )}
-                  >
+            <Dialog.Body>
+              <div
+                aria-label={t(
+                  "Endpoint setup progress: step {value0} of {value1}",
+                  { value0: currentIndex + 1, value1: stepOrder.length }
+                )}
+                className="flex items-center gap-3"
+                role="group"
+              >
+                <div className="flex flex-1 gap-1.5">
+                  {stepOrder.map((item, index) => (
                     <span
+                      aria-hidden="true"
                       className={cn(
-                        "flex size-6 shrink-0 items-center justify-center rounded-md border",
-                        active
-                          ? "border-primary/40 bg-background text-primary"
-                          : "border-border bg-muted/40"
+                        "h-1 flex-1 rounded-full bg-muted transition-colors",
+                        index <= currentIndex && "bg-primary"
                       )}
-                    >
-                      {index < maxVisitedStep ? (
-                        <Check className="size-3.5" aria-hidden="true" />
-                      ) : (
-                        <Icon className="size-3.5" aria-hidden="true" />
-                      )}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">
-                        {item.label}
-                      </span>
-                      <span className="hidden truncate text-[10px] text-muted-foreground md:block">
-                        {item.description}
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </nav>
-
-          <div className="min-h-0 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-5">
-            <div className="mx-auto w-full max-w-3xl">
-              {validationMessage && step !== "review" && (
-                <Alert variant="destructive" className="mb-5">
-                  <CircleAlert aria-hidden="true" />
-                  <AlertTitle>{t("Check this step")}</AlertTitle>
-                  <AlertDescription>{validationMessage}</AlertDescription>
-                </Alert>
+                      key={item}
+                    />
+                  ))}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {t("Step")} {currentIndex + 1} {t("of")} {stepOrder.length}
+                  </span>
+                  {" · "}
+                  {stepLabels[step]}
+                </span>
+              </div>
+              {validationAlert}
+              {step === "type" ? (
+                <TypeStep
+                  endpointKind={form.endpointKind}
+                  locked={isEditing}
+                  onSelect={selectKind}
+                />
+              ) : step === "connection" ? (
+                <ConnectionStep part="core" {...connectionProps} />
+              ) : (
+                <>
+                  <ConfigureStep
+                    compact
+                    form={form}
+                    options={options}
+                    preflightModels={preflightModels}
+                    setForm={setForm}
+                    supports={supports}
+                    update={update}
+                  />
+                  <AvailabilitySettings form={form} update={update} />
+                  {verification}
+                  {advancedSettings}
+                </>
               )}
-              {stepContent}
-            </div>
-          </div>
+            </Dialog.Body>
+          </fieldset>
         </form>
-
-        <DialogFooter className="border-t px-5 py-3 sm:px-6">
-          <Button type="button" variant="outline" onClick={onClose}>
+        <Dialog.Footer>
+          <Button onClick={onClose} type="button" variant="secondary">
             {t("Cancel")}
           </Button>
           {currentIndex > 0 && (
-            <Button type="button" variant="ghost" onClick={previousStep}>
+            <Button
+              disabled={saving || preflightState === "checking"}
+              onClick={previousStep}
+              type="button"
+              variant="ghost"
+            >
               <ArrowLeft data-icon="inline-start" aria-hidden="true" />
               {t("Back")}
             </Button>
           )}
           {step !== "review" ? (
             <Button
-              type="submit"
-              form="endpoint-creation-form"
-              onClick={(event) => {
-                event.preventDefault()
+              onClick={() => {
                 if (validateBeforeNext()) nextStep()
               }}
+              type="button"
             >
               {t("Continue")}
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Button>
           ) : (
             <Button
-              type="submit"
-              form="endpoint-creation-form"
-              disabled={saving || !canSave}
+              disabled={saving || preflightState === "checking"}
+              onClick={() => void saveNow()}
+              type="button"
             >
-              {saving
-                ? t("Saving…")
-                : isEditing
-                  ? t("Save changes")
-                  : t("Save endpoint")}
+              {saving ? t("Saving…") : t("Save endpoint")}
             </Button>
           )}
-        </DialogFooter>
-      </DialogContent>
+        </Dialog.Footer>
+      </Dialog.Content>
     </Dialog>
   )
 }
@@ -741,110 +793,38 @@ function TypeStep({
   const { t } = useTranslations()
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <p className="text-sm font-medium">{t("What are you connecting?")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(
-            "Pick the primary job for this endpoint. The same provider can be saved in both lanes when it serves both jobs."
-          )}
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <TypeCard
-          active={endpointKind === "llm"}
-          disabled={locked}
-          icon={<MessageSquare aria-hidden="true" />}
-          title="LLM"
-          description={t(
-            "Chat, vision, embeddings, image generation, transcription, TTS, and optional diarization."
-          )}
-          onClick={() => onSelect("llm")}
-        />
-        <TypeCard
-          active={endpointKind === "diarization"}
-          disabled={locked}
-          icon={<Mic2 aria-hidden="true" />}
-          title={t("Diarization")}
-          description={t(
-            "Speaker identification for transcription pipelines, with optional chat on providers that support it."
-          )}
-          onClick={() => onSelect("diarization")}
-        />
-      </div>
-      <Alert>
-        <Layers3 aria-hidden="true" />
-        <AlertTitle>{t("Capabilities stay flexible")}</AlertTitle>
-        <AlertDescription>
-          {t(
-            "This label controls setup and inventory. Runtime routing still follows the capabilities you enable, so one endpoint can appear in both views."
-          )}
-        </AlertDescription>
-      </Alert>
-      {locked && (
-        <p className="text-xs text-muted-foreground">
-          {t(
-            "Endpoint type is fixed after creation so existing routing remains predictable."
-          )}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function TypeCard({
-  active,
-  disabled,
-  icon,
-  title,
-  description,
-  onClick,
-}: {
-  active: boolean
-  disabled: boolean
-  icon: React.ReactNode
-  title: string
-  description: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "flex min-h-40 flex-col items-start gap-4 rounded-xl border p-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none active:scale-[0.99]",
-        active
-          ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-          : "hover:bg-muted/50",
-        disabled && "cursor-default opacity-80"
-      )}
+    <ChoiceCards
+      aria-label={t("What are you connecting?")}
+      aspect="16 / 5"
+      columns={2}
+      disabled={locked}
+      onValueChange={(value) => onSelect(value as EndpointKind)}
+      value={endpointKind}
     >
-      <span
-        className={cn(
-          "flex size-9 items-center justify-center rounded-lg",
-          active ? "bg-primary text-primary-foreground" : "bg-muted"
-        )}
-      >
-        {icon}
-      </span>
-      <span>
-        <span className="flex items-center gap-2 font-medium">
-          {title}
-          {active && (
-            <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />
-          )}
-        </span>
-        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-          {description}
-        </span>
-      </span>
-    </button>
+      <ChoiceCards.Item value="llm">
+        <ChoiceCards.Media>
+          <MessageSquare aria-hidden="true" className="size-8" />
+        </ChoiceCards.Media>
+        <ChoiceCards.Label>{t("Language model")}</ChoiceCards.Label>
+        <ChoiceCards.Description>
+          {t("Chat, vision, embeddings, images, transcription and speech.")}
+        </ChoiceCards.Description>
+      </ChoiceCards.Item>
+      <ChoiceCards.Item value="diarization">
+        <ChoiceCards.Media>
+          <Mic2 aria-hidden="true" className="size-8" />
+        </ChoiceCards.Media>
+        <ChoiceCards.Label>{t("Speaker separation")}</ChoiceCards.Label>
+        <ChoiceCards.Description>
+          {t("Tells speakers apart in transcriptions.")}
+        </ChoiceCards.Description>
+      </ChoiceCards.Item>
+    </ChoiceCards>
   )
 }
 
 function ConnectionStep({
+  part,
   form,
   update,
   providers,
@@ -859,6 +839,7 @@ function ConnectionStep({
   onLogoRemove,
   onSelectProvider,
 }: {
+  part: "core" | "advanced"
   form: EndpointForm
   update: <K extends keyof EndpointForm>(key: K, value: EndpointForm[K]) => void
   providers: SupportedProvider[]
@@ -895,275 +876,268 @@ function ConnectionStep({
     : ""
   const shownLogo = logoPreview || existingLogoUrl
 
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <p className="text-sm font-medium">{t("Connect the provider")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(
-            "Add the service address, authentication, and visibility. Route overrides are shown explicitly below for gateways and versioned APIs."
-          )}
-        </p>
-      </div>
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>{t("Connection details")}</CardTitle>
-          <CardDescription>
-            {form.endpointKind === "diarization"
-              ? t("This service will be used for speaker labeling.")
-              : t("This provider will be used for model-backed AI features.")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
+  const logoField = (
+    <Frame>
+      <Frame.Header>
+        <Frame.Title>{t("Logo")}</Frame.Title>
+      </Frame.Header>
+      <Frame.Panel>
+        <Frame.Row>
+          <EndpointBadge
+            name={form.name || "?"}
+            logoUrl={shownLogo}
+            className="size-12 shrink-0"
+          />
+          <Frame.Content>
+            <input
+              ref={logoInputRef}
+              id="endpoint-logo"
+              aria-label={t("Logo")}
+              type="file"
+              className="sr-only"
+              accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+              onChange={(event) => {
+                onLogoChange(event.target.files?.[0] ?? null)
+                event.target.value = ""
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Shown in the model picker. Without a logo, initials are used. PNG, JPEG, GIF, WebP, or ICO · Max 2 MB"
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => logoInputRef.current?.click()}
+              >
+                <ImagePlus data-icon="inline-start" aria-hidden="true" />
+                {shownLogo ? t("Replace logo") : t("Choose logo")}
+              </Button>
+              {shownLogo && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onLogoRemove}
+                >
+                  <Trash2 data-icon="inline-start" aria-hidden="true" />
+                  {t("Remove logo")}
+                </Button>
+              )}
+            </div>
+          </Frame.Content>
+        </Frame.Row>
+      </Frame.Panel>
+    </Frame>
+  )
+
+  if (part === "advanced") {
+    return (
+      <div className="flex flex-col gap-5">
+        <Frame>
+          <Frame.Header>
+            <Frame.Title>{t("API routing")}</Frame.Title>
+            <Frame.Description>
+              {t(
+                "Optional overrides for custom gateways, proxy paths, and providers that require an API version."
+              )}
+            </Frame.Description>
+          </Frame.Header>
+          <Frame.Panel className="p-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor="endpoint-name">
-                  {t("Display name")}
-                </FieldLabel>
+                <Field.Label>{t("API path (optional)")}</Field.Label>
                 <Input
-                  id="endpoint-name"
-                  value={form.name}
-                  onChange={(event) => update("name", event.target.value)}
-                  placeholder={
-                    form.endpointKind === "diarization"
-                      ? t("Speaker service")
-                      : t("Team GPT")
-                  }
-                  required
+                  id="endpoint-api-path"
+                  value={form.apiPath}
+                  onChange={(event) => update("apiPath", event.target.value)}
+                  placeholder="/v1"
                 />
+                <Field.Description>
+                  {t("Override the provider's default route.")}
+                </Field.Description>
               </Field>
               <Field>
-                <FieldLabel htmlFor="endpoint-provider">
-                  {t("Provider")}
-                </FieldLabel>
-                <Select
-                  value={form.providerType}
-                  onValueChange={onSelectProvider}
-                >
-                  <SelectTrigger id="endpoint-provider" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {displayProvider(provider)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FieldDescription>
-                  {selectedProvider.description}
-                  {providers.find(
-                    (provider) => provider.id === form.providerType
-                  )?.examples?.length
-                    ? t(" Examples: {value0}.", {
-                        value0: providers
-                          .find((provider) => provider.id === form.providerType)
-                          ?.examples?.join(", "),
-                      })
-                    : ""}
-                </FieldDescription>
+                <Field.Label>{t("API version (optional)")}</Field.Label>
+                <Input
+                  id="endpoint-api-version"
+                  value={form.apiVersion}
+                  onChange={(event) => update("apiVersion", event.target.value)}
+                  placeholder="2024-06-20"
+                />
+                <Field.Description>
+                  {t("Sent to providers that require a version header.")}
+                </Field.Description>
               </Field>
             </div>
-            <Field>
-              <FieldLabel htmlFor="endpoint-logo">{t("Logo")}</FieldLabel>
-              <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
-                <EndpointBadge
-                  name={form.name || "?"}
-                  logoUrl={shownLogo}
-                  className="size-12 shrink-0 border bg-background"
-                />
-                <div className="min-w-0 flex-1">
-                  <input
-                    ref={logoInputRef}
-                    id="endpoint-logo"
-                    type="file"
-                    className="sr-only"
-                    accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
-                    onChange={(event) => {
-                      onLogoChange(event.target.files?.[0] ?? null)
-                      event.target.value = ""
-                    }}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t(
-                      "Shown in the model picker. Without a logo, initials are used. PNG, JPEG, GIF, WebP, or ICO · Max 2 MB"
-                    )}
-                  </p>
-                  <div className="flex flex-wrap gap-2 pt-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => logoInputRef.current?.click()}
-                    >
-                      <ImagePlus data-icon="inline-start" aria-hidden="true" />
-                      {shownLogo ? t("Replace logo") : t("Choose logo")}
-                    </Button>
-                    {shownLogo && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={onLogoRemove}
-                      >
-                        <Trash2 data-icon="inline-start" aria-hidden="true" />
-                        {t("Remove logo")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="endpoint-visibility">
-                {t("Visibility")}
-              </FieldLabel>
-              <Select
-                disabled={isEditing}
-                value={form.scopeType}
-                onValueChange={(value) =>
-                  update(
-                    "scopeType",
-                    value ?? (canManageOrganization ? "organization" : "user")
-                  )
-                }
-              >
-                <SelectTrigger id="endpoint-visibility" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {canManageOrganization && (
-                    <SelectItem value="organization">
-                      {t("Workspace")}
-                    </SelectItem>
-                  )}
-                  <SelectItem value="user">{t("Only me")}</SelectItem>
-                  {platformAdmin && isPlatformCatalog && (
-                    <SelectItem value="global">
-                      {t("Global (platform admin)")}
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                {t(
-                  "Choose who can use this endpoint. Its scope cannot be changed after creation."
-                )}
-              </FieldDescription>
-            </Field>
-            {platformAdmin && form.scopeType !== "global" && (
-              <Field>
-                <FieldLabel htmlFor="endpoint-scope-id">
-                  {t("Scope ID")}
-                </FieldLabel>
-                <Input
-                  id="endpoint-scope-id"
-                  value={form.scopeId}
-                  onChange={(event) => update("scopeId", event.target.value)}
-                  placeholder={t("Organization or user UUID")}
-                  required
-                  readOnly={isEditing}
-                />
-                <FieldDescription>
-                  {isEditing
-                    ? t("An endpoint's scope is fixed after creation.")
-                    : t(
-                        "Platform administrators can assign this endpoint to a specific organization or user."
-                      )}
-                </FieldDescription>
-              </Field>
-            )}
-            <Field>
-              <FieldLabel htmlFor="endpoint-url">{t("Base URL")}</FieldLabel>
-              <Input
-                id="endpoint-url"
-                value={form.baseUrl}
-                onChange={(event) => update("baseUrl", event.target.value)}
-                placeholder={selectedProvider.baseUrl}
-                required
-              />
-              <FieldDescription>
-                {selectedProvider.baseUrl}{" "}
-                {t(
-                  "is the suggested default; local services and gateways can use their own URL."
-                )}
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="endpoint-key">
-                {t("API key or token")}
-              </FieldLabel>
-              <div className="relative">
-                <KeyRound
-                  className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Input
-                  id="endpoint-key"
-                  className="pl-8"
-                  type="password"
-                  value={form.credential}
-                  onChange={(event) => update("credential", event.target.value)}
-                  placeholder={t("Stored encrypted by JustAI")}
-                  autoComplete="off"
-                />
-              </div>
-              <FieldDescription>
-                {t(
-                  "Leave empty for local runtimes. When editing, an empty field keeps the stored credential."
-                )}
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-        </CardContent>
-      </Card>
+          </Frame.Panel>
+        </Frame>
+      </div>
+    )
+  }
 
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Server aria-hidden="true" /> {t("API routing")}
-          </CardTitle>
-          <CardDescription>
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4">
+        {logoField}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <Field.Label>{t("Display name")}</Field.Label>
+            <Input
+              id="endpoint-name"
+              value={form.name}
+              onChange={(event) => update("name", event.target.value)}
+              placeholder={
+                form.endpointKind === "diarization"
+                  ? t("Speaker service")
+                  : t("Team GPT")
+              }
+              required
+            />
+          </Field>
+          <Field>
+            <Field.Label>{t("Provider")}</Field.Label>
+            <Select value={form.providerType} onValueChange={onSelectProvider}>
+              <SelectTrigger id="endpoint-provider" className="w-full">
+                <SelectValue>
+                  {displayProvider(
+                    providers.find(
+                      (provider) => provider.id === form.providerType
+                    ) ?? { id: form.providerType, capabilities: [] }
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {providers.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {displayProvider(provider)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Field.Description>
+              {t(selectedProvider.description)}
+              {providers.find((provider) => provider.id === form.providerType)
+                ?.examples?.length
+                ? t(" Examples: {value0}.", {
+                    value0: providers
+                      .find((provider) => provider.id === form.providerType)
+                      ?.examples?.join(", "),
+                  })
+                : ""}
+            </Field.Description>
+          </Field>
+        </div>
+        <Field>
+          <Field.Label>{t("Base URL")}</Field.Label>
+          <Input
+            id="endpoint-url"
+            value={form.baseUrl}
+            onChange={(event) => update("baseUrl", event.target.value)}
+            placeholder={selectedProvider.baseUrl}
+            required
+          />
+          <Field.Description>
+            {selectedProvider.baseUrl}{" "}
             {t(
-              "Optional overrides for custom gateways, proxy paths, and providers that require an API version."
+              "is the suggested default; local services and gateways can use their own URL."
             )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="endpoint-api-path">
-                {t("API path (optional)")}
-              </FieldLabel>
-              <Input
-                id="endpoint-api-path"
-                value={form.apiPath}
-                onChange={(event) => update("apiPath", event.target.value)}
-                placeholder="/v1"
-              />
-              <FieldDescription>
-                {t("Override the provider's default route.")}
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="endpoint-api-version">
-                {t("API version (optional)")}
-              </FieldLabel>
-              <Input
-                id="endpoint-api-version"
-                value={form.apiVersion}
-                onChange={(event) => update("apiVersion", event.target.value)}
-                placeholder="2024-06-20"
-              />
-              <FieldDescription>
-                {t("Sent to providers that require a version header.")}
-              </FieldDescription>
-            </Field>
+          </Field.Description>
+        </Field>
+        <Field>
+          <Field.Label>{t("API key or token")}</Field.Label>
+          <div className="relative">
+            <KeyRound
+              className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              id="endpoint-key"
+              className="pl-8"
+              type="password"
+              value={form.credential}
+              onChange={(event) => update("credential", event.target.value)}
+              placeholder={t("Stored encrypted by JustAI")}
+              autoComplete="off"
+            />
           </div>
-        </CardContent>
-      </Card>
+          <Field.Description>
+            {t(
+              "Leave empty for local runtimes. When editing, an empty field keeps the stored credential."
+            )}
+          </Field.Description>
+        </Field>
+        <Field>
+          <Field.Label>{t("Visibility")}</Field.Label>
+          {isEditing || isPlatformCatalog ? (
+            <p className="text-sm">
+              {form.scopeType === "organization"
+                ? t("Workspace")
+                : form.scopeType === "user"
+                  ? t("Only me")
+                  : t("Global (platform admin)")}
+            </p>
+          ) : (
+            <RadioGroup
+              aria-label={t("Visibility")}
+              className="sm:grid sm:grid-cols-2"
+              value={form.scopeType}
+              onValueChange={(value) => update("scopeType", value)}
+            >
+              <RadioGroup.Card
+                value="user"
+                appearance="filled"
+                aria-label={t("Only me")}
+              >
+                <RadioGroup.CardBody>
+                  <RadioGroup.CardTitle>{t("Only me")}</RadioGroup.CardTitle>
+                </RadioGroup.CardBody>
+              </RadioGroup.Card>
+              {canManageOrganization && (
+                <RadioGroup.Card
+                  value="organization"
+                  appearance="filled"
+                  aria-label={t("Workspace")}
+                >
+                  <RadioGroup.CardBody>
+                    <RadioGroup.CardTitle>
+                      {t("Workspace")}
+                    </RadioGroup.CardTitle>
+                  </RadioGroup.CardBody>
+                </RadioGroup.Card>
+              )}
+            </RadioGroup>
+          )}
+          <Field.Description>
+            {t(
+              "Choose who can use this endpoint. Its scope cannot be changed after creation."
+            )}
+          </Field.Description>
+        </Field>
+        {platformAdmin && isPlatformCatalog && form.scopeType !== "global" && (
+          <Field>
+            <Field.Label>{t("Scope ID")}</Field.Label>
+            <Input
+              id="endpoint-scope-id"
+              value={form.scopeId}
+              onChange={(event) => update("scopeId", event.target.value)}
+              placeholder={t("Organization or user UUID")}
+              required
+              readOnly={isEditing}
+            />
+            <Field.Description>
+              {isEditing
+                ? t("An endpoint's scope is fixed after creation.")
+                : t(
+                    "Platform administrators can assign this endpoint to a specific organization or user."
+                  )}
+            </Field.Description>
+          </Field>
+        )}
+      </div>
     </div>
   )
 }
@@ -1175,7 +1149,11 @@ function ConfigureStep({
   supports,
   preflightModels,
   options,
+  compact = false,
+  part = "primary",
 }: {
+  compact?: boolean
+  part?: "primary" | "advanced"
   form: EndpointForm
   setForm: Dispatch<SetStateAction<EndpointForm>>
   update: <K extends keyof EndpointForm>(key: K, value: EndpointForm[K]) => void
@@ -1199,331 +1177,331 @@ function ConfigureStep({
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <p className="text-sm font-medium">
-          {form.endpointKind === "diarization"
-            ? t("Configure the diarization service")
-            : t("Configure models and capabilities")}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {form.endpointKind === "diarization"
-            ? t(
-                "Choose the speaker-labeling model and decide whether this same endpoint should also handle chat."
-              )
-            : t(
-                "Chat is the primary LLM capability. Add optional model mappings only when this provider will serve those jobs."
-              )}
-        </p>
-      </div>
-
-      {form.endpointKind === "diarization" ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Mic2 aria-hidden="true" /> {t("Diarization model")}
-            </CardTitle>
-            <CardDescription>
-              {t(
-                "Used to identify anonymous speakers in transcription workflows."
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="endpoint-diarization-model">
-                  {t("Model or service identifier")}
-                </FieldLabel>
-                <Input
-                  id="endpoint-diarization-model"
-                  value={form.diarizationModel}
-                  onChange={(event) =>
-                    update("diarizationModel", event.target.value)
-                  }
-                  placeholder={
-                    form.providerType === "pyannote"
-                      ? "pyannote/speaker-diarization-3.1"
-                      : "gpt-4o-transcribe-diarize"
-                  }
-                />
-                <FieldDescription>
-                  {t(
-                    "Pyannote services can leave this empty when the service selects its own loaded pipeline."
-                  )}
-                </FieldDescription>
-              </Field>
-              {supports(form.providerType, "chat") && (
-                <CapabilitySwitch
-                  label={t("Also use this endpoint for chat")}
-                  description={t(
-                    "Save it in both the diarization and LLM inventory views."
-                  )}
-                  checked={form.useForChat}
-                  onCheckedChange={(checked) =>
-                    setForm((current) => ({
-                      ...current,
-                      useForChat: checked,
-                      isDefault: checked ? current.isDefault : false,
-                    }))
-                  }
-                />
-              )}
-              {chatAvailable && (
-                <ModelField
-                  id="endpoint-diarization-chat-model"
-                  label={t("Chat model (optional)")}
-                  value={form.chatModel}
-                  onChange={(value) => update("chatModel", value)}
-                  options={options}
-                  description={t(
-                    "Optional chat capability for a dual-purpose endpoint."
-                  )}
-                  placeholder="e.g. gpt-4o-mini"
-                />
-              )}
-            </FieldGroup>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MessageSquare aria-hidden="true" /> {t("Chat model")}
-            </CardTitle>
-            <CardDescription>
-              {t(
-                "This is the model JustAI uses for chat by default. You can enter it manually or choose from the provider catalog after verification."
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ModelField
-              id="endpoint-chat-model"
-              label={t("Default chat model")}
-              value={form.chatModel}
-              onChange={(value) => update("chatModel", value)}
-              options={options}
-              description={
-                preflightModels.length > 0
-                  ? t("{value0} models available from the latest check.", {
-                      value0: preflightModels.length,
-                    })
-                  : t("Model discovery happens in the final verification step.")
-              }
-              placeholder="e.g. gpt-4o-mini or gemma-3-27b-it"
-            />
-          </CardContent>
-        </Card>
+      {!compact && (
+        <div>
+          <p className="text-sm font-medium">
+            {form.endpointKind === "diarization"
+              ? t("Configure the diarization service")
+              : t("Configure models and capabilities")}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {form.endpointKind === "diarization"
+              ? t(
+                  "Choose the speaker-labeling model and decide whether this same endpoint should also handle chat."
+                )
+              : t(
+                  "Chat is the primary LLM capability. Add optional model mappings only when this provider will serve those jobs."
+                )}
+          </p>
+        </div>
       )}
 
-      {form.endpointKind === "llm" && hasOptionalModels && (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle>{t("Optional capabilities")}</CardTitle>
-            <CardDescription>
-              {t(
-                "These stay off until you map a model or explicitly enable the capability."
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              {supports(form.providerType, "vision") && (
-                <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
-                  <CapabilitySwitch
-                    label={t("Vision / image input")}
-                    description={t(
-                      "Allow image messages for a vision-capable model."
-                    )}
-                    checked={form.vision}
-                    onCheckedChange={(checked) => update("vision", checked)}
-                  />
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-vision-model">
-                      {t("Vision model (optional)")}
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-vision-model"
-                      list="endpoint-model-options"
-                      value={form.visionModel}
-                      onChange={(event) =>
-                        update("visionModel", event.target.value)
-                      }
-                      placeholder={t("Reuse chat model")}
-                    />
-                  </Field>
-                </div>
-              )}
-              {supports(form.providerType, "embeddings") && (
+      {part === "primary" &&
+        (form.endpointKind === "diarization" ? (
+          <Frame>
+            <Frame.Header>
+              <Frame.Title>{t("Diarization model")}</Frame.Title>
+              <Frame.Description>
+                {t(
+                  "Used to identify anonymous speakers in transcription workflows."
+                )}
+              </Frame.Description>
+            </Frame.Header>
+            <Frame.Panel className="p-4">
+              <div className="flex flex-col gap-4">
                 <Field>
-                  <FieldLabel htmlFor="endpoint-embedding-model">
-                    {t("Embedding model")}
-                  </FieldLabel>
+                  <Field.Label>{t("Model or service identifier")}</Field.Label>
                   <Input
-                    id="endpoint-embedding-model"
-                    value={form.embeddingModel}
+                    id="endpoint-diarization-model"
+                    value={form.diarizationModel}
                     onChange={(event) =>
-                      update("embeddingModel", event.target.value)
+                      update("diarizationModel", event.target.value)
                     }
-                    placeholder="text-embedding-3-small"
+                    placeholder={
+                      form.providerType === "pyannote"
+                        ? "pyannote/speaker-diarization-3.1"
+                        : "gpt-4o-transcribe-diarize"
+                    }
                   />
-                  <FieldDescription>
+                  <Field.Description>
                     {t(
-                      "Needed when this endpoint should power knowledge search."
+                      "Pyannote services can leave this empty when the service selects its own loaded pipeline."
                     )}
-                  </FieldDescription>
+                  </Field.Description>
                 </Field>
-              )}
-              {supports(form.providerType, "image-generation") && (
-                <Field>
-                  <FieldLabel htmlFor="endpoint-image-model">
-                    {t("Image generation model")}
-                  </FieldLabel>
-                  <Input
-                    id="endpoint-image-model"
-                    value={form.imageModel}
-                    onChange={(event) =>
-                      update("imageModel", event.target.value)
-                    }
-                    placeholder="gpt-image-1"
-                  />
-                  <FieldDescription>
-                    {t("Used by Image Studio for generation and editing.")}
-                  </FieldDescription>
-                </Field>
-              )}
-              {transcriptionAvailable && (
-                <div className="grid gap-3 rounded-lg border p-3">
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-transcription-model">
-                      {t("Transcription model")}
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-transcription-model"
-                      value={form.transcriptionModel}
-                      onChange={(event) => {
-                        const transcriptionModel = event.target.value
-                        const whisperGateway = isWhisperGateway(
-                          form.providerType,
-                          transcriptionModel
-                        )
-                        setForm((current) => ({
-                          ...current,
-                          transcriptionModel,
-                          ...(whisperGateway
-                            ? {
-                                chunkedTranscription: true,
-                                realtimeTranscription: false,
-                              }
-                            : {}),
-                        }))
-                      }}
-                      placeholder="whisper-large-v3-turbo"
-                    />
-                  </Field>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {supports(form.providerType, "realtime-transcription") && (
-                      <CapabilitySwitch
-                        label={t("Realtime transcription")}
-                        description={t("Native provider WebSocket.")}
-                        checked={form.realtimeTranscription}
-                        onCheckedChange={(checked) =>
-                          setForm((current) => ({
-                            ...current,
-                            realtimeTranscription: checked,
-                            chunkedTranscription: checked
-                              ? false
-                              : current.chunkedTranscription,
-                          }))
-                        }
-                      />
-                    )}
-                    {supports(form.providerType, "chunked-transcription") && (
-                      <CapabilitySwitch
-                        label={t("Chunked HTTP transcription")}
-                        description={t("Rolling Whisper windows.")}
-                        checked={form.chunkedTranscription}
-                        onCheckedChange={(checked) =>
-                          setForm((current) => ({
-                            ...current,
-                            chunkedTranscription: checked,
-                            realtimeTranscription: checked
-                              ? false
-                              : current.realtimeTranscription,
-                          }))
-                        }
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-              {supports(form.providerType, "diarization") && (
-                <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+                {supports(form.providerType, "chat") && (
                   <CapabilitySwitch
-                    label={t("Speaker diarization")}
+                    label={t("Also use this endpoint for chat")}
                     description={t(
-                      "Identify anonymous speakers alongside transcription."
+                      "Save it in both the diarization and LLM inventory views."
                     )}
-                    checked={form.diarization}
+                    checked={form.useForChat}
                     onCheckedChange={(checked) =>
-                      update("diarization", checked)
+                      setForm((current) => ({
+                        ...current,
+                        useForChat: checked,
+                        isDefault: checked ? current.isDefault : false,
+                      }))
                     }
                   />
+                )}
+                {chatAvailable && (
+                  <ModelField
+                    id="endpoint-diarization-chat-model"
+                    label={t("Chat model (optional)")}
+                    value={form.chatModel}
+                    onChange={(value) => update("chatModel", value)}
+                    options={options}
+                    description={t(
+                      "Optional chat capability for a dual-purpose endpoint."
+                    )}
+                    placeholder="e.g. gpt-4o-mini"
+                  />
+                )}
+              </div>
+            </Frame.Panel>
+          </Frame>
+        ) : (
+          <Frame>
+            <Frame.Header>
+              <Frame.Title>{t("Chat model")}</Frame.Title>
+              <Frame.Description>
+                {t(
+                  "This is the model JustAI uses for chat by default. You can enter it manually or choose from the provider catalog after verification."
+                )}
+              </Frame.Description>
+            </Frame.Header>
+            <Frame.Panel className="p-4">
+              <ModelField
+                id="endpoint-chat-model"
+                label={t("Default chat model")}
+                value={form.chatModel}
+                onChange={(value) => update("chatModel", value)}
+                options={options}
+                description={
+                  preflightModels.length > 0
+                    ? t("{value0} models available from the latest check.", {
+                        value0: preflightModels.length,
+                      })
+                    : t(
+                        "Model discovery happens in the final verification step."
+                      )
+                }
+                placeholder="e.g. gpt-4o-mini or gemma-3-27b-it"
+              />
+            </Frame.Panel>
+          </Frame>
+        ))}
+
+      {part === "advanced" &&
+        form.endpointKind === "llm" &&
+        hasOptionalModels && (
+          <Frame>
+            <Frame.Header>
+              <Frame.Title>{t("Optional capabilities")}</Frame.Title>
+              <Frame.Description>
+                {t(
+                  "These stay off until you map a model or explicitly enable the capability."
+                )}
+              </Frame.Description>
+            </Frame.Header>
+            <Frame.Panel className="p-4">
+              <div className="flex flex-col gap-4">
+                {supports(form.providerType, "vision") && (
+                  <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+                    <CapabilitySwitch
+                      label={t("Vision / image input")}
+                      description={t(
+                        "Allow image messages for a vision-capable model."
+                      )}
+                      checked={form.vision}
+                      onCheckedChange={(checked) => update("vision", checked)}
+                    />
+                    <Field>
+                      <Field.Label>{t("Vision model (optional)")}</Field.Label>
+                      <Input
+                        id="endpoint-vision-model"
+
+                        value={form.visionModel}
+                        onChange={(event) =>
+                          update("visionModel", event.target.value)
+                        }
+                        placeholder={t("Reuse chat model")}
+                      />
+                    </Field>
+                  </div>
+                )}
+                {supports(form.providerType, "embeddings") && (
                   <Field>
-                    <FieldLabel htmlFor="endpoint-llm-diarization-model">
-                      {t("Diarization model")}
-                    </FieldLabel>
+                    <Field.Label>{t("Embedding model")}</Field.Label>
                     <Input
-                      id="endpoint-llm-diarization-model"
-                      value={form.diarizationModel}
+                      id="endpoint-embedding-model"
+                      value={form.embeddingModel}
                       onChange={(event) =>
-                        update("diarizationModel", event.target.value)
+                        update("embeddingModel", event.target.value)
                       }
-                      placeholder="gpt-4o-transcribe-diarize"
+                      placeholder="text-embedding-3-small"
+                    />
+                    <Field.Description>
+                      {t(
+                        "Needed when this endpoint should power knowledge search."
+                      )}
+                    </Field.Description>
+                  </Field>
+                )}
+                {supports(form.providerType, "image-generation") && (
+                  <Field>
+                    <Field.Label>{t("Image generation model")}</Field.Label>
+                    <Input
+                      id="endpoint-image-model"
+                      value={form.imageModel}
+                      onChange={(event) =>
+                        update("imageModel", event.target.value)
+                      }
+                      placeholder="gpt-image-1"
+                    />
+                    <Field.Description>
+                      {t("Used by Image Studio for generation and editing.")}
+                    </Field.Description>
+                  </Field>
+                )}
+                {transcriptionAvailable && (
+                  <div className="grid gap-4">
+                    <Field>
+                      <Field.Label>{t("Transcription model")}</Field.Label>
+                      <Input
+                        id="endpoint-transcription-model"
+                        value={form.transcriptionModel}
+                        onChange={(event) => {
+                          const transcriptionModel = event.target.value
+                          const whisperGateway = isWhisperGateway(
+                            form.providerType,
+                            transcriptionModel
+                          )
+                          setForm((current) => ({
+                            ...current,
+                            transcriptionModel,
+                            ...(whisperGateway
+                              ? {
+                                  chunkedTranscription: true,
+                                  realtimeTranscription: false,
+                                }
+                              : {}),
+                          }))
+                        }}
+                        placeholder="whisper-large-v3-turbo"
+                      />
+                    </Field>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {supports(
+                        form.providerType,
+                        "realtime-transcription"
+                      ) && (
+                        <CapabilitySwitch
+                          label={t("Realtime transcription")}
+                          description={t("Native provider WebSocket.")}
+                          checked={form.realtimeTranscription}
+                          onCheckedChange={(checked) =>
+                            setForm((current) => ({
+                              ...current,
+                              realtimeTranscription: checked,
+                              chunkedTranscription: checked
+                                ? false
+                                : current.chunkedTranscription,
+                            }))
+                          }
+                        />
+                      )}
+                      {supports(form.providerType, "chunked-transcription") && (
+                        <CapabilitySwitch
+                          label={t("Chunked HTTP transcription")}
+                          description={t("Rolling Whisper windows.")}
+                          checked={form.chunkedTranscription}
+                          onCheckedChange={(checked) =>
+                            setForm((current) => ({
+                              ...current,
+                              chunkedTranscription: checked,
+                              realtimeTranscription: checked
+                                ? false
+                                : current.realtimeTranscription,
+                            }))
+                          }
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+                {supports(form.providerType, "diarization") && (
+                  <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+                    <CapabilitySwitch
+                      label={t("Speaker diarization")}
+                      description={t(
+                        "Identify anonymous speakers alongside transcription."
+                      )}
+                      checked={form.diarization}
+                      onCheckedChange={(checked) =>
+                        update("diarization", checked)
+                      }
+                    />
+                    <Field>
+                      <Field.Label>{t("Diarization model")}</Field.Label>
+                      <Input
+                        id="endpoint-llm-diarization-model"
+                        value={form.diarizationModel}
+                        onChange={(event) =>
+                          update("diarizationModel", event.target.value)
+                        }
+                        placeholder="gpt-4o-transcribe-diarize"
+                      />
+                    </Field>
+                  </div>
+                )}
+                {supports(form.providerType, "tts") && (
+                  <Field>
+                    <Field.Label>{t("Speech model")}</Field.Label>
+                    <Input
+                      id="endpoint-speech-model"
+                      value={form.speechModel}
+                      onChange={(event) =>
+                        update("speechModel", event.target.value)
+                      }
+                      placeholder="gpt-4o-mini-tts"
                     />
                   </Field>
-                </div>
-              )}
-              {supports(form.providerType, "tts") && (
-                <Field>
-                  <FieldLabel htmlFor="endpoint-speech-model">
-                    {t("Speech model")}
-                  </FieldLabel>
-                  <Input
-                    id="endpoint-speech-model"
-                    value={form.speechModel}
-                    onChange={(event) =>
-                      update("speechModel", event.target.value)
+                )}
+                {supports(form.providerType, "tool-calling") && (
+                  <CapabilitySwitch
+                    label={t("Tool calling")}
+                    description={t(
+                      "Allow approved MCP actions for chat requests."
+                    )}
+                    checked={form.toolCalling}
+                    onCheckedChange={(checked) =>
+                      update("toolCalling", checked)
                     }
-                    placeholder="gpt-4o-mini-tts"
                   />
-                </Field>
+                )}
+              </div>
+            </Frame.Panel>
+          </Frame>
+        )}
+      {part === "advanced" &&
+        form.endpointKind === "llm" &&
+        !hasOptionalModels && (
+          <PuAlert variant="plain">
+            <PuAlert.Icon>
+              <Sparkles />
+            </PuAlert.Icon>
+            <PuAlert.Title>
+              {t("No optional capabilities available")}
+            </PuAlert.Title>
+            <PuAlert.Description>
+              {t(
+                "This provider exposes chat only. You can still verify and save the endpoint with its primary chat model."
               )}
-              {supports(form.providerType, "tool-calling") && (
-                <CapabilitySwitch
-                  label={t("Tool calling")}
-                  description={t(
-                    "Allow approved MCP actions for chat requests."
-                  )}
-                  checked={form.toolCalling}
-                  onCheckedChange={(checked) => update("toolCalling", checked)}
-                />
-              )}
-            </FieldGroup>
-          </CardContent>
-        </Card>
-      )}
-      {form.endpointKind === "llm" && !hasOptionalModels && (
-        <Alert>
-          <Sparkles aria-hidden="true" />
-          <AlertTitle>{t("No optional capabilities available")}</AlertTitle>
-          <AlertDescription>
-            {t(
-              "This provider exposes chat only. You can still verify and save the endpoint with its primary chat model."
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+            </PuAlert.Description>
+          </PuAlert>
+        )}
     </div>
   )
 }
@@ -1531,7 +1509,9 @@ function ConfigureStep({
 function BehaviorStep({
   form,
   update,
+  compact = false,
 }: {
+  compact?: boolean
   form: EndpointForm
   update: <K extends keyof EndpointForm>(key: K, value: EndpointForm[K]) => void
 }) {
@@ -1541,33 +1521,33 @@ function BehaviorStep({
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <p className="text-sm font-medium">{t("Set runtime behavior")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(
-            "Decide how long JustAI should wait, how chat requests behave, and whether this endpoint participates in routing."
-          )}
-        </p>
-      </div>
+      {!compact && (
+        <div>
+          <p className="text-sm font-medium">{t("Set runtime behavior")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              "Decide how long JustAI should wait, how chat requests behave, and whether this endpoint participates in routing."
+            )}
+          </p>
+        </div>
+      )}
 
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <SlidersHorizontal aria-hidden="true" /> {t("Runtime limits")}
-          </CardTitle>
-          <CardDescription>
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Runtime limits")}</Frame.Title>
+          <Frame.Description>
             {t(
               "These values apply whenever JustAI routes a request to this endpoint."
             )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            <div className="grid gap-4 sm:grid-cols-3">
+          </Frame.Description>
+        </Frame.Header>
+        <Frame.Panel className="p-4">
+          <div className="flex flex-col gap-4">
+            <div
+              className={cn("grid gap-4", chatAvailable && "sm:grid-cols-3")}
+            >
               <Field>
-                <FieldLabel htmlFor="endpoint-timeout">
-                  {t("Timeout (seconds)")}
-                </FieldLabel>
+                <Field.Label>{t("Timeout (seconds)")}</Field.Label>
                 <Input
                   id="endpoint-timeout"
                   type="number"
@@ -1578,110 +1558,107 @@ function BehaviorStep({
                     update("timeoutSeconds", Number(event.target.value))
                   }
                 />
-                <FieldDescription>
+                <Field.Description>
                   {form.providerType === "pyannote"
                     ? t(
                         "Maximum wait for one full-video diarization. 1,800 seconds is the default."
                       )
                     : t("Maximum wait for a single provider request.")}
-                </FieldDescription>
+                </Field.Description>
               </Field>
-              <Field>
-                <FieldLabel htmlFor="endpoint-max-tokens">
-                  {t("Max output tokens")}
-                </FieldLabel>
-                <Input
-                  id="endpoint-max-tokens"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={form.maxOutputTokens}
-                  onChange={(event) =>
-                    update("maxOutputTokens", Number(event.target.value))
-                  }
-                />
-                <FieldDescription>
-                  {t("Upper limit for generated chat output.")}
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="endpoint-temperature">
-                  {t("Temperature")}
-                </FieldLabel>
-                <Input
-                  id="endpoint-temperature"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={form.temperature}
-                  onChange={(event) =>
-                    update("temperature", Number(event.target.value))
-                  }
-                />
-                <FieldDescription>
-                  {t("Lower values make chat responses more predictable.")}
-                </FieldDescription>
-              </Field>
+              {chatAvailable && (
+                <>
+                  <Field>
+                    <Field.Label>{t("Max output tokens")}</Field.Label>
+                    <Input
+                      id="endpoint-max-tokens"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={form.maxOutputTokens}
+                      onChange={(event) =>
+                        update("maxOutputTokens", Number(event.target.value))
+                      }
+                    />
+                    <Field.Description>
+                      {t("Upper limit for generated chat output.")}
+                    </Field.Description>
+                  </Field>
+                  <Field>
+                    <Field.Label>{t("Temperature")}</Field.Label>
+                    <Input
+                      id="endpoint-temperature"
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={form.temperature}
+                      onChange={(event) =>
+                        update("temperature", Number(event.target.value))
+                      }
+                    />
+                    <Field.Description>
+                      {t("Lower values make chat responses more predictable.")}
+                    </Field.Description>
+                  </Field>
+                </>
+              )}
             </div>
-          </FieldGroup>
-        </CardContent>
-      </Card>
-
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>{t("Availability and defaults")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Control whether routing can use this endpoint and which chat endpoint new sessions select by default. If no enabled chat endpoint exists in this scope, JustAI promotes the first one automatically."
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <CapabilitySwitch
-                label={t("Enabled")}
-                description={t(
-                  "Allow this endpoint to be selected by routing."
-                )}
-                checked={form.enabled}
-                onCheckedChange={(checked) => {
-                  update("enabled", checked)
-                  if (!checked) update("isDefault", false)
-                }}
-              />
-              <CapabilitySwitch
-                label={t("Default chat endpoint")}
-                description={
-                  !form.enabled
-                    ? t("Enable this endpoint before making it the default.")
-                    : chatAvailable
-                      ? t("Use for new chat sessions.")
-                      : t(
-                          "Enable chat in the previous step before making this the default."
-                        )
-                }
-                checked={form.isDefault}
-                disabled={!chatAvailable || !form.enabled}
-                onCheckedChange={(checked) => update("isDefault", checked)}
-              />
-            </div>
-            {!chatAvailable && (
-              <Alert>
-                <MessageSquare aria-hidden="true" />
-                <AlertTitle>{t("Chat is not enabled")}</AlertTitle>
-                <AlertDescription>
-                  {t(
-                    "This endpoint can still serve its selected capabilities, but it will not be used for new chat sessions."
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
-          </FieldGroup>
-        </CardContent>
-      </Card>
+          </div>
+        </Frame.Panel>
+      </Frame>
     </div>
+  )
+}
+
+function AvailabilitySettings({
+  form,
+  update,
+}: {
+  form: EndpointForm
+  update: <K extends keyof EndpointForm>(key: K, value: EndpointForm[K]) => void
+}) {
+  const { t } = useTranslations()
+  const chatAvailable = form.endpointKind === "llm" || form.useForChat
+  return (
+    <Frame>
+      <Frame.Header>
+        <Frame.Title>{t("Availability and defaults")}</Frame.Title>
+        <Frame.Description>
+          {t(
+            "Choose whether this endpoint is available and used by default for new chats."
+          )}
+        </Frame.Description>
+      </Frame.Header>
+      <Frame.Panel>
+        <CapabilitySwitch
+          label={t("Enabled")}
+          description={t("Allow this endpoint to be selected by routing.")}
+          checked={form.enabled}
+          onCheckedChange={(checked) => {
+            update("enabled", checked)
+            if (!checked) update("isDefault", false)
+          }}
+        />
+        {chatAvailable && (
+          <CapabilitySwitch
+            label={t("Default chat endpoint")}
+            description={
+              !form.enabled
+                ? t("Enable this endpoint before making it the default.")
+                : chatAvailable
+                  ? t("Use for new chat sessions.")
+                  : t(
+                      "Enable chat in the previous step before making this the default."
+                    )
+            }
+            checked={form.isDefault}
+            disabled={!chatAvailable || !form.enabled}
+            onCheckedChange={(checked) => update("isDefault", checked)}
+          />
+        )}
+      </Frame.Panel>
+    </Frame>
   )
 }
 
@@ -1702,26 +1679,39 @@ function ModelField({
   description: string
   placeholder: string
 }) {
+  const { t } = useTranslations()
   return (
     <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        list={options.length > 0 ? "endpoint-model-options" : undefined}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-      />
-      {options.length > 0 && (
-        <datalist id="endpoint-model-options">
-          {options.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name ?? model.id}
-            </option>
-          ))}
-        </datalist>
-      )}
-      <FieldDescription>{description}</FieldDescription>
+      <Field.Label>{label}</Field.Label>
+      <div className="flex flex-wrap gap-2">
+        <Input
+          id={id}
+          className="min-w-0 flex-1"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+        />
+        {options.length > 0 && (
+          <Select
+            value={options.some((model) => model.id === value) ? value : null}
+            onValueChange={(next) => {
+              if (next) onChange(next)
+            }}
+          >
+            <SelectTrigger aria-label={t("Choose discovered model")}>
+              <SelectValue>{t("Browse models")}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.name ?? model.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+      <Field.Description>{description}</Field.Description>
     </Field>
   )
 }
@@ -1731,7 +1721,6 @@ function ReviewStep({
   endpointKind,
   providerLabel,
   isEditing,
-  capabilities,
   preflightState,
   preflightMessage,
   validationMessage,
@@ -1746,7 +1735,6 @@ function ReviewStep({
   endpointKind: EndpointKind
   providerLabel: string
   isEditing: boolean
-  capabilities: Record<string, boolean>
   preflightState: PreflightState
   preflightMessage: string
   validationMessage: string
@@ -1759,10 +1747,6 @@ function ReviewStep({
 }) {
   const { t } = useTranslations()
 
-  const enabledCapabilities = Object.entries(capabilities)
-    .filter(([, enabled]) => enabled)
-    .map(([capability]) => capability)
-  const chatAvailable = endpointKind === "llm" || form.useForChat
   const modelLabel =
     endpointKind === "diarization"
       ? form.diarizationModel || "Service-selected pipeline"
@@ -1777,223 +1761,126 @@ function ReviewStep({
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <p className="text-sm font-medium">{t("Verify and review")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(
-            "JustAI will run a safe provider check without saving the endpoint or its credential."
-          )}
-        </p>
-      </div>
-
       {notice && (
-        <Alert variant="destructive">
-          <CircleAlert aria-hidden="true" />
-          <AlertTitle>{t("Endpoint could not be saved")}</AlertTitle>
-          <AlertDescription>{t(notice)}</AlertDescription>
-        </Alert>
+        <PuAlert tone="destructive" variant="plain">
+          <PuAlert.Icon>
+            <CircleAlert />
+          </PuAlert.Icon>
+          <PuAlert.Title>{t("Endpoint could not be saved")}</PuAlert.Title>
+          <PuAlert.Description>{t(notice)}</PuAlert.Description>
+        </PuAlert>
       )}
 
       {validationMessage && (
-        <Alert variant="destructive">
-          <CircleAlert aria-hidden="true" />
-          <AlertTitle>{t("Setup needs attention")}</AlertTitle>
-          <AlertDescription>{validationMessage}</AlertDescription>
-        </Alert>
+        <PuAlert tone="destructive" variant="plain">
+          <PuAlert.Icon>
+            <CircleAlert />
+          </PuAlert.Icon>
+          <PuAlert.Title>{t("Setup needs attention")}</PuAlert.Title>
+          <PuAlert.Description>{t(validationMessage)}</PuAlert.Description>
+        </PuAlert>
       )}
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ListChecks aria-hidden="true" /> {t("Setup summary")}
-          </CardTitle>
-          <CardDescription>
-            {t("Confirm the values that will be saved.")}
-          </CardDescription>
+          <CardTitle>{t("Setup summary")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4">
-            <div>
-              <p className="mb-3 text-xs font-medium">{t("Connection")}</p>
-              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                <SummaryItem
-                  label={t("Lane")}
-                  value={endpointKind === "diarization" ? "Diarization" : "LLM"}
-                />
-                <SummaryItem label={t("Provider")} value={providerLabel} />
-                <SummaryItem
-                  label={t("Name")}
-                  value={form.name || "Unnamed endpoint"}
-                />
-                <SummaryItem
-                  label={t("Visibility")}
-                  value={scopeLabel(form.scopeType)}
-                />
-                <SummaryItem label={t("Base URL")} value={form.baseUrl} wide />
-                <SummaryItem
-                  label={t("API path")}
-                  value={form.apiPath || "Provider default"}
-                />
-                <SummaryItem
-                  label={t("API version")}
-                  value={form.apiVersion || "Provider default"}
-                />
-                <SummaryItem label={t("Credential")} value={credentialLabel} />
-              </dl>
-            </div>
-
-            <Separator />
-
-            <div>
-              <p className="mb-3 text-xs font-medium">
-                {t("Models and capabilities")}
-              </p>
-              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                <SummaryItem label={t("Primary model")} value={modelLabel} />
-                <SummaryItem
-                  label={t("Chat model")}
-                  value={form.chatModel || "Not configured"}
-                />
-                <SummaryItem
-                  label={t("Vision model")}
-                  value={form.visionModel || "Not configured"}
-                />
-                <SummaryItem
-                  label={t("Embedding model")}
-                  value={form.embeddingModel || "Not configured"}
-                />
-                <SummaryItem
-                  label={t("Image model")}
-                  value={form.imageModel || "Not configured"}
-                />
-                <SummaryItem
-                  label={t("Transcription model")}
-                  value={form.transcriptionModel || "Not configured"}
-                />
-                <SummaryItem
-                  label={t("Diarization model")}
-                  value={form.diarizationModel || "Service-selected pipeline"}
-                />
-                <SummaryItem
-                  label={t("Speech model")}
-                  value={form.speechModel || "Not configured"}
-                />
-              </dl>
-              <div className="mt-4">
-                <p className="mb-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  {t("Enabled capabilities")}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {enabledCapabilities.length > 0 ? (
-                    enabledCapabilities.map((capability) => (
-                      <Badge key={capability} variant="secondary">
-                        {capabilityLabel(capability)}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      {t("No capabilities selected.")}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <p className="mb-3 text-xs font-medium">
-                {t("Runtime and routing")}
-              </p>
-              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                <SummaryItem
-                  label={t("Timeout")}
-                  value={`${form.timeoutSeconds} seconds`}
-                />
-                <SummaryItem
-                  label={t("Max output")}
-                  value={`${form.maxOutputTokens} tokens`}
-                />
-                <SummaryItem
-                  label={t("Temperature")}
-                  value={String(form.temperature)}
-                />
-                <SummaryItem
-                  label={t("Status")}
-                  value={form.enabled ? "Enabled" : "Disabled"}
-                />
-                <SummaryItem
-                  label={t("Default chat endpoint")}
-                  value={
-                    form.isDefault
-                      ? "Yes"
-                      : chatAvailable && form.enabled
-                        ? "No — may be auto-selected if none exists"
-                        : chatAvailable
-                          ? "No — endpoint is disabled"
-                          : "No — chat is disabled"
-                  }
-                />
-              </dl>
-            </div>
-          </div>
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <SummaryItem label={t("Name")} value={form.name} />
+            <SummaryItem label={t("Provider")} value={providerLabel} />
+            <SummaryItem
+              label={t("Visibility")}
+              value={t(scopeLabel(form.scopeType))}
+            />
+            <SummaryItem label={t("Primary model")} value={t(modelLabel)} />
+            <SummaryItem label={t("Base URL")} value={form.baseUrl} wide />
+            <SummaryItem label={t("Credential")} value={credentialLabel} />
+          </dl>
         </CardContent>
       </Card>
 
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {preflightState === "passed" ? (
-              <CheckCircle2 className="text-primary" aria-hidden="true" />
-            ) : preflightState === "failed" ? (
-              <CircleAlert className="text-destructive" aria-hidden="true" />
-            ) : (
-              <ShieldCheck aria-hidden="true" />
-            )}
-            {t("Connection check")}
-          </CardTitle>
-          <CardDescription>
+      <Frame variant="plain">
+        <Frame.Header>
+          <Frame.Title>{t("Connection check")}</Frame.Title>
+          <Frame.Description>
             {modelCount > 0
-              ? t(
-                  modelCount === 1
-                    ? "{count} model discovered from the provider."
-                    : "{count} models discovered from the provider.",
-                  { count: modelCount }
-                )
+              ? t("{count} models discovered from the provider.", {
+                  count: modelCount,
+                })
               : t(
-                  "Model discovery is attempted where the provider exposes a safe catalog."
+                  "Saving checks the connection first. You can also test it here."
                 )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+          </Frame.Description>
+          <Frame.Action>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onCheck}
+              disabled={preflightState === "checking"}
+            >
+              {preflightState === "checking" && <Spinner className="size-4" />}
+              {t(
+                preflightState === "checking"
+                  ? "Checking…"
+                  : preflightState === "passed"
+                    ? "Check again"
+                    : "Check connection"
+              )}
+            </Button>
+          </Frame.Action>
+        </Frame.Header>
+        <div className="flex flex-col gap-3">
           {preflightState === "passed" && verificationIsCurrent && (
-            <Alert>
-              <CheckCircle2 aria-hidden="true" />
-              <AlertTitle>{t("Provider verified")}</AlertTitle>
-              <AlertDescription>
-                {preflightMessage || "Provider is reachable."}
-              </AlertDescription>
-            </Alert>
+            <PuAlert tone="success" variant="plain">
+              <PuAlert.Icon>
+                <CheckCircle2 />
+              </PuAlert.Icon>
+              <PuAlert.Title>{t("Provider verified")}</PuAlert.Title>
+              <PuAlert.Description>
+                {t(preflightMessage || "Provider is reachable.")}
+              </PuAlert.Description>
+            </PuAlert>
           )}
           {preflightState === "passed" && !verificationIsCurrent && (
-            <Alert>
-              <CircleAlert aria-hidden="true" />
-              <AlertTitle>{t("Setup changed after verification")}</AlertTitle>
-              <AlertDescription>
+            <PuAlert variant="plain">
+              <PuAlert.Icon>
+                <CircleAlert />
+              </PuAlert.Icon>
+              <PuAlert.Title>
+                {t("Setup changed after verification")}
+              </PuAlert.Title>
+              <PuAlert.Description>
                 {t(
                   "Check the connection again to verify the updated provider or model settings."
                 )}
-              </AlertDescription>
-            </Alert>
+              </PuAlert.Description>
+            </PuAlert>
           )}
           {preflightState === "failed" && (
-            <Alert variant="destructive">
-              <CircleAlert aria-hidden="true" />
-              <AlertTitle>{t("Verification needs attention")}</AlertTitle>
-              <AlertDescription>
-                {preflightMessage || "The provider could not be reached."}
-              </AlertDescription>
-            </Alert>
+            <PuAlert
+              tone={
+                verificationOverride && verificationIsCurrent
+                  ? "warning"
+                  : "destructive"
+              }
+              variant="plain"
+            >
+              <PuAlert.Icon>
+                <CircleAlert />
+              </PuAlert.Icon>
+              <PuAlert.Title>
+                {t(
+                  verificationOverride && verificationIsCurrent
+                    ? "Verification skipped"
+                    : "Verification needs attention"
+                )}
+              </PuAlert.Title>
+              <PuAlert.Description>
+                {t(preflightMessage || "The provider could not be reached.")}
+              </PuAlert.Description>
+            </PuAlert>
           )}
           {preflightState === "checking" && (
             <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
@@ -2001,36 +1888,12 @@ function ReviewStep({
               {t("Checking provider and looking for models…")}
             </div>
           )}
-          {preflightState === "idle" && (
-            <p className="rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              {t(
-                "Check the connection to unlock saving. This does not persist a draft or expose the credential."
-              )}
-            </p>
-          )}
           {preflightMessage &&
             preflightState !== "passed" &&
             preflightState !== "failed" && (
               <p className="text-xs text-destructive">{preflightMessage}</p>
             )}
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onCheck}
-              disabled={preflightState === "checking"}
-            >
-              <RefreshCw
-                data-icon="inline-start"
-                className={preflightState === "checking" ? "animate-spin" : ""}
-                aria-hidden="true"
-              />
-              {preflightState === "checking"
-                ? t("Checking…")
-                : preflightState === "passed"
-                  ? t("Check again")
-                  : t("Check connection")}
-            </Button>
             {preflightState === "failed" &&
               (!verificationOverride || !verificationIsCurrent) && (
                 <Button
@@ -2049,8 +1912,8 @@ function ReviewStep({
               )}
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Frame>
     </div>
   )
 }
