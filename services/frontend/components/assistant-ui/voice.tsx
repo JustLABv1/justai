@@ -1,311 +1,37 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import {
-  AlertCircle,
-  Mic,
-  MicOff,
-  Phone,
-  PhoneOff,
-  RotateCcw,
-  X,
-} from "lucide-react"
-import {
-  useVoiceControls,
-  useVoiceState,
-  useVoiceVolume,
-} from "@assistant-ui/react"
+import { Mic } from "lucide-react"
+import { useVoiceControls } from "@assistant-ui/react"
 import type { ToolCallMessagePartProps } from "@assistant-ui/react"
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
-import { Button } from "@/components/ui/button"
+import { Prompt } from "@/components/panelui/prompt"
 import { cn } from "@/lib/utils"
 
-export function VoiceControl({
-  className,
-  compact = false,
-  centered = false,
-  error,
-  onClearError,
-  onDismissError,
-  toolApproval,
-}: {
-  className?: string
-  compact?: boolean
-  centered?: boolean
-  error?: string | null
-  onClearError?: () => void
-  onDismissError?: () => void
-  toolApproval?: ToolCallMessagePartProps | null
-}) {
+/** Starts a voice session. While one runs, the composer shows its Prompt.Recorder instead. */
+export function VoiceControl({ className }: { className?: string }) {
   const { t } = useTranslations()
 
-  const state = useVoiceState()
   const controls = useVoiceControls()
-  const volume = useVoiceVolume()
-  const active =
-    state?.status.type === "running" || state?.status.type === "starting"
-  const muted = state?.isMuted === true
-  const orbState = error
-    ? "error"
-    : toolApproval
-      ? "muted"
-      : state?.status.type === "starting"
-        ? "connecting"
-        : muted
-          ? "muted"
-          : state?.mode === "speaking"
-            ? "speaking"
-            : active
-              ? "listening"
-              : "idle"
-
-  if (centered) {
-    const statusLabel = error
-      ? t("Voice unavailable")
-      : toolApproval
-        ? t("Approval required")
-        : state?.status.type === "starting"
-          ? t("Connecting to voice")
-          : active
-            ? muted
-              ? t("Voice muted")
-              : state?.mode === "speaking"
-                ? t("Assistant is speaking")
-                : t("Listening")
-            : t("Voice mode")
-    const statusDescription = error
-      ? error
-      : toolApproval
-        ? t("Voice is paused while you review this action.")
-        : active
-          ? t("Speak naturally. You can interrupt the assistant at any time.")
-          : t("Start a hands-free conversation with JustAI.")
-
-    return (
-      <div
-        className={cn(
-          "absolute inset-0 z-40 flex min-h-0 items-center justify-center overflow-y-auto bg-background/95 px-6 py-12 backdrop-blur-sm",
-          className
-        )}
-      >
-        <div className="flex w-full max-w-lg flex-col items-center gap-7 text-center">
-          <div className="relative flex items-center justify-center">
-            <div className="absolute size-56 rounded-full bg-primary/5 blur-3xl" />
-            <VoiceOrb
-              className="relative size-40 border-primary/30 bg-primary/10 shadow-[0_0_120px_rgba(99,102,241,0.28)] sm:size-48"
-              state={orbState}
-              volume={volume}
-            />
-          </div>
-          <div className="space-y-2">
-            <p className="text-lg font-semibold tracking-tight">
-              {statusLabel}
-            </p>
-            <p
-              className={cn(
-                "mx-auto max-w-md text-sm leading-6 text-muted-foreground",
-                error && "text-destructive"
-              )}
-            >
-              {statusDescription}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {error ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    controls.connect()
-                    onClearError?.()
-                  }}
-                >
-                  <RotateCcw aria-hidden="true" className="mr-2 size-4" />
-                  {t("Try again")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={onDismissError ?? onClearError}
-                >
-                  {t("Back to chat")}
-                </Button>
-              </>
-            ) : active ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => (muted ? controls.unmute() : controls.mute())}
-                >
-                  {muted ? (
-                    <Mic aria-hidden="true" className="mr-2 size-4" />
-                  ) : (
-                    <MicOff aria-hidden="true" className="mr-2 size-4" />
-                  )}
-                  {muted ? t("Unmute") : t("Mute")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={controls.disconnect}
-                >
-                  <PhoneOff aria-hidden="true" className="mr-2 size-4" />
-                  {t("End voice")}
-                </Button>
-              </>
-            ) : (
-              <Button
-                type="button"
-                onClick={() => {
-                  onClearError?.()
-                  controls.connect()
-                }}
-              >
-                <Phone aria-hidden="true" className="mr-2 size-4" />
-                {t("Start voice")}
-              </Button>
-            )}
-          </div>
-          {error && (
-            <div className="flex max-w-md items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-left text-xs text-destructive">
-              <AlertCircle
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0"
-              />
-              <span>{t(error)}</span>
-            </div>
-          )}
-          {toolApproval && (
-            <div
-              className="w-full max-w-lg rounded-xl border bg-card p-2 text-left shadow-sm"
-              aria-label={t("Tool approval required")}
-            >
-              <ToolFallback {...toolApproval} />
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  if (compact) {
-    const label = active
-      ? muted
-        ? t("Unmute voice")
-        : t("Mute voice")
-      : t("Start voice")
-    return (
-      <div className={cn("relative flex items-center", className)}>
-        <Button
-          aria-label={label}
-          aria-pressed={active && !muted}
-          className={cn(
-            "relative size-8 rounded-full border bg-background p-0 text-foreground shadow-sm hover:bg-muted dark:border-[#414141]",
-            "focus-visible:ring-2 focus-visible:ring-primary/50",
-            active && "bg-primary/10 text-primary hover:bg-primary/15",
-            muted && "opacity-70"
-          )}
-          onClick={() => {
-            if (!active) controls.connect()
-            else if (muted) controls.unmute()
-            else controls.mute()
-          }}
-          type="button"
-          variant="ghost"
-        >
-          {active ? (
-            <VoiceOrb
-              className="absolute inset-1 border-0 bg-primary/10 shadow-none"
-              compact
-              state={orbState}
-              volume={volume}
-            />
-          ) : (
-            <Mic className="size-4" />
-          )}
-          <span className="sr-only">{label}</span>
-        </Button>
-        {active && (
-          <Button
-            aria-label={t("End voice")}
-            className="ml-0.5 size-7 rounded-full p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={controls.disconnect}
-            type="button"
-            variant="ghost"
-          >
-            <X aria-hidden="true" className="size-3.5" />
-          </Button>
-        )}
-        {toolApproval && (
-          <div className="absolute right-0 bottom-full z-30 mb-3 w-[min(22rem,calc(100vw-2rem))]">
-            <ToolFallback {...toolApproval} />
-          </div>
-        )}
-      </div>
-    )
-  }
   return (
-    <div className={cn("relative flex items-center gap-2", className)}>
-      <VoiceOrb
-        className="shrink-0 border-0 bg-primary/10 shadow-none"
-        compact
-        state={orbState}
-        volume={volume}
-      />
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span
-          className={cn(
-            "size-2 rounded-full bg-muted-foreground",
-            active && "bg-emerald-500"
-          )}
-        />
-        {state?.status.type === "starting"
-          ? t("Connecting")
-          : active
-            ? muted
-              ? t("Muted")
-              : t("Voice active")
-            : t("Voice")}
-      </div>
-      {active ? (
-        <>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={() => (muted ? controls.unmute() : controls.mute())}
-            aria-label={muted ? t("Unmute voice") : t("Mute voice")}
-          >
-            {muted ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={controls.disconnect}
-            aria-label={t("End voice")}
-          >
-            <PhoneOff aria-hidden="true" />
-          </Button>
-        </>
-      ) : (
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={controls.connect}
-          aria-label={t("Start voice")}
-        >
-          <Phone aria-hidden="true" />
-        </Button>
-      )}
-      {toolApproval && (
-        <div className="absolute right-0 bottom-full z-30 mb-3 w-[min(22rem,calc(100vw-2rem))]">
-          <ToolFallback {...toolApproval} />
-        </div>
-      )}
+    <div className={cn("relative flex items-center", className)}>
+      <Prompt.Tool label={t("Start voice")} onClick={controls.connect}>
+        <Mic />
+      </Prompt.Tool>
+    </div>
+  )
+}
+
+/** A tool the voice session wants approved, shown over the composer. */
+export function VoiceToolApproval({
+  toolApproval,
+}: {
+  toolApproval?: ToolCallMessagePartProps | null
+}) {
+  if (!toolApproval) return null
+  return (
+    <div className="absolute right-0 bottom-full z-30 mb-3 w-[min(22rem,calc(100vw-2rem))]">
+      <ToolFallback {...toolApproval} />
     </div>
   )
 }
