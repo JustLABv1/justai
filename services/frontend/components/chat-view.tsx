@@ -1077,12 +1077,16 @@ function ContextDisplay({
   onRemoveMCP,
   onRemoveNote,
   onRemoveRepository,
+  onRemoveKnowledge,
+  onRemoveTranscription,
   onSaveKnowledge,
 }: {
   context: ConversationContext
   onRemoveMCP?: (serverId: string) => Promise<void>
   onRemoveNote?: (noteId: string) => Promise<void>
   onRemoveRepository?: (repositoryId: string) => Promise<void>
+  onRemoveKnowledge?: (sourceId: string) => Promise<void>
+  onRemoveTranscription?: (sessionId: string) => Promise<void>
   onSaveKnowledge?: (sourceId: string) => Promise<void>
 }) {
   const { t } = useTranslations()
@@ -1127,11 +1131,12 @@ function ContextDisplay({
       label: session.title,
       detail: "transcription",
       kind: "transcription" as const,
+      resourceId: session.id,
     })),
   ]
 
   const handleRemoveContext = async (
-    kind: "mcp" | "note" | "repository",
+    kind: "mcp" | "note" | "repository" | "knowledge" | "transcription",
     resourceId: string
   ) => {
     if (removingContextId) return
@@ -1140,7 +1145,11 @@ function ContextDisplay({
         ? onRemoveMCP
         : kind === "note"
           ? onRemoveNote
-          : onRemoveRepository
+          : kind === "knowledge"
+            ? onRemoveKnowledge
+            : kind === "transcription"
+              ? onRemoveTranscription
+              : onRemoveRepository
     if (!onRemove) return
 
     setRemoveError(null)
@@ -1214,7 +1223,9 @@ function ContextDisplay({
           {item.resourceId &&
           ((item.kind === "mcp" && onRemoveMCP) ||
             (item.kind === "note" && onRemoveNote) ||
-            (item.kind === "repository" && onRemoveRepository)) ? (
+            (item.kind === "repository" && onRemoveRepository) ||
+            (item.kind === "knowledge" && onRemoveKnowledge) ||
+            (item.kind === "transcription" && onRemoveTranscription)) ? (
             <button
               type="button"
               className="shrink-0 rounded-full p-0.5 opacity-70 transition-colors hover:bg-background hover:opacity-100 disabled:pointer-events-none disabled:opacity-50"
@@ -1229,7 +1240,9 @@ function ContextDisplay({
                 if (
                   item.kind === "mcp" ||
                   item.kind === "note" ||
-                  item.kind === "repository"
+                  item.kind === "repository" ||
+                  item.kind === "knowledge" ||
+                  item.kind === "transcription"
                 )
                   void handleRemoveContext(item.kind, item.resourceId!)
               }}
@@ -2363,6 +2376,8 @@ function Composer({
   onAttachNote,
   onRemoveNote,
   onRemoveRepository,
+  onRemoveKnowledge,
+  onRemoveTranscription,
   onSaveKnowledge,
   toolApproval,
   voiceTranscript,
@@ -2393,6 +2408,8 @@ function Composer({
   onAttachNote: (noteId: string) => Promise<void>
   onRemoveNote: (noteId: string) => Promise<void>
   onRemoveRepository: (repositoryId: string) => Promise<void>
+  onRemoveKnowledge: (sourceId: string) => Promise<void>
+  onRemoveTranscription: (sessionId: string) => Promise<void>
   onSaveKnowledge: (sourceId: string) => Promise<void>
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
   voiceTranscript?: string
@@ -3273,6 +3290,8 @@ function Composer({
               onRemoveMCP={onRemoveMCP}
               onRemoveNote={onRemoveNote}
               onRemoveRepository={onRemoveRepository}
+              onRemoveKnowledge={onRemoveKnowledge}
+              onRemoveTranscription={onRemoveTranscription}
               onSaveKnowledge={onSaveKnowledge}
             />
             <Prompt.Hint
@@ -3405,6 +3424,8 @@ function AssistantChatSurface({
   onAttachNote,
   onRemoveNote,
   onRemoveRepository,
+  onRemoveKnowledge,
+  onRemoveTranscription,
   onSaveKnowledge,
   onUpload,
   onRemoveUpload,
@@ -3433,6 +3454,8 @@ function AssistantChatSurface({
   onAttachNote: (noteId: string) => Promise<void>
   onRemoveNote: (noteId: string) => Promise<void>
   onRemoveRepository: (repositoryId: string) => Promise<void>
+  onRemoveKnowledge: (sourceId: string) => Promise<void>
+  onRemoveTranscription: (sessionId: string) => Promise<void>
   onSaveKnowledge: (sourceId: string) => Promise<void>
   onUpload: (file: File) => Promise<UploadedConversationAttachment>
   onRemoveUpload: (sourceId: string) => Promise<void>
@@ -3957,6 +3980,8 @@ function AssistantChatSurface({
           onAttachNote,
           onRemoveNote,
           onRemoveRepository,
+          onRemoveKnowledge,
+          onRemoveTranscription,
           onSaveKnowledge,
           toolApproval: voiceApproval,
           voiceTranscript,
@@ -4339,6 +4364,18 @@ export function ChatView({
     [refreshConversationContext]
   )
 
+  const removeTranscription = useCallback(
+    async (sessionId: string) => {
+      const id = activeConversationRef.current
+      if (!id) return
+      await api.delete(
+        `/api/v1/conversations/${id}/context/transcription/${sessionId}`
+      )
+      await refreshConversationContext(id)
+    },
+    [refreshConversationContext]
+  )
+
   const saveKnowledgeSource = useCallback(
     async (sourceId: string) => {
       const id = activeConversationRef.current
@@ -4579,6 +4616,8 @@ export function ChatView({
               onAttachNote={attachNote}
               onRemoveNote={removeNote}
               onRemoveRepository={removeRepository}
+              onRemoveKnowledge={removeUploadedFile}
+              onRemoveTranscription={removeTranscription}
               onSaveKnowledge={saveKnowledgeSource}
               onOpenHistory={onOpenHistory}
               onRemoveUpload={removeUploadedFile}
