@@ -19,30 +19,18 @@ import {
   type ActivityEntry,
   type AnalyticsInsights,
 } from "@/lib/analytics-insights"
-import { EvilAreaChart } from "@/components/evilcharts/charts/recharts-area-chart"
-import { EvilBarChart } from "@/components/evilcharts/charts/recharts-bar-chart"
+import { BarChart } from "@/components/panelui/bar-chart"
+import { Frame } from "@/components/panelui/frame"
+import { Stat } from "@/components/panelui/stat"
+import { Kpi } from "@/components/panelui/kpi"
 import { AnalyticsEntityFilter } from "@/components/analytics-entity-filter"
-import { PlatformStatCard } from "@/components/platform-stat-card"
 import { PlatformTranscriptionWorkers } from "@/components/platform-transcription-workers"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { Alert } from "@/components/panelui/alert"
+import { Avatar } from "@/components/panelui/avatar"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
+import { Dialog } from "@/components/panelui/dialog"
+import { Input } from "@/components/panelui/input"
 import {
   Select,
   SelectContent,
@@ -50,15 +38,9 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@/components/panelui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Tabs,
-  ScrollableTabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs"
-import { avatarToneFor, initialsFor } from "@/lib/identity"
+import { Tabs } from "@/components/panelui/tabs"
 
 const views = {
   overview: "Usage overview",
@@ -249,23 +231,11 @@ export function PlatformAnalyticsView({
         { label: t("Transcriptions"), value: data.summary.transcriptions },
       ]
     : []
-  const trendConfig = {
-    chatRuns: {
-      label: t("Model requests"),
-      colors: { light: ["var(--chart-1)"], dark: ["var(--chart-1)"] },
-    },
-    mcpCalls: {
-      label: t("MCP tools"),
-      colors: { light: ["var(--chart-2)"], dark: ["var(--chart-2)"] },
-    },
-    agentRuns: {
-      label: t("Agent runs"),
-      colors: { light: ["var(--chart-3)"], dark: ["var(--chart-3)"] },
-    },
-    transcriptions: {
-      label: t("Transcriptions"),
-      colors: { light: ["var(--chart-4)"], dark: ["var(--chart-4)"] },
-    },
+  const trendLabels = {
+    chatRuns: t("Model requests"),
+    mcpCalls: t("MCP tools"),
+    agentRuns: t("Agent runs"),
+    transcriptions: t("Transcriptions"),
   }
   const activeUser = data?.users.find((user) => user.id === filters.userId)
   const activeWorkspace = data?.workspaces.find(
@@ -334,8 +304,8 @@ export function PlatformAnalyticsView({
 
   return (
     <div className="@container flex min-w-0 flex-col gap-6">
-      <Card>
-        <CardContent>
+      <Frame>
+        <Frame.Panel className="p-4">
           <div className="flex flex-wrap items-center gap-2">
             <Select
               value={
@@ -461,12 +431,12 @@ export function PlatformAnalyticsView({
               <RefreshCw />
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </Frame.Panel>
+      </Frame>
 
       {error && (
-        <Alert variant="destructive">
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+        <Alert tone="destructive" variant="plain">
+          <Alert.Description className="flex flex-wrap items-center justify-between gap-2">
             <span>{t(error)}</span>
             <Button
               size="sm"
@@ -475,7 +445,7 @@ export function PlatformAnalyticsView({
             >
               {t("Try again")}
             </Button>
-          </AlertDescription>
+          </Alert.Description>
         </Alert>
       )}
       {!data ? (
@@ -492,27 +462,48 @@ export function PlatformAnalyticsView({
       ) : (
         <>
           <div className="grid min-w-0 gap-4 @3xl:grid-cols-3">
-            <PlatformStatCard
-              title={t("Active users")}
-              period={rangeLabel}
-              value={number(data.summary.activeUsers)}
-              color="#00b884"
-              points={days.map((day) => ({ value: day.activeUsers }))}
-            />
-            <PlatformStatCard
-              title={t("Model requests")}
-              period={rangeLabel}
-              value={number(data.summary.chatRuns)}
-              color="#2f7bff"
-              points={days.map((day) => ({ value: day.chatRuns }))}
-            />
-            <PlatformStatCard
-              title={t("MCP tool calls")}
-              period={rangeLabel}
-              value={number(data.summary.mcpCalls)}
-              color="#8b46ff"
-              points={days.map((day) => ({ value: day.mcpCalls }))}
-            />
+            {[
+              {
+                title: "Active users",
+                value: data.summary.activeUsers,
+                points: days.map((day) => day.activeUsers),
+                color: "success" as const,
+              },
+              {
+                title: "Model requests",
+                value: data.summary.chatRuns,
+                points: days.map((day) => day.chatRuns),
+                color: "primary" as const,
+              },
+              {
+                title: "MCP tool calls",
+                value: data.summary.mcpCalls,
+                points: days.map((day) => day.mcpCalls),
+                color: "info" as const,
+              },
+            ].map((item) => (
+              <Frame key={item.title} variant="band">
+                <Frame.Panel className="p-4">
+                  <Stat>
+                    <Stat.Content>
+                      <Stat.Label>{t(item.title)}</Stat.Label>
+                      <Stat.Value size="md">{number(item.value)}</Stat.Value>
+                    </Stat.Content>
+                  </Stat>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {rangeLabel}
+                  </p>
+                  <Kpi.Chart
+                    className="mt-4"
+                    data={item.points}
+                    color={item.color}
+                    height={48}
+                    filled
+                    aria-label={t(item.title)}
+                  />
+                </Frame.Panel>
+              </Frame>
+            ))}
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-2 px-1 text-xs text-muted-foreground">
             <span>
@@ -553,30 +544,28 @@ export function PlatformAnalyticsView({
             </span>
           </div>
           <Tabs
+            variant="segmented"
             value={view}
             onValueChange={(value) => setView(value as View)}
             className="gap-5"
           >
-            <ScrollableTabsList
-              variant="line"
-              aria-label={t("Analytics views")}
-            >
+            <Tabs.List aria-label={t("Analytics views")}>
               {Object.entries(views).map(([id, label]) => (
-                <TabsTrigger key={id} value={id}>
+                <Tabs.Trigger key={id} value={id}>
                   {t(label)}
-                </TabsTrigger>
+                </Tabs.Trigger>
               ))}
-            </ScrollableTabsList>
-            <TabsContent value="overview" className="flex flex-col gap-5">
+            </Tabs.List>
+            <Tabs.Content value="overview" className="flex flex-col gap-5">
               <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t("Activity over time")}</CardTitle>
-                    <CardDescription>
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{t("Activity over time")}</Frame.Title>
+                    <Frame.Description>
                       {t("Recorded usage by UTC day")}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
+                    </Frame.Description>
+                  </Frame.Header>
+                  <Frame.Panel className="p-4">
                     {days.some(
                       (day) =>
                         day.chatRuns +
@@ -585,99 +574,86 @@ export function PlatformAnalyticsView({
                           day.transcriptions >
                         0
                     ) ? (
-                      <EvilAreaChart
-                        className="aspect-auto h-72 w-full"
+                      <BarChart
                         data={days}
-                        config={trendConfig}
-                        stackType="stacked"
-                        animationType="none"
-                        chartProps={{
-                          accessibilityLayer: true,
-                          margin: { left: 0, right: 8, top: 8 },
-                        }}
+                        xDataKey="label"
+                        stacked
+                        aspectRatio={2.4}
+                        label={t("Activity over time")}
+                        animationDuration={0}
                       >
-                        <EvilAreaChart.Grid stroke="var(--border)" />
-                        <EvilAreaChart.XAxis dataKey="label" minTickGap={40} />
-                        <EvilAreaChart.YAxis allowDecimals={false} width={32} />
-                        <EvilAreaChart.Tooltip />
-                        <EvilAreaChart.Legend isClickable align="left" />
-                        {Object.keys(trendConfig).map((key) => (
-                          <EvilAreaChart.Area
-                            key={key}
-                            dataKey={key}
-                            variant="gradient"
-                            strokeVariant="solid"
-                            strokeWidth={1.8}
-                            isClickable
-                          />
-                        ))}
-                      </EvilAreaChart>
+                        <BarChart.Header legend labels={trendLabels} />
+                        <BarChart.Grid />
+                        <BarChart.XAxis />
+                        <BarChart.YAxis format={(value) => number(value)} />
+                        <BarChart.Bar dataKey="chatRuns" color="chart-1" />
+                        <BarChart.Bar dataKey="mcpCalls" color="chart-2" />
+                        <BarChart.Bar dataKey="agentRuns" color="chart-3" />
+                        <BarChart.Bar
+                          dataKey="transcriptions"
+                          color="chart-4"
+                        />
+                        <BarChart.Tooltip
+                          labels={trendLabels}
+                          formatValue={(value) => number(value)}
+                        />
+                      </BarChart>
                     ) : (
                       <AnalyticsEmpty
                         text={t("No recorded usage in this period.")}
                       />
                     )}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t("Feature adoption")}</CardTitle>
-                    <CardDescription>
+                  </Frame.Panel>
+                </Frame>
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{t("Feature adoption")}</Frame.Title>
+                    <Frame.Description>
                       {t("Recorded operations in this period")}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
+                    </Frame.Description>
+                  </Frame.Header>
+                  <Frame.Panel className="p-4">
                     {features.some((feature) => feature.value > 0) ? (
-                      <EvilBarChart
-                        className="aspect-auto h-72 w-full"
+                      <BarChart
                         data={features}
-                        config={{
-                          value: {
-                            label: t("Operations"),
-                            colors: {
-                              light: ["var(--chart-1)"],
-                              dark: ["var(--chart-1)"],
-                            },
-                          },
-                        }}
-                        animationType="none"
-                        layout="vertical"
-                        chartProps={{ accessibilityLayer: true }}
+                        xDataKey="label"
+                        orientation="horizontal"
+                        aspectRatio={1.3}
+                        label={t("Feature adoption")}
+                        animationDuration={0}
                       >
-                        <EvilBarChart.Grid stroke="var(--border)" />
-                        <EvilBarChart.XAxis dataKey="label" />
-                        <EvilBarChart.YAxis allowDecimals={false} width={30} />
-                        <EvilBarChart.Tooltip />
-                        <EvilBarChart.Bar dataKey="value" variant="gradient" />
-                      </EvilBarChart>
+                        <BarChart.Grid />
+                        <BarChart.Bar dataKey="value" color="primary" />
+                        <BarChart.YAxis />
+                        <BarChart.Tooltip
+                          labels={{ value: t("Operations") }}
+                          formatValue={(value) => number(value)}
+                        />
+                      </BarChart>
                     ) : (
                       <AnalyticsEmpty
                         text={t("No recorded usage in this period.")}
                       />
                     )}
-                  </CardContent>
-                </Card>
+                  </Frame.Panel>
+                </Frame>
               </div>
               <div className="grid gap-5 xl:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t("Most active people")}</CardTitle>
-                    <CardDescription>
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{t("Most active people")}</Frame.Title>
+                    <Frame.Description>
                       {t("Open a person to inspect their activity")}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col">
+                    </Frame.Description>
+                  </Frame.Header>
+                  <Frame.Panel className="flex flex-col p-4">
                     {data.users.slice(0, 5).map((user) => (
                       <button
                         key={user.id}
                         onClick={() => focusActivity({ user: user.id })}
                         className="flex min-w-0 items-center gap-3 rounded-lg py-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        <Avatar size="sm">
-                          <AvatarFallback className={avatarToneFor(user.id)}>
-                            {initialsFor(user.name)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <Avatar name={user.name} size="sm" />
                         <span className="min-w-0 flex-1 truncate text-sm">
                           {user.name}
                         </span>
@@ -693,16 +669,16 @@ export function PlatformAnalyticsView({
                         text={t("No active users in this period.")}
                       />
                     )}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t("Most used MCP tools")}</CardTitle>
-                    <CardDescription>
+                  </Frame.Panel>
+                </Frame>
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{t("Most used MCP tools")}</Frame.Title>
+                    <Frame.Description>
                       {t("Completed calls, including failures")}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
+                    </Frame.Description>
+                  </Frame.Header>
+                  <Frame.Panel className="p-4">
                     {data.tools.slice(0, 5).map((tool) => (
                       <button
                         key={`${tool.serverId}:${tool.tool}`}
@@ -727,11 +703,11 @@ export function PlatformAnalyticsView({
                         text={t("No completed MCP calls in this period.")}
                       />
                     )}
-                  </CardContent>
-                </Card>
+                  </Frame.Panel>
+                </Frame>
               </div>
-            </TabsContent>
-            <TabsContent value="users">
+            </Tabs.Content>
+            <Tabs.Content value="users">
               <AnalyticsTable
                 title={t("People")}
                 description={t("Top 50 people by recorded activity")}
@@ -777,8 +753,8 @@ export function PlatformAnalyticsView({
                   </tr>
                 ))}
               </AnalyticsTable>
-            </TabsContent>
-            <TabsContent value="workspaces">
+            </Tabs.Content>
+            <Tabs.Content value="workspaces">
               <AnalyticsTable
                 title={t("Workspaces")}
                 description={t("Top 50 workspaces by recorded activity")}
@@ -821,8 +797,8 @@ export function PlatformAnalyticsView({
                   </tr>
                 ))}
               </AnalyticsTable>
-            </TabsContent>
-            <TabsContent value="tools">
+            </Tabs.Content>
+            <Tabs.Content value="tools">
               <AnalyticsTable
                 title={t("MCP usage")}
                 description={t(
@@ -870,117 +846,124 @@ export function PlatformAnalyticsView({
                   </tr>
                 ))}
               </AnalyticsTable>
-            </TabsContent>
-            <TabsContent value="activity">
-              <Card>
-                <div className="flex flex-wrap items-center gap-2 px-4">
-                  <div className="relative min-w-48 flex-1">
-                    <Search
-                      className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                    <Input
-                      className="h-8 pl-8"
-                      aria-label={t("Search activity")}
-                      placeholder={t(
-                        "Search people, tools, models or actions…"
-                      )}
-                      value={search}
-                      onChange={(event) => {
-                        setSearch(event.target.value)
-                        setPage(1)
-                      }}
-                    />
-                  </div>
-                  <Select
-                    value={category || "all"}
-                    onValueChange={(value) => {
-                      setCategory(value === "all" ? "" : value || "")
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger size="sm" aria-label={t("Activity type")}>
-                      <SelectValue>
-                        {t(
-                          activityCategoryLabels[
-                            category as keyof typeof activityCategoryLabels
-                          ] || "All activity"
+            </Tabs.Content>
+            <Tabs.Content value="activity">
+              <Frame>
+                <div className="p-4">
+                  <div className="grid grid-cols-2 items-center gap-2 @3xl:grid-cols-[minmax(0,1fr)_11rem_11rem]">
+                    <Input.Group className="col-span-2 @3xl:col-span-1">
+                      <Input.Addon>
+                        <Search className="size-4" aria-hidden="true" />
+                      </Input.Addon>
+                      <Input
+                        className="h-8"
+                        aria-label={t("Search activity")}
+                        placeholder={t(
+                          "Search people, tools, models or actions…"
                         )}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="all">{t("All activity")}</SelectItem>
-                        {Object.entries(activityCategoryLabels).map(
-                          ([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {t(label)}
-                            </SelectItem>
-                          )
-                        )}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={outcome || "all"}
-                    onValueChange={(value) => {
-                      setOutcome(value === "all" ? "" : value || "")
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger size="sm" aria-label={t("Outcome")}>
-                      <SelectValue>
-                        {t(
-                          activityOutcomeLabels[
-                            outcome as keyof typeof activityOutcomeLabels
-                          ] || "All outcomes"
-                        )}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="all">{t("All outcomes")}</SelectItem>
-                        {Object.entries(activityOutcomeLabels).map(
-                          ([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {t(label)}
-                            </SelectItem>
-                          )
-                        )}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  {(search || category || outcome || serverId) && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setSearch("")
-                        setCategory("")
-                        setOutcome("")
-                        setServerId("")
+                        value={search}
+                        onChange={(event) => {
+                          setSearch(event.target.value)
+                          setPage(1)
+                        }}
+                      />
+                    </Input.Group>
+                    <Select
+                      value={category || "all"}
+                      onValueChange={(value) => {
+                        setCategory(value === "all" ? "" : value || "")
                         setPage(1)
                       }}
                     >
-                      {t("Clear filters")}
+                      <SelectTrigger size="sm" aria-label={t("Activity type")}>
+                        <SelectValue>
+                          {t(
+                            activityCategoryLabels[
+                              category as keyof typeof activityCategoryLabels
+                            ] || "All activity"
+                          )}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="all">
+                            {t("All activity")}
+                          </SelectItem>
+                          {Object.entries(activityCategoryLabels).map(
+                            ([value, label]) => (
+                              <SelectItem key={value} value={value}>
+                                {t(label)}
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={outcome || "all"}
+                      onValueChange={(value) => {
+                        setOutcome(value === "all" ? "" : value || "")
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger size="sm" aria-label={t("Outcome")}>
+                        <SelectValue>
+                          {t(
+                            activityOutcomeLabels[
+                              outcome as keyof typeof activityOutcomeLabels
+                            ] || "All outcomes"
+                          )}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="all">
+                            {t("All outcomes")}
+                          </SelectItem>
+                          {Object.entries(activityOutcomeLabels).map(
+                            ([value, label]) => (
+                              <SelectItem key={value} value={value}>
+                                {t(label)}
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                    {(search || category || outcome || serverId) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setSearch("")
+                          setCategory("")
+                          setOutcome("")
+                          setServerId("")
+                          setPage(1)
+                        }}
+                      >
+                        {t("Clear filters")}
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!activityReady || !data.activity.items.length}
+                      onClick={exportActivity}
+                    >
+                      <Download data-icon="inline-start" />
+                      {t("Export page")}
                     </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!activityReady || !data.activity.items.length}
-                    onClick={exportActivity}
-                  >
-                    <Download data-icon="inline-start" />
-                    {t("Export page")}
-                  </Button>
+                  </div>
                 </div>
                 {serverId && (
                   <p className="px-4 text-xs text-muted-foreground">
                     {t("Activity is filtered to the selected MCP server.")}
                   </p>
                 )}
-                <CardContent
+                <Frame.Panel
                   className="min-w-0 overflow-x-auto"
                   aria-busy={loading}
                 >
@@ -1059,7 +1042,7 @@ export function PlatformAnalyticsView({
                       </tbody>
                     </table>
                   )}
-                </CardContent>
+                </Frame.Panel>
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
                   <span aria-live="polite">
                     {t(
@@ -1093,20 +1076,20 @@ export function PlatformAnalyticsView({
                     </Button>
                   </div>
                 </div>
-              </Card>
-            </TabsContent>
-            <TabsContent value="operations" className="flex flex-col gap-5">
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("Model performance")}</CardTitle>
-                  <CardDescription>
+              </Frame>
+            </Tabs.Content>
+            <Tabs.Content value="operations" className="flex flex-col gap-5">
+              <Frame>
+                <Frame.Header>
+                  <Frame.Title>{t("Model performance")}</Frame.Title>
+                  <Frame.Description>
                     {t(
                       "Request outcomes, latency and provider-reported tokens"
                     )}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <dl className="grid grid-cols-2 gap-5 md:grid-cols-4">
+                  </Frame.Description>
+                </Frame.Header>
+                <Frame.Panel className="p-4">
+                  <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
                     {[
                       ["Successful", number(analytics?.summary.succeeded)],
                       ["Errors", number(analytics?.summary.failed)],
@@ -1123,18 +1106,16 @@ export function PlatformAnalyticsView({
                           : number(analytics.summary.totalTokens),
                       ],
                     ].map(([label, value]) => (
-                      <div key={label}>
-                        <dt className="text-xs text-muted-foreground">
-                          {t(label)}
-                        </dt>
-                        <dd className="mt-2 text-2xl font-medium tabular-nums">
-                          {value}
-                        </dd>
-                      </div>
+                      <Stat key={label}>
+                        <Stat.Content>
+                          <Stat.Label>{t(label)}</Stat.Label>
+                          <Stat.Value size="sm">{value}</Stat.Value>
+                        </Stat.Content>
+                      </Stat>
                     ))}
-                  </dl>
-                </CardContent>
-              </Card>
+                  </div>
+                </Frame.Panel>
+              </Frame>
               <AnalyticsTable
                 title={t("Models & endpoints")}
                 description={t(
@@ -1165,12 +1146,12 @@ export function PlatformAnalyticsView({
                 ))}
               </AnalyticsTable>
               {filters.userId ? (
-                <Alert>
-                  <AlertDescription>
+                <Alert tone="info" variant="plain">
+                  <Alert.Description>
                     {t(
                       "Clear the user filter to view worker infrastructure metrics."
                     )}
-                  </AlertDescription>
+                  </Alert.Description>
                 </Alert>
               ) : (
                 <PlatformTranscriptionWorkers
@@ -1178,7 +1159,7 @@ export function PlatformAnalyticsView({
                   detailed
                 />
               )}
-            </TabsContent>
+            </Tabs.Content>
           </Tabs>
           <details className="px-1 text-xs text-muted-foreground">
             <summary className="cursor-pointer">{t("About this data")}</summary>
@@ -1196,72 +1177,75 @@ export function PlatformAnalyticsView({
           if (!open) setSelected(null)
         }}
       >
-        <DialogContent className="min-w-0 sm:max-w-2xl">
-          <DialogHeader className="min-w-0 pr-6">
-            <DialogTitle className="break-all">
+        <Dialog.Content className="min-w-0 sm:max-w-2xl">
+          <Dialog.Header className="min-w-0 pr-6">
+            <Dialog.Title className="break-all">
               {selected?.tool || selected?.metadata.model || selected?.action}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {selected && dateTime(selected.occurredAt)}
-            </DialogDescription>
-          </DialogHeader>
-          {selected && (
-            <div className="flex min-w-0 flex-col gap-4">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">
-                  {t(activityCategoryLabels[selected.category])}
-                </Badge>
-                <Badge
-                  variant={outcomeVariants[selected.outcome] || "secondary"}
-                >
-                  {t(
-                    activityOutcomeLabels[selected.outcome] || selected.outcome
-                  )}
-                </Badge>
-                <Badge variant="outline">
-                  {t(
-                    selected.id.startsWith("audit:")
-                      ? "Audit event"
-                      : "Run record"
-                  )}
-                </Badge>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Body>
+            {selected && (
+              <div className="flex min-w-0 flex-col gap-4">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary">
+                    {t(activityCategoryLabels[selected.category])}
+                  </Badge>
+                  <Badge
+                    variant={outcomeVariants[selected.outcome] || "secondary"}
+                  >
+                    {t(
+                      activityOutcomeLabels[selected.outcome] ||
+                        selected.outcome
+                    )}
+                  </Badge>
+                  <Badge variant="outline">
+                    {t(
+                      selected.id.startsWith("audit:")
+                        ? "Audit event"
+                        : "Run record"
+                    )}
+                  </Badge>
+                </div>
+                <dl className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  {[
+                    [
+                      "User",
+                      `${selected.userName}${selected.userEmail ? ` · ${selected.userEmail}` : ""}`,
+                    ],
+                    [
+                      "Workspace",
+                      selected.organizationId
+                        ? selected.workspaceName
+                        : t("Platform"),
+                    ],
+                    ["Action", selected.action],
+                    ["Time (UTC)", new Date(selected.occurredAt).toISOString()],
+                    ["MCP server", selected.serverName],
+                    ["Tool", selected.tool],
+                    ...Object.entries(selected.metadata),
+                  ]
+                    .filter(
+                      ([, value]) =>
+                        value !== null && value !== undefined && value !== ""
+                    )
+                    .map(([label, value]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">
+                          {t(label)}
+                        </dt>
+                        <dd className="mt-1 text-sm break-all">
+                          {metadataValue(String(label), value)}
+                        </dd>
+                      </div>
+                    ))}
+                </dl>
               </div>
-              <dl className="grid min-w-0 gap-4 sm:grid-cols-2">
-                {[
-                  [
-                    "User",
-                    `${selected.userName}${selected.userEmail ? ` · ${selected.userEmail}` : ""}`,
-                  ],
-                  [
-                    "Workspace",
-                    selected.organizationId
-                      ? selected.workspaceName
-                      : t("Platform"),
-                  ],
-                  ["Action", selected.action],
-                  ["Time (UTC)", new Date(selected.occurredAt).toISOString()],
-                  ["MCP server", selected.serverName],
-                  ["Tool", selected.tool],
-                  ...Object.entries(selected.metadata),
-                ]
-                  .filter(
-                    ([, value]) =>
-                      value !== null && value !== undefined && value !== ""
-                  )
-                  .map(([label, value]) => (
-                    <div key={label} className="min-w-0">
-                      <dt className="text-xs text-muted-foreground">
-                        {t(label)}
-                      </dt>
-                      <dd className="mt-1 text-sm break-all">
-                        {metadataValue(String(label), value)}
-                      </dd>
-                    </div>
-                  ))}
-              </dl>
-            </div>
-          )}
-        </DialogContent>
+            )}
+          </Dialog.Body>
+        </Dialog.Content>
       </Dialog>
     </div>
   )
@@ -1290,12 +1274,12 @@ function AnalyticsTable({
 }) {
   const { t } = useTranslations()
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="min-w-0 overflow-x-auto">
+    <Frame>
+      <Frame.Header>
+        <Frame.Title>{title}</Frame.Title>
+        <Frame.Description>{description}</Frame.Description>
+      </Frame.Header>
+      <Frame.Panel className="min-w-0 overflow-x-auto p-4">
         {empty ? (
           <AnalyticsEmpty text={t("No recorded usage in this period.")} />
         ) : (
@@ -1312,7 +1296,7 @@ function AnalyticsTable({
             <tbody>{children}</tbody>
           </table>
         )}
-      </CardContent>
-    </Card>
+      </Frame.Panel>
+    </Frame>
   )
 }

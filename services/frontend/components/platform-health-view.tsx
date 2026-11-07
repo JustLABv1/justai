@@ -1,11 +1,14 @@
 "use client"
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { Activity, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
 import { Alert } from "@/components/panelui/alert"
 import { Badge } from "@/components/panelui/badge"
 import { Frame } from "@/components/panelui/frame"
+import { Button } from "@/components/panelui/button"
+import { Tabs } from "@/components/panelui/tabs"
+import { Sheet } from "@/components/panelui/sheet"
 import { Spinner } from "@/components/panelui/spinner"
 type HealthState = "healthy" | "warning" | "down" | "unknown"
 
@@ -318,38 +321,7 @@ export function PlatformHealthView({
             </Frame.Panel>
           </Frame>
           {workerDetails.length > 0 && (
-            <details className="mt-3 border-t border-border pt-3">
-              <summary className="cursor-pointer rounded-sm text-xs font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring">
-                {t("Heartbeat diagnostics")}
-              </summary>
-              <div className="mt-3 flex max-h-64 flex-col gap-2 overflow-y-auto">
-                {workerDetails.map((worker: any, index: number) => (
-                  <div
-                    className="flex flex-wrap items-center justify-between gap-2 text-xs"
-                    key={`${worker.name}-${worker.instanceId ?? index}`}
-                  >
-                    <span className="font-medium">
-                      {String(worker.name)
-                        .replace(/[-_]/g, " ")
-                        .replace(/^./, (value) => value.toUpperCase())}
-                      {worker.instanceId
-                        ? ` · ${String(worker.instanceId).slice(0, 8)}`
-                        : ""}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {worker.heartbeatAgeSeconds >= 0
-                        ? t("{value0}s since heartbeat", {
-                            value0: worker.heartbeatAgeSeconds,
-                          })
-                        : worker.started
-                          ? t("Awaiting heartbeat")
-                          : t("Not started")}
-                      {worker.lastError ? ` · ${worker.lastError}` : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </details>
+            <WorkerDiagnostics workers={workerDetails} />
           )}
         </HealthPanel>
       </div>
@@ -373,5 +345,209 @@ export function PlatformHealthView({
         </Alert>
       )}
     </div>
+  )
+}
+
+function WorkerDiagnostics({ workers }: { workers: any[] }) {
+  const { t, locale } = useTranslations()
+  const [open, setOpen] = useState(false)
+  const groups = Array.from(
+    new Set(workers.map((worker) => String(worker.name)))
+  ).sort()
+  const [selectedGroup, setSelectedGroup] = useState("")
+  const group = groups.includes(selectedGroup)
+    ? selectedGroup
+    : (groups[0] ?? "")
+  const visibleWorkers = workers
+    .filter((worker) => String(worker.name) === group)
+    .sort((a, b) => {
+      const ageA =
+        typeof a.heartbeatAgeSeconds === "number" && a.heartbeatAgeSeconds >= 0
+          ? a.heartbeatAgeSeconds
+          : Infinity
+      const ageB =
+        typeof b.heartbeatAgeSeconds === "number" && b.heartbeatAgeSeconds >= 0
+          ? b.heartbeatAgeSeconds
+          : Infinity
+      return ageA - ageB
+    })
+  const groupLabel = (name: string) =>
+    t(
+      name === "agent"
+        ? "Agents"
+        : name === "rag"
+          ? "RAG worker"
+          : name === "transcription"
+            ? "Transcription worker"
+            : name
+                .replace(/[-_]/g, " ")
+                .replace(/^./, (value) => value.toUpperCase())
+    )
+
+  function ageLabel(seconds: unknown) {
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0)
+      return null
+    const [divisor, unit] =
+      seconds >= 86400
+        ? ([86400, "day"] as const)
+        : seconds >= 3600
+          ? ([3600, "hour"] as const)
+          : seconds >= 60
+            ? ([60, "minute"] as const)
+            : ([1, "second"] as const)
+    return new Intl.RelativeTimeFormat(locale, {
+      numeric: "always",
+      style: "long",
+    }).format(-Math.floor(seconds / divisor), unit)
+  }
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-4 w-full"
+        onClick={() => setOpen(true)}
+      >
+        {t("Heartbeat diagnostics")}
+        <span className="ml-auto text-muted-foreground tabular-nums">
+          {workers.length}
+        </span>
+      </Button>
+      <Sheet side="right" open={open} onOpenChange={setOpen}>
+        <Sheet.Content className="w-[min(42rem,calc(100vw-2*var(--sheet-gap)))]!">
+          <Tabs
+            value={group}
+            onValueChange={(value) => value && setSelectedGroup(String(value))}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <Sheet.Header>
+              <Sheet.Title>{t("Heartbeat diagnostics")}</Sheet.Title>
+              <Sheet.Description>
+                {t(
+                  "Worker instances and the time since their last reported heartbeat."
+                )}
+              </Sheet.Description>
+              <Tabs.List aria-label={t("Worker type")} className="mt-3 w-full">
+                {groups.map((name) => (
+                  <Tabs.Trigger key={name} value={name}>
+                    {groupLabel(name)}
+                    <Tabs.Badge>
+                      {
+                        workers.filter((worker) => String(worker.name) === name)
+                          .length
+                      }
+                    </Tabs.Badge>
+                  </Tabs.Trigger>
+                ))}
+              </Tabs.List>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("{healthy} healthy · {unhealthy} need attention", {
+                  healthy: visibleWorkers.filter(
+                    (worker) => worker.healthy === true && !worker.lastError
+                  ).length,
+                  unhealthy: visibleWorkers.filter(
+                    (worker) => worker.healthy === false || worker.lastError
+                  ).length,
+                })}
+              </p>
+            </Sheet.Header>
+            <Sheet.Body key={group}>
+              <Tabs.Content value={group}>
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{groupLabel(group)}</Frame.Title>
+                    <Frame.Action>{visibleWorkers.length}</Frame.Action>
+                  </Frame.Header>
+                  <Frame.Panel>
+                    {visibleWorkers.map((worker, index) => {
+                      const age = ageLabel(worker.heartbeatAgeSeconds)
+                      return (
+                        <Frame.Row
+                          key={`${worker.name}-${worker.instanceId ?? index}`}
+                          className="flex-col items-stretch gap-3 py-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-medium">
+                              {String(worker.name)
+                                .replace(/[-_]/g, " ")
+                                .replace(/^./, (value) => value.toUpperCase())}
+                            </p>
+                            <Badge
+                              variant={
+                                worker.lastError
+                                  ? "destructive"
+                                  : worker.healthy === true
+                                    ? "success"
+                                    : worker.healthy === false
+                                      ? "warning"
+                                      : "secondary"
+                              }
+                            >
+                              {t(
+                                worker.lastError
+                                  ? "Check failed"
+                                  : worker.healthy === true
+                                    ? "Operational"
+                                    : age && worker.healthy === false
+                                      ? "Stale heartbeat"
+                                      : age
+                                        ? "Heartbeat received"
+                                        : worker.started
+                                          ? "Awaiting heartbeat"
+                                          : "Not started"
+                              )}
+                            </Badge>
+                          </div>
+                          {worker.instanceId && (
+                            <p className="font-mono text-xs break-all text-muted-foreground">
+                              {String(worker.instanceId)}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+                            <span className="text-muted-foreground">
+                              {t("Last heartbeat")}
+                            </span>
+                            <span
+                              className="font-medium tabular-nums"
+                              title={
+                                age
+                                  ? t("{value0}s since heartbeat", {
+                                      value0: worker.heartbeatAgeSeconds,
+                                    })
+                                  : undefined
+                              }
+                            >
+                              {age
+                                ? age
+                                : t(
+                                    worker.started
+                                      ? "Awaiting heartbeat"
+                                      : "Not started"
+                                  )}
+                            </span>
+                          </div>
+                          {worker.lastError && (
+                            <Alert tone="destructive" variant="plain">
+                              <Alert.Description className="break-words">
+                                {String(worker.lastError)}
+                              </Alert.Description>
+                            </Alert>
+                          )}
+                        </Frame.Row>
+                      )
+                    })}
+                  </Frame.Panel>
+                </Frame>
+              </Tabs.Content>
+            </Sheet.Body>
+          </Tabs>
+          <Sheet.Footer>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              {t("Close")}
+            </Button>
+          </Sheet.Footer>
+        </Sheet.Content>
+      </Sheet>
+    </>
   )
 }

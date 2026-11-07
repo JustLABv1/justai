@@ -9,7 +9,6 @@ import {
 import { useCallback, useEffect, useState } from "react"
 import {
   Activity,
-  AlertTriangle,
   BarChart3,
   ChevronDown,
   Database,
@@ -49,16 +48,9 @@ import { MCPView } from "@/components/mcp-view"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
 import { Tabs } from "@/components/panelui/tabs"

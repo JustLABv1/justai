@@ -4591,9 +4591,17 @@ export const de = {
   "Manage platform messages and their publishing schedule.":
     "Plattformmeldungen und deren Veröffentlichungszeitplan verwalten.",
   "Message & appearance": "Nachricht und Darstellung",
-  Schedule: "Zeitplan",
   "Times are shown in your local time zone.":
     "Die Zeiten werden in deiner lokalen Zeitzone angezeigt.",
   "Your announcement will appear here.":
     "Deine Ankündigung wird hier angezeigt.",
+  "Worker instances and the time since their last reported heartbeat.":
+    "Worker-Instanzen und die Zeit seit ihrem letzten gemeldeten Heartbeat.",
+  "Worker instances": "Worker-Instanzen",
+  "Heartbeat received": "Heartbeat empfangen",
+  "Last heartbeat": "Letzter Heartbeat",
+  "Worker type": "Worker-Typ",
+  "{healthy} healthy \u00b7 {unhealthy} need attention":
+    "{healthy} funktionsfähig · {unhealthy} mit Handlungsbedarf",
+  "Stale heartbeat": "Heartbeat veraltet",
 } as const
