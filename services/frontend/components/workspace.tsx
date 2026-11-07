@@ -1259,6 +1259,7 @@ export function Workspace({
           >
             {activeView === "chat" && (
               <ChatView
+                displayName={user.displayName}
                 key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
                 // The picker is now fed by the canonical agent catalog. The
                 // compatibility assistant list remains available to the

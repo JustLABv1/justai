@@ -1,5 +1,10 @@
 "use client"
 
+import {
+  getWelcomeGreeting,
+  getServerWelcomeGreeting,
+  subscribeToWelcomeGreeting,
+} from "@/lib/welcome-greeting"
 import { useTranslations } from "@/components/locale-provider"
 import {
   useCallback,
@@ -136,6 +141,7 @@ type EnsureConversationOptions = {
 }
 
 type Props = {
+  displayName?: string
   conversationId: string | null
   cacheScope: string
   conversation?: Conversation
@@ -1929,16 +1935,29 @@ function FollowStreamingResponse() {
   return null
 }
 
-function EmptyThread({ children }: { children?: ReactNode }) {
+function EmptyThread({
+  children,
+  displayName,
+}: {
+  children?: ReactNode
+  displayName?: string
+}) {
+  const { t } = useTranslations()
+  const greeting = useSyncExternalStore(
+    subscribeToWelcomeGreeting,
+    getWelcomeGreeting,
+    getServerWelcomeGreeting
+  )
+  const firstName = displayName?.trim().split(/\s+/)[0]
   return (
     <ThreadPrimitive.Empty>
       <div className="relative flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
         <ChatAmbient />
         <div className="z-10 flex w-full max-w-3xl flex-col items-center">
-          <div className="mb-3 flex w-full items-center justify-center gap-3">
-            <ChatBrandMark className="size-12" />
+          <div className="mb-3 grid w-full grid-cols-[3rem_minmax(0,auto)_3rem] items-center justify-center gap-3">
+            <ChatBrandMark className="size-12 shrink-0" />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
-              JustAI
+              {firstName ? t(greeting, { name: firstName }) : t("Hello there")}
             </span>
           </div>
           {children}
@@ -3266,12 +3285,14 @@ function Composer({
 }
 
 type AssistantThreadLayoutProps = {
+  displayName?: string
   composerProps: Parameters<typeof Composer>[0]
   voiceError?: string | null
   onVoiceErrorClear?: () => void
 }
 
 function AssistantThreadLayout({
+  displayName,
   composerProps,
   voiceError,
   onVoiceErrorClear,
@@ -3320,7 +3341,7 @@ function AssistantThreadLayout({
         >
           <FollowStreamingResponse />
           <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
-            <EmptyThread>
+            <EmptyThread displayName={displayName}>
               {isEmpty && <div className="mt-2 w-full">{composer}</div>}
             </EmptyThread>
             {!isEmpty && (
@@ -3359,6 +3380,7 @@ function AssistantThreadLayout({
 }
 
 function AssistantChatSurface({
+  displayName,
   conversationId,
   cacheScope,
   conversationAssistantId,
@@ -3386,6 +3408,7 @@ function AssistantChatSurface({
   onAssistantSelectionChange,
   conversationContext,
 }: {
+  displayName?: string
   conversationId: string | null
   cacheScope: string
   conversationAssistantId?: string | null
@@ -3895,6 +3918,7 @@ function AssistantChatSurface({
   return (
     <AssistantRuntimeProvider runtime={runtime} config={assistantConfig}>
       <AssistantThreadLayout
+        displayName={displayName}
         composerProps={{
           assistants,
           assistantId: selectedAssistantId,
@@ -3938,6 +3962,7 @@ function AssistantChatSurface({
 }
 
 export function ChatView({
+  displayName,
   conversationId,
   cacheScope,
   conversation,
@@ -4525,6 +4550,7 @@ export function ChatView({
             className="chat-surface-enter flex min-h-0 flex-1 flex-col"
           >
             <AssistantChatSurface
+              displayName={displayName}
               activeEndpoint={activeEndpoint}
               assistants={assistants}
               cacheScope={cacheScope}

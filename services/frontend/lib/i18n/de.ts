@@ -4620,4 +4620,13 @@ export const de = {
   "No model preference yet": "Noch kein bevorzugtes Modell",
   "Choose the language used throughout JustAI.":
     "Wähle die Sprache für die gesamte JustAI-Oberfläche.",
+  "Hello, {name}": "Hallo, {name}",
+  "Hello there": "Hallo",
+  "Welcome back, {name}": "Willkommen zurück, {name}",
+  "What shall we work on, {name}?": "Was gehen wir heute an, {name}?",
+  "What’s on your mind, {name}?": "Was beschäftigt dich, {name}?",
+  "Ready for your next idea, {name}?": "Bereit für deine nächste Idee, {name}?",
+  "Good morning, {name}": "Guten Morgen, {name}",
+  "Good afternoon, {name}": "Guten Tag, {name}",
+  "Good evening, {name}": "Guten Abend, {name}",
 } as const
