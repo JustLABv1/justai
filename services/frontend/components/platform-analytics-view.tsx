@@ -334,7 +334,11 @@ export function PlatformAnalyticsView({
                 }
               }}
             >
-              <SelectTrigger size="sm" aria-label={t("Date range")}>
+              <SelectTrigger
+                size="sm"
+                className="w-44 max-w-full"
+                aria-label={t("Date range")}
+              >
                 <SelectValue>{rangeLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
