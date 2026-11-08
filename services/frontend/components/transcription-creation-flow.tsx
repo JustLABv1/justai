@@ -1,17 +1,8 @@
 "use client"
 
 import { useLayoutEffect, useRef, type ReactNode } from "react"
-import { Check } from "lucide-react"
 import { Card } from "@/components/panelui/card"
-import {
-  Stepper,
-  StepperIndicator,
-  StepperItem,
-  StepperNav,
-  StepperSeparator,
-  StepperTitle,
-  StepperTrigger,
-} from "@/components/reui/stepper"
+import { Steps } from "@/components/panelui/steps"
 
 type CreationStep = { label: string; description?: string }
 
@@ -80,33 +71,21 @@ export function TranscriptionCreationFlow({
         <p className="max-w-xl text-sm text-muted-foreground">{description}</p>
       </header>
       <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col gap-6">
-        <Stepper
-          className="w-full"
-          indicators={{
-            completed: <Check aria-hidden="true" className="size-3.5" />,
-          }}
-          onValueChange={(value) => onStepChange(value - 1)}
-          value={step + 1}
+        <Steps
+          aria-label={`${title} steps`}
+          onValueChange={onStepChange}
+          role="group"
+          value={step}
         >
-          <StepperNav aria-label={`${title} steps`}>
-            {steps.map((item, index) => (
-              <StepperItem
-                className="relative flex-1"
-                disabled={busy || index > step}
-                key={item.label}
-                step={index + 1}
-              >
-                <StepperTrigger className="flex justify-start gap-2">
-                  <StepperIndicator>{index + 1}</StepperIndicator>
-                  <StepperTitle>{item.label}</StepperTitle>
-                </StepperTrigger>
-                {index < steps.length - 1 && (
-                  <StepperSeparator className="group-data-[state=completed]/step:bg-primary md:mx-2.5" />
-                )}
-              </StepperItem>
-            ))}
-          </StepperNav>
-        </Stepper>
+          {steps.map((item, index) => (
+            <Steps.Item disabled={busy} key={item.label} step={index}>
+              <Steps.Trigger>
+                <Steps.Indicator />
+                <Steps.Title>{item.label}</Steps.Title>
+              </Steps.Trigger>
+            </Steps.Item>
+          ))}
+        </Steps>
         <Card className="min-w-0 p-5 sm:p-6">
           <div
             ref={panel}
