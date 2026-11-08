@@ -21,7 +21,6 @@ import {
   LogOut,
   MessageSquare,
   MonitorSmartphone,
-  NotebookPen,
   Pencil,
   ShieldCheck,
   Trash2,
@@ -51,6 +50,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/panelui/card"
@@ -469,37 +469,49 @@ export function ProfileView({
     }
   }
 
-  const statCards = profile
+  const metricGroups = profile
     ? [
         {
-          label: t("Current streak"),
-          value: `${profile.stats.currentStreak ?? streak} ${(profile.stats.currentStreak ?? streak) === 1 ? t("day") : t("days")}`,
+          title: t("Consistency"),
           icon: Flame,
+          metrics: [
+            {
+              label: t("Current streak"),
+              value: `${profile.stats.currentStreak ?? streak} ${(profile.stats.currentStreak ?? streak) === 1 ? t("day") : t("days")}`,
+            },
+            {
+              label: t("Longest streak"),
+              value: `${profile.stats.longestStreak ?? streak} ${(profile.stats.longestStreak ?? streak) === 1 ? t("day") : t("days")}`,
+            },
+          ],
         },
         {
-          label: t("Longest streak"),
-          value: `${profile.stats.longestStreak ?? streak} ${(profile.stats.longestStreak ?? streak) === 1 ? t("day") : t("days")}`,
-          icon: Flame,
-        },
-        {
-          label: t("Prompts sent"),
-          value: profile.stats.prompts.toLocaleString(locale),
+          title: t("Conversations"),
           icon: MessageSquare,
+          metrics: [
+            {
+              label: t("conversations"),
+              value: profile.stats.conversations.toLocaleString(locale),
+            },
+            {
+              label: t("Prompts sent"),
+              value: profile.stats.prompts.toLocaleString(locale),
+            },
+          ],
         },
         {
-          label: t("Agent runs"),
-          value: profile.stats.agentRuns.toLocaleString(locale),
+          title: t("Capture & agents"),
           icon: Bot,
-        },
-        {
-          label: t("conversations"),
-          value: profile.stats.conversations.toLocaleString(locale),
-          icon: MessageSquare,
-        },
-        {
-          label: t("minutes captured"),
-          value: profile.stats.transcriptionMinutes.toLocaleString(locale),
-          icon: NotebookPen,
+          metrics: [
+            {
+              label: t("minutes captured"),
+              value: profile.stats.transcriptionMinutes.toLocaleString(locale),
+            },
+            {
+              label: t("Agent runs"),
+              value: profile.stats.agentRuns.toLocaleString(locale),
+            },
+          ],
         },
       ]
     : []
@@ -713,28 +725,44 @@ export function ProfileView({
             title={t("At a glance")}
             description={t("A few signals from your work across JustAI.")}
           >
-            {profile ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {statCards.map(({ label, value }) => (
-                  <Card size="sm" key={label}>
-                    <CardContent>
-                      <Stat>
-                        <Stat.Content>
-                          <Stat.Label>{label}</Stat.Label>
-                          <Stat.Value size="sm">{value}</Stat.Value>
-                        </Stat.Content>
-                      </Stat>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 6 }, (_, index) => (
-                  <Skeleton className="h-24 rounded-2xl" key={index} />
-                ))}
-              </div>
-            )}
+            <Card size="sm">
+              <CardContent className="grid divide-y p-0! lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+                {profile
+                  ? metricGroups.map(({ title, icon: Icon, metrics }) => (
+                      <section
+                        key={title}
+                        className="min-w-0 p-5"
+                        aria-label={title}
+                      >
+                        <h3 className="mb-4 flex items-center gap-2 text-sm font-medium">
+                          <Icon
+                            aria-hidden="true"
+                            className="size-4 text-muted-foreground"
+                          />
+                          {title}
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          {metrics.map(({ label, value }) => (
+                            <Stat key={label}>
+                              <Stat.Content>
+                                <Stat.Label className="text-xs">
+                                  {label}
+                                </Stat.Label>
+                                <Stat.Value size="sm">{value}</Stat.Value>
+                              </Stat.Content>
+                            </Stat>
+                          ))}
+                        </div>
+                      </section>
+                    ))
+                  : Array.from({ length: 3 }, (_, index) => (
+                      <div key={index} className="p-5">
+                        <Skeleton className="mb-4 h-4 w-24" />
+                        <Skeleton className="h-12" />
+                      </div>
+                    ))}
+              </CardContent>
+            </Card>
           </PageSection>
           {profile && (
             <div className="flex flex-col gap-4">
@@ -839,86 +867,102 @@ export function ProfileView({
             )}
           >
             <div className="grid items-start gap-3 lg:grid-cols-2">
-              <Frame className="h-full">
-                <Frame.Header>
-                  <Frame.Title>{t("Sessions and devices")}</Frame.Title>
-                  <Frame.Description>
+              <Card size="sm" className="h-full">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle>{t("Sessions and devices")}</CardTitle>
+                    {!accountLoading && (
+                      <Badge variant="secondary">
+                        {sessions.length.toLocaleString(locale)}
+                      </Badge>
+                    )}
+                  </div>
+                  <CardDescription>
                     {t("Review devices with access to your account.")}
-                  </Frame.Description>
-                </Frame.Header>
-                <Frame.Panel className="px-4 pb-4">
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
                   {accountLoading ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Skeleton className="size-8 rounded-full" />{" "}
-                      {t("Loading sessions…")}
+                    <div className="flex items-center gap-3 py-2">
+                      <Skeleton className="size-10 rounded-xl" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-44" />
+                      </div>
                     </div>
                   ) : sessions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="py-2 text-sm text-muted-foreground">
                       {t("No active sessions found.")}
                     </p>
                   ) : (
-                    <div className="divide-y rounded-xl bg-muted/30">
-                      {sessions.map((session) => (
-                        <div
-                          className="flex flex-wrap items-center gap-3 p-3"
-                          key={session.id}
-                        >
-                          <span className="flex size-8 items-center justify-center rounded-full bg-background text-muted-foreground">
-                            <MonitorSmartphone aria-hidden="true" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">
-                              {t(deviceLabel(session.userAgent))}
-                              {session.current && (
-                                <Badge
-                                  className="ml-2 align-middle"
-                                  variant="secondary"
-                                >
-                                  {t("This device")}
-                                </Badge>
-                              )}
-                            </p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {t("Last active")}{" "}
-                              {dayFormatter.format(
-                                new Date(session.lastSeenAt)
-                              )}
-                            </p>
-                          </div>
-                          {!session.current && (
+                    <ul className="divide-y divide-border">
+                      {[...sessions]
+                        .sort((a, b) => Number(b.current) - Number(a.current))
+                        .map((session) => (
+                          <li
+                            key={session.id}
+                            className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
+                          >
+                            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                              <MonitorSmartphone
+                                aria-hidden="true"
+                                className="size-5"
+                              />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <p className="text-sm font-medium">
+                                  {t(deviceLabel(session.userAgent))}
+                                </p>
+                                {session.current && (
+                                  <Badge
+                                    variant="outline"
+                                    className="h-5 text-[11px]"
+                                  >
+                                    {t("This device")}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {t("Last active")}{" "}
+                                {dayFormatter.format(
+                                  new Date(session.lastSeenAt)
+                                )}
+                              </p>
+                            </div>
                             <Button
                               disabled={busy}
-                              onClick={() => void revokeSession(session)}
+                              onClick={() =>
+                                session.current
+                                  ? void logout()
+                                  : void revokeSession(session)
+                              }
                               size="sm"
                               variant="ghost"
+                              className="shrink-0"
                             >
+                              <LogOut aria-hidden="true" className="size-3.5" />
                               {t("Sign out")}
                             </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                          </li>
+                        ))}
+                    </ul>
                   )}
-                </Frame.Panel>
-                <Frame.Footer className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <Button
-                    onClick={() => void logout()}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    <LogOut data-icon="inline-start" />
-                    {t("Sign out")}
-                  </Button>
-                  <Button
-                    disabled={busy || accountLoading || sessions.length < 2}
-                    onClick={() => void revokeOtherSessions()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {t("Sign out other devices")}
-                  </Button>
-                </Frame.Footer>
-              </Frame>
+                </CardContent>
+                {!accountLoading &&
+                  sessions.some((session) => !session.current) && (
+                    <CardFooter className="justify-end border-t pt-3">
+                      <Button
+                        disabled={busy}
+                        onClick={() => void revokeOtherSessions()}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {t("Sign out other devices")}
+                      </Button>
+                    </CardFooter>
+                  )}
+              </Card>
               <Card className="h-full" size="sm">
                 <CardHeader>
                   <CardTitle>{t("Linked sign-in methods")}</CardTitle>

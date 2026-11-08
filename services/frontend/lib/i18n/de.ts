@@ -1,5 +1,7 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  Consistency: "Regelmäßigkeit",
+  "Capture & agents": "Aufnahmen & Agenten",
   Account: "Konto",
   "Profile sections": "Profilbereiche",
   "{value0} active days out of {value1}": "{value0} aktive Tage von {value1}",
