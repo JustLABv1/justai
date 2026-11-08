@@ -4,4 +4,4 @@ Start: `index.html` (kompakte Übersicht), `overview.png` (teilbare Bildübersic
 
 `masters/`: editierbare SVG-Originale, alle Buchstaben als Pfade. `digital/`: Exportvarianten, transparente PNGs und Web-/App-Icons. SVG ist das maßgebliche Vektorformat.
 
-Dieses Kit ist eine Designlieferung. Die bestehenden Logo-Komponenten und öffentlichen Assets des Produkts wurden nicht ersetzt.
+Die Markenfarben entsprechen dem Frontend: #1764EF im hellen Modus und #2675FF im dunklen Modus. Die öffentlichen SVGs, README-Logos und App-Icons verwenden dieselbe Farbpalette.
