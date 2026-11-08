@@ -1,5 +1,11 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  Account: "Konto",
+  "Profile sections": "Profilbereiche",
+  "{value0} active days out of {value1}": "{value0} aktive Tage von {value1}",
+  "actions in the last 90 days": "Aktionen in den letzten 90 Tagen",
+  "Select a day to see its activity.":
+    "Wähle einen Tag, um seine Aktivität anzusehen.",
   "LiteLLM API key": "LiteLLM-API-Schlüssel",
   "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.":
     "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",

@@ -24,7 +24,6 @@ import {
   NotebookPen,
   Pencil,
   ShieldCheck,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react"
@@ -38,12 +37,10 @@ import type {
   ProfileData,
   User,
 } from "@/lib/types"
+import { Tabs } from "@/components/panelui/tabs"
 import { Frame } from "@/components/panelui/frame"
-import {
-  HeatmapChart,
-  buildHeatmapCalendar,
-  type HeatmapCell,
-} from "@/components/panelui/heatmap-chart"
+import { DayGrid } from "@/components/panelui/day-grid"
+import { buildProfileDays } from "@/lib/profile-day-grid"
 import { toast as profileToasts } from "@/components/ui/toast"
 import { Avatar } from "@/components/panelui/avatar"
 import { Stat } from "@/components/panelui/stat"
@@ -107,74 +104,100 @@ function deviceLabel(userAgent: string) {
   return userAgent || "Unknown device"
 }
 
-function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
+function ProfileActivityGrid({
+  activity,
+}: {
+  activity: ProfileData["activity"]
+}) {
   const { t, locale } = useTranslations()
-  const calendar = useMemo(() => {
-    const end = new Date()
-    end.setHours(12, 0, 0, 0)
-    const start = new Date(end)
-    start.setDate(start.getDate() - 364)
-    return buildHeatmapCalendar(
-      activity.map((day) => ({
-        date: new Date(`${day.date}T12:00:00`),
-        count: day.count,
-      })),
-      { start, end, weekStartDay: 1 }
-    )
-  }, [activity])
-  const formatCell = (cell: HeatmapCell) =>
-    cell.date
-      ? t("{value0} actions on {value1}", {
-          value0: cell.count,
-          value1: cell.date.toLocaleDateString(locale, {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          }),
-        })
-      : ""
+  const calendar = useMemo(() => buildProfileDays(activity), [activity])
+  const [selected, setSelected] = useState(89)
+  const day = calendar.days[selected]
+  const formatDate = (date: Date) =>
+    date.toLocaleDateString(locale, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })
+  const cells = calendar.days.map((day) => ({
+    level: day.level,
+    label: t("{value0} actions on {value1}", {
+      value0: day.count.toLocaleString(locale),
+      value1: formatDate(day.date),
+    }),
+  }))
+  const total = calendar.days.reduce((sum, day) => sum + day.count, 0)
+  const active = calendar.days.filter((day) => day.count > 0).length
   return (
     <Frame variant="band">
       <Frame.Header>
-        <Frame.Title>{t("Your year in JustAI")}</Frame.Title>
-        <Frame.Description>
-          {activity
-            .reduce((sum, day) => sum + day.count, 0)
-            .toLocaleString(locale)}{" "}
-          {t("actions across the last 365 days")}
-        </Frame.Description>
+        <Frame.Title>{t("Activity rhythm")}</Frame.Title>
+        <Frame.Description>{t("Last 90 days")}</Frame.Description>
         <Frame.Action>
           <Badge variant="secondary">
-            {activity.filter((day) => day.count > 0).length} {t("active days")}
+            {active} {t("active days")}
           </Badge>
         </Frame.Action>
       </Frame.Header>
-      <Frame.Panel className="p-4">
-        <div className="overflow-x-auto">
-          <HeatmapChart
-            data={calendar}
-            weekStartDay={1}
-            color="primary"
-            label={t("Activity over the last year")}
-            formatCellLabel={formatCell}
-            animationDuration={0}
-          >
-            <HeatmapChart.XAxis
-              formatLabel={(date) =>
-                date.toLocaleDateString(locale, { month: "short" })
-              }
+      <Frame.Panel className="p-4 sm:p-5">
+        <div className="grid items-center gap-6 sm:grid-cols-[minmax(0,22rem)_1fr] sm:gap-8">
+          <div className="min-w-0">
+            <div className="flex gap-3">
+              <DayGrid.Weekdays
+                labels={Array.from({ length: 7 }, (_, index) =>
+                  new Date(2026, 0, 5 + index).toLocaleDateString(locale, {
+                    weekday: "short",
+                  })
+                )}
+              />
+              <DayGrid
+                cells={cells}
+                rows={7}
+                offset={calendar.offset}
+                value={selected}
+                onValueChange={setSelected}
+                color="primary"
+                label={t("Last 90 days")}
+                summary={({ active, total }) =>
+                  t("{value0} active days out of {value1}", {
+                    value0: active,
+                    value1: total,
+                  })
+                }
+              />
+            </div>
+            <div className="mt-3 flex justify-between gap-2 text-xs text-muted-foreground">
+              <span>{formatDate(calendar.days[0].date)}</span>
+              <span>{formatDate(calendar.days[89].date)}</span>
+            </div>
+            <DayGrid.Legend
+              className="mt-4"
+              color="primary"
+              less={t("Less")}
+              more={t("More")}
             />
-            <HeatmapChart.YAxis
-              labels={Array.from({ length: 7 }, (_, index) =>
-                new Date(2026, 0, 5 + index).toLocaleDateString(locale, {
-                  weekday: "short",
-                })
-              )}
-            />
-            <HeatmapChart.Cells />
-            <HeatmapChart.Tooltip formatLabel={formatCell} />
-            <HeatmapChart.Legend lessLabel={t("Less")} moreLabel={t("More")} />
-          </HeatmapChart>
+          </div>
+          <div className="flex flex-col gap-5">
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">
+                {total.toLocaleString(locale)}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {t("actions in the last 90 days")}
+              </p>
+            </div>
+            <DayGrid.Caption>
+              <DayGrid.Title>
+                {t("{value0} actions on {value1}", {
+                  value0: day.count.toLocaleString(locale),
+                  value1: formatDate(day.date),
+                })}
+              </DayGrid.Title>
+              <DayGrid.Description>
+                {t("Select a day to see its activity.")}
+              </DayGrid.Description>
+            </DayGrid.Caption>
+          </div>
         </div>
       </Frame.Panel>
     </Frame>
@@ -469,18 +492,14 @@ export function ProfileView({
           icon: Bot,
         },
         {
-          label: t("Productive weekday"),
-          value: t(profile.stats.productiveWeekday || "—"),
-          icon: NotebookPen,
+          label: t("conversations"),
+          value: profile.stats.conversations.toLocaleString(locale),
+          icon: MessageSquare,
         },
         {
-          label: t("Last 30 days"),
-          value:
-            profile.stats.previous30DaysActions &&
-            profile.stats.previous30DaysActions > 0
-              ? `${Math.round(((profile.stats.last30DaysActions ?? 0) / profile.stats.previous30DaysActions - 1) * 100)}%`
-              : `${(profile.stats.last30DaysActions ?? 0).toLocaleString(locale)} actions`,
-          icon: Sparkles,
+          label: t("minutes captured"),
+          value: profile.stats.transcriptionMinutes.toLocaleString(locale),
+          icon: NotebookPen,
         },
       ]
     : []
@@ -499,7 +518,7 @@ export function ProfileView({
         <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
           <div className="relative self-start">
             <Avatar
-              className="size-20!"
+              className="size-16!"
               name={user.displayName}
               src={avatarSrc ? resolveAPIURL(avatarSrc) : undefined}
             />
@@ -620,42 +639,6 @@ export function ProfileView({
           </div>
         </CardContent>
       </Card>
-      <Frame>
-        <Frame.Panel>
-          <Frame.Row className="flex-wrap gap-3">
-            <Frame.Content>
-              <Frame.Title as="p">{t("Language")}</Frame.Title>
-              <Frame.Description>
-                {t("Choose the language used throughout JustAI.")}
-              </Frame.Description>
-            </Frame.Content>
-            <Frame.Actions>
-              <Select
-                value={locale}
-                onValueChange={(value) => {
-                  if (value === "de" || value === "en") setLocale(value)
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-40"
-                  aria-label={t("Choose language")}
-                >
-                  <SelectValue>
-                    {locale === "de" ? "Deutsch" : "English"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="de">Deutsch</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Frame.Actions>
-          </Frame.Row>
-        </Frame.Panel>
-      </Frame>
       <Dialog
         open={Boolean(pendingAvatar)}
         onOpenChange={(open) => {
@@ -714,240 +697,274 @@ export function ProfileView({
         pending={busy}
         title={t("Remove profile picture?")}
       />
-      <PageSection
-        title={t("At a glance")}
-        description={t("A few signals from your work across JustAI.")}
-      >
-        {profile ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {statCards.map(({ label, value }) => (
-              <Card size="sm" key={label}>
-                <CardContent>
-                  <Stat>
-                    <Stat.Content>
-                      <Stat.Label>{label}</Stat.Label>
-                      <Stat.Value size="sm">{value}</Stat.Value>
-                    </Stat.Content>
-                  </Stat>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }, (_, index) => (
-              <Skeleton className="h-24 rounded-2xl" key={index} />
-            ))}
-          </div>
-        )}
-      </PageSection>
-      <ProfileUsageSection />
-      {profile ? (
-        <ActivityHeatmap activity={profile.activity} />
-      ) : (
-        <Skeleton className="h-56 rounded-2xl" />
-      )}
-      {profile && (
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              {
-                label: t("conversations"),
-                value: profile.stats.conversations,
-                description: t("Threads you have started and shaped."),
-              },
-              {
-                label: t("minutes captured"),
-                value: profile.stats.transcriptionMinutes,
-                description: t("Time turned into searchable transcripts."),
-              },
-              {
-                label: t("active days"),
-                value: profile.activity.filter((day) => day.count > 0).length,
-                description: t("Days you made something happen this year."),
-              },
-            ].map((item) => (
-              <Frame variant="band" key={item.label}>
-                <Frame.Panel className="flex h-full flex-col gap-3 p-4">
-                  <Stat>
-                    <Stat.Content>
-                      <Stat.Label>{item.label}</Stat.Label>
-                      <Stat.Value size="lg">
-                        {item.value.toLocaleString(locale)}
-                      </Stat.Value>
-                    </Stat.Content>
-                  </Stat>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {item.description}
-                  </p>
+      <Tabs defaultValue="activity" className="gap-5">
+        <Tabs.List aria-label={t("Profile sections")}>
+          <Tabs.Trigger value="activity">{t("Activity")}</Tabs.Trigger>
+          <Tabs.Trigger value="usage">{t("Usage")}</Tabs.Trigger>
+          <Tabs.Trigger value="account">{t("Account")}</Tabs.Trigger>
+        </Tabs.List>
+        <Tabs.Content value="activity" className="flex flex-col gap-5">
+          {profile ? (
+            <ProfileActivityGrid activity={profile.activity} />
+          ) : (
+            <Skeleton className="h-56 rounded-2xl" />
+          )}
+          <PageSection
+            title={t("At a glance")}
+            description={t("A few signals from your work across JustAI.")}
+          >
+            {profile ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {statCards.map(({ label, value }) => (
+                  <Card size="sm" key={label}>
+                    <CardContent>
+                      <Stat>
+                        <Stat.Content>
+                          <Stat.Label>{label}</Stat.Label>
+                          <Stat.Value size="sm">{value}</Stat.Value>
+                        </Stat.Content>
+                      </Stat>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <Skeleton className="h-24 rounded-2xl" key={index} />
+                ))}
+              </div>
+            )}
+          </PageSection>
+          {profile && (
+            <div className="flex flex-col gap-4">
+              <Frame>
+                <Frame.Panel>
+                  {[
+                    {
+                      label: t("Favorite agent"),
+                      value:
+                        profile.stats.favoriteAgent ||
+                        t("No favorite agent yet"),
+                      description: t("Most-used saved agent by conversation."),
+                    },
+                    {
+                      label: t("Favorite model"),
+                      value:
+                        profile.stats.favoriteModel ||
+                        t("No model preference yet"),
+                      description: t(
+                        "Model used most often in completed runs."
+                      ),
+                    },
+                    {
+                      label: t("Productive weekday"),
+                      value: t(profile.stats.productiveWeekday || "—"),
+                      description: "",
+                    },
+                    {
+                      label: t("Milestones"),
+                      value: profile.stats.milestones?.length
+                        ? profile.stats.milestones.join(" · ")
+                        : t("First milestone ahead"),
+                      description: t(
+                        "Milestones based on your activity this year."
+                      ),
+                    },
+                  ].map((item) => (
+                    <Frame.Row
+                      key={item.label}
+                      className="flex-wrap gap-y-2 py-4"
+                    >
+                      <Frame.Content>
+                        <Frame.Title as="p">{item.label}</Frame.Title>
+                        <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                          {item.description}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <p className="max-w-full text-sm font-medium break-words sm:max-w-[50%]">
+                        {item.value}
+                      </p>
+                    </Frame.Row>
+                  ))}
                 </Frame.Panel>
               </Frame>
-            ))}
-          </div>
+            </div>
+          )}
+        </Tabs.Content>
+        <Tabs.Content value="usage" className="flex flex-col gap-5">
+          <ProfileUsageSection />
+        </Tabs.Content>
+        <Tabs.Content value="account" className="flex flex-col gap-5">
           <Frame>
             <Frame.Panel>
-              {[
-                {
-                  label: t("Favorite agent"),
-                  value:
-                    profile.stats.favoriteAgent || t("No favorite agent yet"),
-                  description: t("Most-used saved agent by conversation."),
-                },
-                {
-                  label: t("Favorite model"),
-                  value:
-                    profile.stats.favoriteModel || t("No model preference yet"),
-                  description: t("Model used most often in completed runs."),
-                },
-                {
-                  label: t("Milestones"),
-                  value: profile.stats.milestones?.length
-                    ? profile.stats.milestones.join(" · ")
-                    : t("First milestone ahead"),
-                  description: t(
-                    "Milestones based on your activity this year."
-                  ),
-                },
-              ].map((item) => (
-                <Frame.Row key={item.label} className="flex-wrap gap-y-2 py-4">
-                  <Frame.Content>
-                    <Frame.Title as="p">{item.label}</Frame.Title>
-                    <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
-                      {item.description}
-                    </Frame.Description>
-                  </Frame.Content>
-                  <p className="max-w-full text-sm font-medium break-words sm:max-w-[50%]">
-                    {item.value}
-                  </p>
-                </Frame.Row>
-              ))}
+              <Frame.Row className="flex-wrap gap-3">
+                <Frame.Content>
+                  <Frame.Title as="p">{t("Language")}</Frame.Title>
+                  <Frame.Description>
+                    {t("Choose the language used throughout JustAI.")}
+                  </Frame.Description>
+                </Frame.Content>
+                <Frame.Actions>
+                  <Select
+                    value={locale}
+                    onValueChange={(value) => {
+                      if (value === "de" || value === "en") setLocale(value)
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-40"
+                      aria-label={t("Choose language")}
+                    >
+                      <SelectValue>
+                        {locale === "de" ? "Deutsch" : "English"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="de">Deutsch</SelectItem>
+                        <SelectItem value="en">English</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Frame.Actions>
+              </Frame.Row>
             </Frame.Panel>
           </Frame>
-        </div>
-      )}
-      <PageSection
-        title={t("Account security")}
-        description={t(
-          "Manage your active devices and connected sign-in methods."
-        )}
-      >
-        <div className="grid items-start gap-3 lg:grid-cols-2">
-          <Frame className="h-full">
-            <Frame.Header>
-              <Frame.Title>{t("Sessions and devices")}</Frame.Title>
-              <Frame.Description>
-                {t("Review devices with access to your account.")}
-              </Frame.Description>
-            </Frame.Header>
-            <Frame.Panel className="px-4 pb-4">
-              {accountLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Skeleton className="size-8 rounded-full" />{" "}
-                  {t("Loading sessions…")}
-                </div>
-              ) : sessions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {t("No active sessions found.")}
-                </p>
-              ) : (
-                <div className="divide-y rounded-xl bg-muted/30">
-                  {sessions.map((session) => (
-                    <div
-                      className="flex flex-wrap items-center gap-3 p-3"
-                      key={session.id}
-                    >
-                      <span className="flex size-8 items-center justify-center rounded-full bg-background text-muted-foreground">
-                        <MonitorSmartphone aria-hidden="true" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {t(deviceLabel(session.userAgent))}
-                          {session.current && (
-                            <Badge
-                              className="ml-2 align-middle"
-                              variant="secondary"
-                            >
-                              {t("This device")}
-                            </Badge>
-                          )}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {t("Last active")}{" "}
-                          {dayFormatter.format(new Date(session.lastSeenAt))}
-                        </p>
-                      </div>
-                      {!session.current && (
-                        <Button
-                          disabled={busy}
-                          onClick={() => void revokeSession(session)}
-                          size="sm"
-                          variant="ghost"
+          <PageSection
+            title={t("Account security")}
+            description={t(
+              "Manage your active devices and connected sign-in methods."
+            )}
+          >
+            <div className="grid items-start gap-3 lg:grid-cols-2">
+              <Frame className="h-full">
+                <Frame.Header>
+                  <Frame.Title>{t("Sessions and devices")}</Frame.Title>
+                  <Frame.Description>
+                    {t("Review devices with access to your account.")}
+                  </Frame.Description>
+                </Frame.Header>
+                <Frame.Panel className="px-4 pb-4">
+                  {accountLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Skeleton className="size-8 rounded-full" />{" "}
+                      {t("Loading sessions…")}
+                    </div>
+                  ) : sessions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t("No active sessions found.")}
+                    </p>
+                  ) : (
+                    <div className="divide-y rounded-xl bg-muted/30">
+                      {sessions.map((session) => (
+                        <div
+                          className="flex flex-wrap items-center gap-3 p-3"
+                          key={session.id}
                         >
-                          {t("Sign out")}
-                        </Button>
-                      )}
+                          <span className="flex size-8 items-center justify-center rounded-full bg-background text-muted-foreground">
+                            <MonitorSmartphone aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {t(deviceLabel(session.userAgent))}
+                              {session.current && (
+                                <Badge
+                                  className="ml-2 align-middle"
+                                  variant="secondary"
+                                >
+                                  {t("This device")}
+                                </Badge>
+                              )}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {t("Last active")}{" "}
+                              {dayFormatter.format(
+                                new Date(session.lastSeenAt)
+                              )}
+                            </p>
+                          </div>
+                          {!session.current && (
+                            <Button
+                              disabled={busy}
+                              onClick={() => void revokeSession(session)}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              {t("Sign out")}
+                            </Button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-            </Frame.Panel>
-            <Frame.Footer className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button onClick={() => void logout()} size="sm" variant="ghost">
-                <LogOut data-icon="inline-start" />
-                {t("Sign out")}
-              </Button>
-              <Button
-                disabled={busy || accountLoading || sessions.length < 2}
-                onClick={() => void revokeOtherSessions()}
-                size="sm"
-                variant="outline"
-              >
-                {t("Sign out other devices")}
-              </Button>
-            </Frame.Footer>
-          </Frame>
-          <Card className="h-full" size="sm">
-            <CardHeader>
-              <CardTitle>{t("Linked sign-in methods")}</CardTitle>
-              <CardDescription>
-                {t("Identity providers connected to your account.")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {accountLoading ? (
-                <Skeleton className="h-12 rounded-xl" />
-              ) : identities.length === 0 ? (
-                <div className="flex items-center gap-3 rounded-xl bg-muted/30 p-3 text-sm text-muted-foreground">
-                  <KeyRound aria-hidden="true" />
-                  {t("No external identity providers are linked.")}
-                </div>
-              ) : (
-                <div className="divide-y rounded-xl bg-muted/30">
-                  {identities.map((identity) => (
-                    <div
-                      className="flex items-center gap-3 p-3"
-                      key={`${identity.provider}-${identity.createdAt}`}
-                    >
-                      <span className="flex size-8 items-center justify-center rounded-full bg-background text-muted-foreground">
-                        <Link2 aria-hidden="true" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {identity.provider}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {t("Linked")}{" "}
-                          {dayFormatter.format(new Date(identity.createdAt))}
-                        </p>
-                      </div>
+                  )}
+                </Frame.Panel>
+                <Frame.Footer className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Button
+                    onClick={() => void logout()}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <LogOut data-icon="inline-start" />
+                    {t("Sign out")}
+                  </Button>
+                  <Button
+                    disabled={busy || accountLoading || sessions.length < 2}
+                    onClick={() => void revokeOtherSessions()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {t("Sign out other devices")}
+                  </Button>
+                </Frame.Footer>
+              </Frame>
+              <Card className="h-full" size="sm">
+                <CardHeader>
+                  <CardTitle>{t("Linked sign-in methods")}</CardTitle>
+                  <CardDescription>
+                    {t("Identity providers connected to your account.")}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {accountLoading ? (
+                    <Skeleton className="h-12 rounded-xl" />
+                  ) : identities.length === 0 ? (
+                    <div className="flex items-center gap-3 rounded-xl bg-muted/30 p-3 text-sm text-muted-foreground">
+                      <KeyRound aria-hidden="true" />
+                      {t("No external identity providers are linked.")}
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </PageSection>
+                  ) : (
+                    <div className="divide-y rounded-xl bg-muted/30">
+                      {identities.map((identity) => (
+                        <div
+                          className="flex items-center gap-3 p-3"
+                          key={`${identity.provider}-${identity.createdAt}`}
+                        >
+                          <span className="flex size-8 items-center justify-center rounded-full bg-background text-muted-foreground">
+                            <Link2 aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {identity.provider}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {t("Linked")}{" "}
+                              {dayFormatter.format(
+                                new Date(identity.createdAt)
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </PageSection>
+        </Tabs.Content>
+      </Tabs>
     </Page>
   )
 }
