@@ -20,6 +20,7 @@ export type VideoTranscriptionLibraryItem = {
   language: string
   durationMs: number
   hasSummary: boolean
+  doneAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -44,6 +45,8 @@ export const VIDEO_LIBRARY_FILTERS = [
   "completed",
   "failed",
   "cancelled",
+  "open",
+  "done",
 ] as const
 export type VideoLibraryFilter = (typeof VIDEO_LIBRARY_FILTERS)[number]
 export function videoLibraryFilter(value: string | null): VideoLibraryFilter {

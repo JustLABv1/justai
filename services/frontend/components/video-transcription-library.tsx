@@ -7,6 +7,10 @@ import { useEffect, useRef, useState } from "react"
 import {
   AudioLines,
   Mic,
+  Check,
+  CircleCheck,
+  ListChecks,
+  Undo2,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -19,12 +23,15 @@ import { Alert } from "@/components/panelui/alert"
 import { Badge, type BadgeProps } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Card } from "@/components/panelui/card"
+import { Checkbox } from "@/components/panelui/checkbox"
 import { Chip } from "@/components/panelui/chip"
 import { Input } from "@/components/panelui/input"
 import { SectionHeading } from "@/components/section-heading"
 import { Skeleton } from "@/components/ui/skeleton"
+import { toast } from "@/components/ui/toast"
 import { VideoTranscriptionThumbnail } from "@/components/video-transcription-thumbnail"
 import { api } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import { workspacePath } from "@/lib/workspace-routes"
 import {
   VIDEO_LIBRARY_PAGE_SIZE,
@@ -56,6 +63,8 @@ const FILTER_LABELS = {
   completed: "Ready",
   failed: "Failed",
   cancelled: "Cancelled",
+  open: "Not done",
+  done: "Done",
 } as const
 
 const FILTER_TONES = {
@@ -64,6 +73,8 @@ const FILTER_TONES = {
   completed: "success",
   failed: "destructive",
   cancelled: "primary",
+  open: "primary",
+  done: "success",
 } as const
 
 export function VideoTranscriptionLibrary({
@@ -109,6 +120,16 @@ export function VideoTranscriptionLibrary({
     error: string
   }>({ key: "", data: null, error: "" })
   const rootRef = useRef<HTMLElement>(null)
+  // Selection belongs to one page of results: it is keyed to the request, so
+  // changing page, filter or search drops it instead of acting on hidden items.
+  const [selection, setSelection] = useState<{
+    key: string
+    active: boolean
+    ids: string[]
+  }>({ key: "", active: false, ids: [] })
+  const selecting = selection.active
+  const selectedIds = selection.key === requestKey ? selection.ids : []
+  const [bulkSaving, setBulkSaving] = useState(false)
   const data = state.key === requestKey ? state.data : null
   const error = state.key === requestKey ? state.error : ""
   const loading = !data && !error
@@ -171,6 +192,44 @@ export function VideoTranscriptionLibrary({
     }
   }, [page, query, filter, kind, requestKey, router])
 
+  const toggleSelected = (id: string) =>
+    setSelection({
+      key: requestKey,
+      active: true,
+      ids: selectedIds.includes(id)
+        ? selectedIds.filter((value) => value !== id)
+        : [...selectedIds, id],
+    })
+  const stopSelecting = () =>
+    setSelection({ key: requestKey, active: false, ids: [] })
+  const markSelected = async (done: boolean) => {
+    if (!selectedIds.length) return
+    setBulkSaving(true)
+    try {
+      await api.patch("/api/v1/transcription/sessions", {
+        ids: selectedIds,
+        done,
+      })
+      toast.add({
+        type: "success",
+        title: t(done ? "Marked as done" : "Reopened"),
+      })
+      stopSelecting()
+      setRetry((value) => value + 1)
+    } catch (caught) {
+      toast.add({
+        type: "destructive",
+        priority: "high",
+        title: t(
+          caught instanceof Error
+            ? caught.message
+            : "The status could not be saved."
+        ),
+      })
+    } finally {
+      setBulkSaving(false)
+    }
+  }
   const changePage = (next: number) => {
     router.push(libraryPath(next, query, filter), { scroll: false })
     rootRef.current?.scrollIntoView({ block: "start" })
@@ -257,7 +316,74 @@ export function VideoTranscriptionLibrary({
               </Chip>
             ))}
         </Chip.Group>
+        {data?.items.length ? (
+          <Button
+            className="sm:ml-auto"
+            onClick={() =>
+              selecting
+                ? stopSelecting()
+                : setSelection({ key: requestKey, active: true, ids: [] })
+            }
+            size="sm"
+            variant={selecting ? "default" : "secondary"}
+          >
+            <ListChecks data-icon="inline-start" />
+            {t(selecting ? "Cancel selection" : "Select")}
+          </Button>
+        ) : null}
       </div>
+      {selecting && data ? (
+        <div
+          role="toolbar"
+          aria-label={t("Bulk actions")}
+          className="flex flex-wrap items-center gap-3 rounded-xl bg-muted px-4 py-2"
+        >
+          <Checkbox
+            aria-label={t("Select all on this page")}
+            checked={
+              data.items.length > 0 && selectedIds.length === data.items.length
+            }
+            indeterminate={
+              selectedIds.length > 0 && selectedIds.length < data.items.length
+            }
+            onCheckedChange={(checked) =>
+              setSelection({
+                key: requestKey,
+                active: true,
+                ids: checked ? data.items.map((item) => item.id) : [],
+              })
+            }
+          />
+          <span className="text-sm text-muted-foreground" aria-live="polite">
+            {selectedIds.length
+              ? t("{value0} selected", { value0: selectedIds.length })
+              : t("Select all on this page")}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              disabled={!selectedIds.length || bulkSaving}
+              onClick={() => void markSelected(false)}
+              size="sm"
+              variant="outline"
+            >
+              <Undo2 data-icon="inline-start" />
+              {t("Reopen")}
+            </Button>
+            <Button
+              disabled={!selectedIds.length || bulkSaving}
+              onClick={() => void markSelected(true)}
+              size="sm"
+            >
+              {bulkSaving ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <CircleCheck data-icon="inline-start" />
+              )}
+              {t("Mark as done")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {error ? (
         <Alert tone="destructive">
           <Alert.Title>{t("Your recordings could not be loaded.")}</Alert.Title>
@@ -302,9 +428,35 @@ export function VideoTranscriptionLibrary({
                   item.id
                 )}
                 prefetch={false}
-                className="group w-full rounded-[22px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-pressed={selecting ? selectedIds.includes(item.id) : undefined}
+                onClick={(event) => {
+                  if (!selecting) return
+                  event.preventDefault()
+                  toggleSelected(item.id)
+                }}
+                className="group relative w-full rounded-[22px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <Card className="h-full gap-0 overflow-hidden p-0 transition-shadow group-hover:shadow-md">
+                {selecting ? (
+                  <span className="absolute top-3 left-3 z-10 flex size-5 items-center justify-center drop-shadow-sm">
+                    <Checkbox
+                      aria-label={t("Select {value0}", {
+                        value0: item.title.trim() || item.fileName,
+                      })}
+                      checked={selectedIds.includes(item.id)}
+                      onCheckedChange={() => toggleSelected(item.id)}
+                      tabIndex={-1}
+                    />
+                  </span>
+                ) : null}
+                <Card
+                  className={cn(
+                    "h-full gap-0 overflow-hidden p-0 transition-shadow group-hover:shadow-md",
+                    item.doneAt && "opacity-70",
+                    selecting &&
+                      selectedIds.includes(item.id) &&
+                      "ring-2 ring-primary"
+                  )}
+                >
                   {kind === "live" ? (
                     <div className="flex aspect-video items-center justify-center bg-muted text-muted-foreground">
                       <AudioLines aria-hidden="true" className="size-10" />
@@ -354,9 +506,15 @@ export function VideoTranscriptionLibrary({
                         ) : null}
                         {t(videoLibraryStep(item))}
                       </Badge>
+                      {item.doneAt ? (
+                        <Badge size="sm" variant="success">
+                          <Check aria-hidden="true" className="size-3" />
+                          {t("Done")}
+                        </Badge>
+                      ) : null}
                       {item.hasSummary ? (
                         <Badge size="sm" variant="outline">
-                          <FileText aria-hidden="true" />
+                          <FileText aria-hidden="true" className="size-3" />
                           {t("With summary")}
                         </Badge>
                       ) : null}

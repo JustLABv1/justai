@@ -17,8 +17,8 @@ func TestLiveLibraryFiltersAndScopesProcessingFailures(t *testing.T) {
 	user, org, id := uuid.New(), uuid.New(), uuid.New()
 	now := time.Now()
 	scope := `(?s)WITH recordings AS .*s.user_id=\$1 AND s.organization_id=\$2 AND s.archived_at IS NULL.*NOT EXISTS.*transcription_video_uploads.*`
-	mock.ExpectQuery(scope+`SELECT COUNT\(\*\)`).WithArgs(user, org, "%debate%").WillReturnRows(sqlmock.NewRows([]string{"all", "pending", "completed", "failed"}).AddRow(20, 2, 15, 3))
-	mock.ExpectQuery(scope+`SELECT id,title,state,stage.*AND state='failed'.*ORDER BY created_at DESC,id DESC LIMIT \$4 OFFSET \$5`).WithArgs(user, org, "%debate%", 12, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "state", "stage", "language", "duration", "summary", "created", "updated"}).AddRow(id, "Debate", "failed", "diarization", "de", 240000, true, now, now))
+	mock.ExpectQuery(scope+`SELECT COUNT\(\*\)`).WithArgs(user, org, "%debate%").WillReturnRows(sqlmock.NewRows([]string{"all", "pending", "completed", "failed", "open", "done"}).AddRow(20, 2, 15, 3, 18, 2))
+	mock.ExpectQuery(scope+`SELECT id,title,state,stage.*AND state='failed'.*ORDER BY created_at DESC,id DESC LIMIT \$4 OFFSET \$5`).WithArgs(user, org, "%debate%", 12, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "state", "stage", "language", "duration", "summary", "created", "updated", "done_at"}).AddRow(id, "Debate", "failed", "diarization", "de", 240000, true, now, now, nil))
 	c, w := videoLibraryTestContext("/?status=failed&query=debate&page=99", user, org)
 	(&App{DB: db}).listLiveTranscriptionLibrary(c)
 	var response struct {

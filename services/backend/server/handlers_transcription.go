@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"justai-backend/auth"
 	"justai-backend/middleware"
@@ -86,7 +87,7 @@ func (a *App) listTranscriptionSessions(c *gin.Context) {
 		SELECT s.id, s.user_id, s.organization_id, s.title, s.status,
 		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id,
 		       COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language,
-		       s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at,
+		       s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, s.done_at,
 		       (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id),
 		       (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE),
 		       EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id)
@@ -286,27 +287,70 @@ func (a *App) updateTranscriptionSession(c *gin.Context) {
 	var request struct {
 		Title    string `json:"title"`
 		Archived *bool  `json:"archived"`
+		Done     *bool  `json:"done"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
 	title := strings.TrimSpace(request.Title)
-	if title == "" && request.Archived == nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("title or archived is required"))
+	if title == "" && request.Archived == nil && request.Done == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("title, archived or done is required"))
 		return
 	}
-	if request.Archived == nil {
-		_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET title = $2, updated_at = now() WHERE id = $1`, id, title)
-	} else if title == "" {
-		_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET archived_at = CASE WHEN $2 THEN COALESCE(archived_at, now()) ELSE NULL END, updated_at = now() WHERE id = $1`, id, *request.Archived)
-	} else {
-		_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET title = $2, archived_at = CASE WHEN $3 THEN COALESCE(archived_at, now()) ELSE NULL END, updated_at = now() WHERE id = $1`, id, title, *request.Archived)
+	// Each field is optional: a NULL parameter keeps the stored value.
+	var titleArg any
+	if title != "" {
+		titleArg = title
 	}
+	_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET
+		title = COALESCE($2, title),
+		archived_at = CASE WHEN $3::boolean IS NULL THEN archived_at WHEN $3 THEN COALESCE(archived_at, now()) ELSE NULL END,
+		done_at = CASE WHEN $4::boolean IS NULL THEN done_at WHEN $4 THEN COALESCE(done_at, now()) ELSE NULL END,
+		updated_at = now() WHERE id = $1`, id, titleArg, request.Archived, request.Done)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"session": mustTranscriptionSession(c, a, id)})
+}
+
+// bulkUpdateTranscriptionSessions applies done/archived to many sessions at
+// once. Ownership is enforced in the UPDATE itself, so ids belonging to other
+// users or workspaces are silently ignored rather than revealed.
+func (a *App) bulkUpdateTranscriptionSessions(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	var request struct {
+		IDs      []uuid.UUID `json:"ids"`
+		Archived *bool       `json:"archived"`
+		Done     *bool       `json:"done"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if len(request.IDs) == 0 || len(request.IDs) > 100 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("between 1 and 100 session ids are required"))
+		return
+	}
+	if request.Archived == nil && request.Done == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("archived or done is required"))
+		return
+	}
+	ids := make([]string, len(request.IDs))
+	for i, id := range request.IDs {
+		ids[i] = id.String()
+	}
+	result, err := a.DB.ExecContext(c, `UPDATE transcription_sessions SET
+		archived_at = CASE WHEN $4::boolean IS NULL THEN archived_at WHEN $4 THEN COALESCE(archived_at, now()) ELSE NULL END,
+		done_at = CASE WHEN $5::boolean IS NULL THEN done_at WHEN $5 THEN COALESCE(done_at, now()) ELSE NULL END,
+		updated_at = now()
+		WHERE id = ANY($1) AND user_id = $2 AND organization_id = $3`, pq.Array(ids), principal.UserID, organizationID, request.Archived, request.Done)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	updated, _ := result.RowsAffected()
+	c.JSON(http.StatusOK, gin.H{"updated": updated})
 }
 
 func (a *App) deleteTranscriptionSession(c *gin.Context) {
@@ -1866,7 +1910,7 @@ func transcriptionMode(endpoint provider.Endpoint) string {
 }
 
 func loadTranscriptionSession(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (models.TranscriptionSession, error) {
-	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language, s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
+	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language, s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, s.done_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
 	return scanTranscriptionSession(row)
 }
 
@@ -1874,7 +1918,7 @@ func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (mod
 	var item models.TranscriptionSession
 	var transcriptionEndpoint, diarizationEndpoint, grammarEndpoint uuid.NullUUID
 	var hasVideoUpload bool
-	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &grammarEndpoint, &item.TranscriptionModel, &item.DiarizationModel, &item.GrammarModel, &item.Language, &item.RecordAudio, &item.PolishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
+	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &grammarEndpoint, &item.TranscriptionModel, &item.DiarizationModel, &item.GrammarModel, &item.Language, &item.RecordAudio, &item.PolishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.DoneAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
 		return item, err
 	}
 	if transcriptionEndpoint.Valid {

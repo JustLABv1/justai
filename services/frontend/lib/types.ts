@@ -865,6 +865,7 @@ export type TranscriptionSession = {
   createdAt: string
   updatedAt: string
   archivedAt?: string | null
+  doneAt?: string | null
   sourceCount: number
   segmentCount: number
 }
