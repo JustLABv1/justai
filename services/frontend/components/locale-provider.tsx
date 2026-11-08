@@ -64,3 +64,16 @@ export function useTranslatedConfig<T>(messages: T): T {
   const { locale } = useTranslations()
   return useMemo(() => translateMessages(locale, messages), [locale, messages])
 }
+
+/** Like `useTranslations`, but returns an identity translator outside a provider (for example in a root error boundary). */
+export function useOptionalTranslations() {
+  const context = useContext(LocaleContext)
+  return (
+    context ?? {
+      locale: "en" as Locale,
+      setLocale: () => {},
+      t: (message: string | null | undefined, values?: TranslationValues) =>
+        translate("en", message, values),
+    }
+  )
+}

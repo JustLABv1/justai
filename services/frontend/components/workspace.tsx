@@ -52,7 +52,13 @@ import type {
   Automation,
   WorkspaceProject,
 } from "@/lib/types"
-import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
+import {
+  isKnownWorkspaceRoute,
+  parseWorkspaceRoute,
+  workspacePath,
+} from "@/lib/workspace-routes"
+import { ErrorScreen } from "@/components/error-screen"
+import { errorPageKind } from "@/lib/error-pages"
 import { cn } from "@/lib/utils"
 import { FocusWorkspaceSidebar } from "@/components/focus-workspace-sidebar"
 import {
@@ -92,6 +98,7 @@ export function Workspace({
 
   const [status, setStatus] = useState<WorkspaceStatus>("loading")
   const [loadError, setLoadError] = useState("")
+  const [loadErrorStatus, setLoadErrorStatus] = useState(0)
   const [featureErrors, setFeatureErrors] = useState<Record<string, string>>({})
   const [disabledFeatures, setDisabledFeatures] = useState<
     Record<string, string>
@@ -265,6 +272,7 @@ export function Workspace({
     async function loadWorkspace() {
       setStatus("loading")
       setLoadError("")
+      setLoadErrorStatus(0)
       try {
         const me = await api.get<{ user: User; organizations: Organization[] }>(
           "/api/v1/auth/me"
@@ -449,6 +457,8 @@ export function Workspace({
           redirectToLogin()
           return
         }
+        // Anything that is not an HTTP answer (no status) means no backend.
+        setLoadErrorStatus(caught instanceof APIError ? caught.status : 0)
         setLoadError(
           caught instanceof Error
             ? caught.message
@@ -1107,22 +1117,19 @@ export function Workspace({
   if (status === "loading") return <WorkspaceLoading />
 
   if (status === "error" || !user) {
+    const errorStatus = loadErrorStatus || 0
     return (
-      <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
-        <Alert className="max-w-md" variant="destructive">
-          <AlertTitle>{t("Workspace unavailable")}</AlertTitle>
-          <AlertDescription className="flex flex-col gap-4">
-            <span>{loadError || "Please sign in again to continue."}</span>
-            <Button
-              className="w-fit"
-              variant="outline"
-              onClick={() => setReloadToken((value) => value + 1)}
-            >
-              {t("Try again")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      </main>
+      <ErrorScreen
+        kind={errorPageKind(errorStatus)}
+        status={errorStatus || null}
+        description={
+          errorStatus >= 400 && errorStatus < 500 && errorStatus !== 408
+            ? loadError || undefined
+            : undefined
+        }
+        onRetry={() => setReloadToken((value) => value + 1)}
+        homeHref={null}
+      />
     )
   }
 
@@ -1255,41 +1262,45 @@ export function Workspace({
                   : "mx-auto max-w-[1440px] overflow-y-auto p-4 sm:p-6 lg:p-8"
             )}
           >
-            {activeView === "chat" && (
-              <ChatView
-                displayName={user.displayName}
-                key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
-                // The picker is now fed by the canonical agent catalog. The
-                // compatibility assistant list remains available to the
-                // legacy editor below.
-                assistants={chatAgents}
-                cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
-                conversationId={activeConversationId}
-                conversation={activeConversation}
-                endpoints={endpoints}
-                mcpServers={servers}
-                notes={notes}
-                onAssistantSelectionChange={setDraftAssistantId}
-                onEnsureConversation={ensureConversationForContext}
-                onConversationCreated={(conversation) => {
-                  setDraftAssistantId(conversation.assistantId ?? null)
-                  setConversations((current) => {
-                    if (current.some((item) => item.id === conversation.id)) {
-                      return current
-                    }
-                    return [conversation, ...current]
-                  })
-                  navigate("chat", conversation.id, true)
-                }}
-                onConversationUpdated={() => {
-                  void refreshConversations().catch(() => undefined)
-                }}
-                onConversationSettled={settlePendingConversation}
-                onConversationMissing={handleConversationMissing}
-                onNavigate={(view) => navigate(view, null)}
-                onOpenHistory={() => setHistoryOpen(true)}
-              />
+            {!isKnownWorkspaceRoute(pathname ?? "/") && (
+              <ErrorScreen kind="not-found" status={404} />
             )}
+            {isKnownWorkspaceRoute(pathname ?? "/") &&
+              activeView === "chat" && (
+                <ChatView
+                  displayName={user.displayName}
+                  key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
+                  // The picker is now fed by the canonical agent catalog. The
+                  // compatibility assistant list remains available to the
+                  // legacy editor below.
+                  assistants={chatAgents}
+                  cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
+                  conversationId={activeConversationId}
+                  conversation={activeConversation}
+                  endpoints={endpoints}
+                  mcpServers={servers}
+                  notes={notes}
+                  onAssistantSelectionChange={setDraftAssistantId}
+                  onEnsureConversation={ensureConversationForContext}
+                  onConversationCreated={(conversation) => {
+                    setDraftAssistantId(conversation.assistantId ?? null)
+                    setConversations((current) => {
+                      if (current.some((item) => item.id === conversation.id)) {
+                        return current
+                      }
+                      return [conversation, ...current]
+                    })
+                    navigate("chat", conversation.id, true)
+                  }}
+                  onConversationUpdated={() => {
+                    void refreshConversations().catch(() => undefined)
+                  }}
+                  onConversationSettled={settlePendingConversation}
+                  onConversationMissing={handleConversationMissing}
+                  onNavigate={(view) => navigate(view, null)}
+                  onOpenHistory={() => setHistoryOpen(true)}
+                />
+              )}
             {activeView === "transcription" &&
               sessionViewMatches &&
               (disabledFeatures.transcription ? (
