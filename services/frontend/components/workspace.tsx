@@ -1529,7 +1529,7 @@ function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
           : "JustAI")
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-      <SidebarTrigger className="-ml-1" />
+      <SidebarTrigger className="-ml-1 md:hidden" />
       <Separator className="mr-1 h-4" orientation="vertical" />
       <Breadcrumb>
         <BreadcrumbList>

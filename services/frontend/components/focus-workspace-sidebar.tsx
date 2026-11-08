@@ -8,10 +8,9 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown,
   LogOut,
-  Leaf,
   MoreHorizontal,
+  Leaf,
   Plus,
   RotateCcw,
   Trash2,
@@ -94,24 +93,8 @@ import {
   DialogTitle,
 } from "@/components/panelui/dialog"
 import { Input } from "@/components/panelui/input"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuAction,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-  SidebarRail,
-  useSidebar,
-} from "@/components/ui/sidebar"
+import { Sidebar, useSidebar } from "@/components/ui/sidebar"
+import { NavRail } from "@/components/panelui/nav-rail"
 import type {
   Conversation,
   Organization,
@@ -269,19 +252,8 @@ export function FocusWorkspaceSidebar({
   const [sessionQuery, setSessionQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
-  const { setOpenMobile, state, isMobile } = useSidebar()
-  const [chatRailOpen, setChatRailOpen] = useState(false)
+  const { setOpenMobile, setOpen, state, isMobile } = useSidebar()
   const collapsed = state === "collapsed" && !isMobile
-  const recentChats = useMemo(
-    () =>
-      [...conversations]
-        .sort(
-          (a, b) =>
-            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-        )
-        .slice(0, 20),
-    [conversations]
-  )
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
   const closeOverlays = () => {
     setOpenMobile(false)
@@ -500,499 +472,264 @@ export function FocusWorkspaceSidebar({
       <Sidebar
         collapsible="icon"
         variant="inset"
-        className="workspace-sidebar"
-        onPointerLeave={() => setChatRailOpen(false)}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget))
-            setChatRailOpen(false)
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && chatRailOpen) {
-            event.preventDefault()
-            event.stopPropagation()
-            setChatRailOpen(false)
-            event.currentTarget
-              .querySelector<HTMLButtonElement>("[data-chat-rail-trigger]")
-              ?.focus()
-          }
-        }}
+        className="workspace-sidebar [&_[data-slot=sidebar-inner]]:bg-transparent! [&_[data-slot=sidebar-inner]]:shadow-none!"
+        style={{ "--sidebar-width-icon": "3.5rem" } as React.CSSProperties}
       >
-        <SidebarHeader className="gap-2">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton
-                      aria-label={t("Select workspace ({value0})", {
-                        value0: activeOrganization?.name ?? t("Workspace"),
-                      })}
-                      tooltip={t("Select workspace · {value0}", {
-                        value0: activeOrganization?.name ?? t("Workspace"),
-                      })}
-                      className="gap-2.5"
-                      size="lg"
-                    />
-                  }
-                >
-                  <BrandMark
-                    aria-hidden="true"
-                    className="size-6 [&_svg]:size-full!"
-                    cropped
+        <NavRail
+          aria-label={t("Workspace")}
+          collapsed={collapsed}
+          onCollapsedChange={(next) => setOpen(!next)}
+          expandedWidth="100%"
+          collapsedWidth="100%"
+          className="min-h-0 flex-1"
+        >
+          <NavRail.Header className="pt-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <NavRail.Item
+                    label={t("Select workspace ({value0})", {
+                      value0: activeOrganization?.name ?? t("Workspace"),
+                    })}
+                    icon={
+                      <BrandMark
+                        aria-hidden="true"
+                        className="size-6 [&_svg]:size-full!"
+                        cropped
+                      />
+                    }
+                    className={cn(
+                      "h-10! min-w-0",
+                      collapsed ? "w-full flex-none" : "flex-1"
+                    )}
                   />
-                  <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
-                    {activeOrganization?.name ?? t("Workspace")}
-                  </span>
-                  <ChevronsUpDown
-                    aria-hidden="true"
-                    className="text-muted-foreground"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="start"
-                  className="w-64"
-                  side="bottom"
-                >
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>{t("Workspaces")}</DropdownMenuLabel>
-                    {organizations.map((organization) => (
-                      <DropdownMenuItem
-                        key={organization.id}
-                        onClick={() => onOrganizationSelect(organization.id)}
-                      >
-                        <Bot data-icon="inline-start" />
-                        <span className="min-w-0 flex-1 truncate">
-                          {organization.name}
-                        </span>
-                        {organization.id === activeOrganization?.id && (
-                          <span className="text-xs text-muted-foreground">
-                            {t("Current")}
-                          </span>
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onNavigate("settings")}>
-                    <Settings2 data-icon="inline-start" />
-                    {t("Manage workspaces")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                aria-keyshortcuts="Meta+K Control+K"
-                aria-label={t("Search workspace")}
-                className="h-9 bg-sidebar-accent/60 text-sm text-muted-foreground"
-                onClick={() => setSearchOpen(true)}
-                tooltip={t("Search workspace · ⌘K")}
+                }
               >
-                <Search />
-                <span className="flex-1 text-left font-normal">
-                  {t("Search…")}
-                </span>
-                <kbd className="rounded bg-background/60 px-1.5 py-0.5 text-[10px] font-medium">
-                  ⌘K
-                </kbd>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-
-        <SidebarContent>
-          {[...new Set(navigation.map((item) => item.group))].map((group) => (
-            <SidebarGroup key={group}>
-              <SidebarGroupLabel>{group}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navigation
-                    .filter((item) => item.group === group)
-                    .map((item) => {
-                      const Icon = item.icon
-                      const active = activeView === item.id
-                      const disabled = Boolean(
-                        item.feature && disabledFeatures[item.feature]
-                      )
-                      const hasHistory =
-                        item.id === "chat" ||
-                        item.id === "transcription" ||
-                        item.id === "video-transcription"
-                      const button = (
-                        <SidebarMenuButton
-                          aria-current={active ? "page" : undefined}
-                          aria-label={item.label}
-                          data-chat-rail-trigger={
-                            item.id === "chat" ? "" : undefined
-                          }
-                          aria-expanded={
-                            item.id === "chat" && collapsed
-                              ? chatRailOpen
-                              : undefined
-                          }
-                          aria-controls={
-                            item.id === "chat" && collapsed && chatRailOpen
-                              ? "recent-chat-rail"
-                              : undefined
-                          }
-                          onPointerEnter={() =>
-                            setChatRailOpen(collapsed && item.id === "chat")
-                          }
-                          onFocus={(event) => {
-                            if (
-                              !event.relatedTarget?.closest("#recent-chat-rail")
-                            )
-                              setChatRailOpen(collapsed && item.id === "chat")
-                          }}
-                          onKeyDown={(event) => {
-                            if (
-                              collapsed &&
-                              item.id === "chat" &&
-                              event.key === "ArrowRight"
-                            ) {
-                              event.preventDefault()
-                              setChatRailOpen(true)
-                              requestAnimationFrame(() =>
-                                document
-                                  .querySelector<HTMLButtonElement>(
-                                    "#recent-chat-rail button"
-                                  )
-                                  ?.focus()
-                              )
-                            }
-                          }}
-                          className="text-sm aria-disabled:pointer-events-auto"
-                          aria-disabled={disabled || undefined}
-                          isActive={active}
-                          onClick={() => {
-                            if (!disabled) navigateFromRail(item.id)
-                          }}
-                          tooltip={
-                            disabled
-                              ? t(
-                                  "{value0} · Disabled by platform administrator",
-                                  { value0: item.label }
-                                )
-                              : item.label
-                          }
-                        >
-                          <Icon />
-                          <span>{item.label}</span>
-                        </SidebarMenuButton>
-                      )
-                      if (!hasHistory || !active) {
-                        return (
-                          <SidebarMenuItem key={item.id}>
-                            {button}
-                          </SidebarMenuItem>
-                        )
-                      }
-                      return (
-                        <Collapsible
-                          key={item.id}
-                          onOpenChange={onHistoryOpenChange}
-                          open={historyOpen}
-                          render={<SidebarMenuItem />}
-                        >
-                          {button}
-                          {createAction && (
-                            <SidebarMenuAction
-                              aria-label={createAction.label}
-                              disabled={createAction.disabled}
-                              onClick={() => {
-                                setOpenMobile(false)
-                                createAction.onClick()
-                              }}
-                              title={createAction.label}
-                            >
-                              <Plus />
-                            </SidebarMenuAction>
-                          )}
-                          <CollapsibleTrigger
-                            render={
-                              <SidebarMenuAction
-                                className="right-7"
-                                aria-label={
-                                  historyOpen
-                                    ? t("Hide {value0}", {
-                                        value0:
-                                          historyTitle.toLocaleLowerCase(),
-                                      })
-                                    : t("Show {value0}", {
-                                        value0:
-                                          historyTitle.toLocaleLowerCase(),
-                                      })
-                                }
-                              />
-                            }
+                {activeOrganization?.name ?? t("Workspace")}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64" side="bottom">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{t("Workspaces")}</DropdownMenuLabel>
+                  {organizations.map((organization) => (
+                    <DropdownMenuItem
+                      key={organization.id}
+                      onClick={() => onOrganizationSelect(organization.id)}
+                    >
+                      <Bot data-icon="inline-start" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {organization.name}
+                      </span>
+                      {organization.id === activeOrganization?.id && (
+                        <span className="text-xs text-muted-foreground">
+                          {t("Current")}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onNavigate("settings")}>
+                  <Settings2 data-icon="inline-start" />
+                  {t("Manage workspaces")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <NavRail.Trigger
+              expandLabel={t("Expand sidebar")}
+              collapseLabel={t("Collapse sidebar")}
+            />
+          </NavRail.Header>
+          <NavRail.Item
+            icon={<Search />}
+            label={t("Search workspace")}
+            aria-keyshortcuts="Meta+K Control+K"
+            onClick={() => setSearchOpen(true)}
+          >
+            {t("Search…")}
+          </NavRail.Item>
+          <div
+            className={cn(
+              "min-h-0 flex-1",
+              collapsed
+                ? "overflow-visible"
+                : "overflow-x-hidden overflow-y-auto"
+            )}
+          >
+            {[...new Set(navigation.map((item) => item.group))].map((group) => (
+              <NavRail.Group key={group} label={t(group)}>
+                {navigation
+                  .filter((item) => item.group === group)
+                  .map((item) => {
+                    const Icon = item.icon
+                    const active = activeView === item.id
+                    const disabled = Boolean(
+                      item.feature && disabledFeatures[item.feature]
+                    )
+                    return (
+                      <NavRail.Item
+                        key={item.id}
+                        icon={<Icon />}
+                        label={item.label}
+                        active={active}
+                        disabled={disabled}
+                        href="#"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setOpenMobile(false)
+                          navigateFromRail(item.id)
+                        }}
+                      >
+                        {item.label}
+                        {active && historyView && (
+                          <NavRail.Sub
+                            open={historyOpen && !collapsed}
+                            onOpenChange={(open) => {
+                              if (!collapsed) onHistoryOpenChange(open)
+                            }}
+                            label={historyTitle}
                           >
-                            <ChevronRight className="transition-transform group-data-[open]/menu-item:rotate-90 in-data-[open]:rotate-90" />
-                          </CollapsibleTrigger>
-                          <CollapsibleContent>
-                            <SidebarMenuSub>
-                              {recentItems.map((entry) => {
-                                const entryActive =
+                            {createAction && (
+                              <NavRail.Item
+                                icon={<Plus />}
+                                disabled={createAction.disabled}
+                                onClick={() => {
+                                  closeOverlays()
+                                  createAction.onClick()
+                                }}
+                              >
+                                {createAction.label}
+                              </NavRail.Item>
+                            )}
+                            {recentItems.map((entry) => (
+                              <NavRail.Item
+                                key={entry.id}
+                                active={
                                   activeView === "chat"
                                     ? activeConversationId === entry.id
                                     : activeSessionId === entry.id
-                                return (
-                                  <SidebarMenuSubItem key={entry.id}>
-                                    <SidebarMenuSubButton
-                                      isActive={entryActive}
-                                      render={<button type="button" />}
-                                      onClick={() => {
-                                        setOpenMobile(false)
-                                        if (activeView === "chat")
-                                          onNavigate("chat", entry.id)
-                                        else
-                                          onNavigate(activeView, null, entry.id)
-                                      }}
-                                      title={displayTitle(entry.title)}
-                                    >
-                                      <span className="min-w-0 flex-1 truncate">
-                                        {displayTitle(entry.title)}
-                                      </span>
-                                      {entry.status === "failed" ? (
-                                        <span
-                                          aria-label={t("Failed")}
-                                          className="size-1.5 shrink-0 rounded-full bg-destructive"
-                                        />
-                                      ) : entry.status === "live" ? (
-                                        <span
-                                          aria-label={t("Live")}
-                                          className="size-1.5 shrink-0 rounded-full bg-primary"
-                                        />
-                                      ) : null}
-                                    </SidebarMenuSubButton>
-                                  </SidebarMenuSubItem>
-                                )
-                              })}
-                              <SidebarMenuSubItem>
-                                <SidebarMenuSubButton
-                                  render={<button type="button" />}
-                                  onClick={() => {
-                                    if (
-                                      activeView === "video-transcription" ||
-                                      activeView === "transcription"
-                                    ) {
-                                      closeOverlays()
-                                      setOpenMobile(false)
-                                      onNavigate(activeView)
-                                    } else setHistoryDialogOpen(true)
-                                  }}
-                                  className="text-muted-foreground hover:text-sidebar-accent-foreground"
-                                >
-                                  <span>{t("View all…")}</span>
-                                </SidebarMenuSubButton>
-                              </SidebarMenuSubItem>
-                            </SidebarMenuSub>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      )
-                    })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
-        </SidebarContent>
-
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                aria-current={activeView === "settings" ? "page" : undefined}
-                aria-label={t("Workspace settings")}
-                className="text-sm"
-                isActive={activeView === "settings"}
-                onClick={() => onNavigate("settings")}
-                tooltip={t("Workspace settings")}
-              >
-                <Settings2 />
-                <span>{t("Workspace settings")}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+                                }
+                                onClick={() => {
+                                  setOpenMobile(false)
+                                  if (activeView === "chat")
+                                    onNavigate("chat", entry.id)
+                                  else onNavigate(activeView, null, entry.id)
+                                }}
+                              >
+                                {displayTitle(entry.title)}
+                              </NavRail.Item>
+                            ))}
+                            <NavRail.Item
+                              onClick={() => {
+                                if (activeView === "chat")
+                                  setHistoryDialogOpen(true)
+                                else {
+                                  closeOverlays()
+                                  onNavigate(activeView)
+                                }
+                              }}
+                            >
+                              {t("View all…")}
+                            </NavRail.Item>
+                          </NavRail.Sub>
+                        )}
+                      </NavRail.Item>
+                    )
+                  })}
+              </NavRail.Group>
+            ))}
+          </div>
+          <NavRail.Footer>
+            <NavRail.Item
+              icon={<Settings2 />}
+              active={activeView === "settings"}
+              onClick={() => {
+                setOpenMobile(false)
+                onNavigate("settings")
+              }}
+            >
+              {t("Workspace settings")}
+            </NavRail.Item>
             {user.platformAdmin && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  aria-current={activeView === "admin" ? "page" : undefined}
-                  aria-label={t("Platform admin")}
-                  className="text-sm"
-                  isActive={activeView === "admin"}
-                  onClick={() => onNavigate("admin")}
-                  tooltip={t("Platform admin")}
-                >
-                  <ShieldCheck />
-                  <span>{t("Platform admin")}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              <NavRail.Item
+                icon={<ShieldCheck />}
+                active={activeView === "admin"}
+                onClick={() => {
+                  setOpenMobile(false)
+                  onNavigate("admin")
+                }}
+              >
+                {t("Platform admin")}
+              </NavRail.Item>
             )}
-            <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton
-                      aria-label={t("{value0} account menu", {
-                        value0: user.displayName,
-                      })}
-                      tooltip={t("{value0} · Account menu", {
-                        value0: user.displayName,
-                      })}
-                      size="lg"
-                    />
-                  }
-                >
-                  <Avatar
-                    size="sm"
-                    name={user.displayName}
-                    src={
-                      user.avatarUrl
-                        ? resolveAPIURL(
-                            versionedAvatarURL(
-                              user.avatarUrl,
-                              user.avatarVersion
-                            ) ?? user.avatarUrl
-                          )
-                        : undefined
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <NavRail.Item
+                    label={t("{value0} account menu", {
+                      value0: user.displayName,
+                    })}
+                    icon={
+                      <Avatar
+                        size="sm"
+                        name={user.displayName}
+                        src={
+                          user.avatarUrl
+                            ? resolveAPIURL(
+                                versionedAvatarURL(
+                                  user.avatarUrl,
+                                  user.avatarVersion
+                                ) ?? user.avatarUrl
+                              )
+                            : undefined
+                        }
+                      />
                     }
                   />
-                  <span className="min-w-0 flex-1 text-left">
+                }
+              >
+                {user.displayName}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56" side="top">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>
                     <span className="block truncate text-xs font-medium">
                       {user.displayName}
                     </span>
                     <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                      {activeOrganization?.name ?? user.email}
+                      {user.email}
                     </span>
-                  </span>
-                  <MoreHorizontal
-                    aria-hidden="true"
-                    className="text-muted-foreground"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56" side="top">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>
-                      <span className="block truncate text-xs font-medium">
-                        {user.displayName}
+                    {activeOrganization?.role && (
+                      <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
+                        {activeOrganization.name} · {activeOrganization.role}
                       </span>
-                      <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                        {user.email}
-                      </span>
-                      {activeOrganization?.role && (
-                        <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
-                          {activeOrganization.name} · {activeOrganization.role}
-                        </span>
-                      )}
-                    </DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <LanguageMenu />
-                  <ThemeMenu />
-                  <DropdownMenuGroup>
-                    <DropdownMenuCheckboxItem
-                      checked={seasonsDisabled}
-                      onCheckedChange={setSeasonsDisabled}
-                    >
-                      <Leaf data-icon="inline-start" />
-                      {t("Disable seasons")}
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onNavigate("profile")}>
-                    <UserRound data-icon="inline-start" />
-                    {t("Profile")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={onSignOut}>
-                    <LogOut data-icon="inline-start" />
-                    {t("Sign out")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
-        {collapsed && chatRailOpen && (
-          <div className="workspace-chat-rail">
-            <section
-              id="recent-chat-rail"
-              aria-label={t("Recent chats")}
-              className="flex h-full min-h-0 flex-col gap-4 rounded-2xl bg-sidebar p-4 shadow-lg"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="truncate text-sm font-medium">
-                  {activeOrganization?.name ?? t("Workspace")}
-                </h2>
-                <Button
-                  aria-label={t("Search chats")}
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => {
-                    setChatRailOpen(false)
-                    setSearchOpen(true)
-                  }}
-                >
-                  <Search />
-                </Button>
-              </div>
-              <Button
-                className="justify-start"
-                variant="ghost"
-                onClick={() => {
-                  setChatRailOpen(false)
-                  onNavigate("chat")
-                }}
-              >
-                <Plus data-icon="inline-start" />
-                {t("New chat")}
-              </Button>
-              <h3 className="text-xs text-muted-foreground">
-                {t("Recent chats")}
-              </h3>
-              <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-                {recentChats.length === 0 && (
-                  <p className="px-2 text-sm text-muted-foreground">
-                    {t("Your conversations will appear here.")}
-                  </p>
-                )}
-                {recentChats.map((chat) => (
-                  <Button
-                    key={chat.id}
-                    variant="ghost"
-                    className={cn(
-                      "shrink-0 justify-start",
-                      activeConversationId === chat.id &&
-                        "bg-sidebar-accent text-sidebar-accent-foreground"
                     )}
-                    aria-current={
-                      activeView === "chat" && activeConversationId === chat.id
-                        ? "page"
-                        : undefined
-                    }
-                    title={chat.title}
-                    onClick={() => {
-                      setChatRailOpen(false)
-                      onNavigate("chat", chat.id)
-                    }}
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <LanguageMenu />
+                <ThemeMenu />
+                <DropdownMenuGroup>
+                  <DropdownMenuCheckboxItem
+                    checked={seasonsDisabled}
+                    onCheckedChange={setSeasonsDisabled}
                   >
-                    <span className="truncate">{chat.title}</span>
-                  </Button>
-                ))}
-              </div>
-              <Button
-                variant="ghost"
-                className="justify-start"
-                onClick={() => {
-                  setChatRailOpen(false)
-                  onNavigate("chat")
-                  setHistoryDialogOpen(true)
-                }}
-              >
-                {t("View all chats")}
-                <ChevronRight data-icon="inline-end" />
-              </Button>
-            </section>
-          </div>
-        )}
-        <SidebarRail />
+                    <Leaf data-icon="inline-start" />
+                    {t("Disable seasons")}
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onNavigate("profile")}>
+                  <UserRound data-icon="inline-start" />
+                  {t("Profile")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onSignOut}>
+                  <LogOut data-icon="inline-start" />
+                  {t("Sign out")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </NavRail.Footer>
+        </NavRail>
       </Sidebar>
 
       <Dialog
