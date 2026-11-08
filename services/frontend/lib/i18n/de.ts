@@ -1,5 +1,19 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Available tools": "Verfügbare Tools",
+  "JustAI tools": "JustAI-Tools",
+  "JustAI help": "JustAI-Hilfe",
+  "Open JustAI page": "JustAI-Seite öffnen",
+  "Set up live transcription": "Live-Transkription einrichten",
+  "Set up video transcription": "Video-Transkription einrichten",
+  "Read transcript": "Transkript lesen",
+  "Tool activity": "Tool-Aktivität",
+  "{count} call": "{count} Aufruf",
+  "{count} calls": "{count} Aufrufe",
+  "Set up recording": "Aufnahme einrichten",
+  "Choose your audio source and settings, then start recording.":
+    "Wähle deine Audioquelle und Einstellungen und starte dann die Aufnahme.",
+  "Open this page in JustAI.": "Öffne diese Seite in JustAI.",
   Consistency: "Regelmäßigkeit",
   "Capture & agents": "Aufnahmen & Agenten",
   Account: "Konto",

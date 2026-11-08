@@ -2077,7 +2077,9 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			var result json.RawMessage
 			var callErr error
 			if binding.Builtin {
-				if binding.ToolName == "discover_mcp_tools" {
+				if binding.ToolName == "list_justai_tools" {
+					result, callErr = justAIToolCatalog(definitions, bindings)
+				} else if binding.ToolName == "discover_mcp_tools" {
 					query := strings.TrimSpace(stringToolArgument(arguments, "query"))
 					if query == "" {
 						callErr = fmt.Errorf("an MCP capability query is required")

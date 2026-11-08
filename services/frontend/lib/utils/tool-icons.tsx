@@ -1,3 +1,4 @@
+import { BrandMark } from "@/components/brand-mark"
 import { HugeiconsIcon } from "@hugeicons/react"
 import type { IconSvgElement } from "@hugeicons/react"
 import {
@@ -325,6 +326,19 @@ export const getToolCategoryIcon = (
 
   const finalCategory = normalizeCategoryName(aliasedCategory)
 
+  if (finalCategory === "justai" && !iconUrl) {
+    return (
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10",
+          restProps.className
+        )}
+      >
+        <BrandMark cropped className="size-4" />
+      </span>
+    )
+  }
+
   // MCP branding is more specific than the generic integrations category or
   // any built-in category inferred from the provider-facing tool name.
   if (iconUrl) {
@@ -395,6 +409,12 @@ export const getToolCategoryIcon = (
 // Format tool names from snake_case to Title Case
 export const formatToolName = (name: string): string => {
   const builtInLabels: Record<string, string> = {
+    get_justai_help: "JustAI help",
+    list_justai_tools: "Available tools",
+    navigate_justai: "Open JustAI page",
+    start_live_transcription: "Set up live transcription",
+    start_video_transcription: "Set up video transcription",
+    get_transcription: "Read transcript",
     browse_url: "Browse URL",
     create_pdf: "Create PDF",
     create_file: "Create file",

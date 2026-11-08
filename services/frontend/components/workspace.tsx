@@ -84,6 +84,11 @@ export function Workspace({
   const activeView = route.view
   const requestedConversationId = route.conversationId
   const requestedSessionId = route.sessionId
+  // An explicit chat action opens the normal setup wizard; it never captures audio.
+  const liveSetupRequested =
+    activeView === "transcription" &&
+    !requestedSessionId &&
+    searchParams.get("create") === "1"
 
   const [status, setStatus] = useState<WorkspaceStatus>("loading")
   const [loadError, setLoadError] = useState("")
@@ -1295,10 +1300,14 @@ export function Workspace({
                   onStartChat={startChatWithTranscription}
                   onSessionCreated={handleTranscriptionSessionCreated}
                   onSessionsChanged={handleTranscriptionSessionsChanged}
-                  onCreateSessionRequestHandled={() =>
+                  onCreateSessionRequestHandled={() => {
                     setCreateTranscriptionRequested(false)
+                    if (liveSetupRequested)
+                      router.replace("/live-transcription", { scroll: false })
+                  }}
+                  createSessionRequested={
+                    createTranscriptionRequested || liveSetupRequested
                   }
-                  createSessionRequested={createTranscriptionRequested}
                   sessionId={activeSessionId}
                   sessions={transcriptionSessions.filter(
                     (session) => session.kind !== "video"

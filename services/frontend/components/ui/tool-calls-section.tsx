@@ -222,16 +222,14 @@ export function ToolCallsSection({
 
   if (toolCalls.length === 0) return null
 
-  const summaryCalls = toolCalls.slice(0, 2)
-  const summary = summaryCalls
-    .map((call) => {
-      const label = call.message || formatToolName(call.tool_name)
-      return call.integration_name
-        ? `${call.integration_name}: ${label}`
-        : label
-    })
-    .join(", ")
-  const remainingCount = toolCalls.length - summaryCalls.length
+  const labels = [
+    ...new Set(
+      toolCalls.map((call) => call.message || formatToolName(call.tool_name))
+    ),
+  ]
+  const summary = labels.slice(0, 2).join(" · ")
+  const remainingCount = labels.length - 2
+  const justAIGroup = toolCalls.every((call) => call.tool_category === "justai")
 
   // Default icon renderer
   const defaultRenderIcon = (call: ToolCallEntry, size: number) => {
@@ -270,20 +268,11 @@ export function ToolCallsSection({
     const displayIcons = uniqueIcons.slice(0, maxIconsToShow)
 
     return (
-      <div className="flex min-h-8 items-center -space-x-2">
+      <div className="flex min-h-7 items-center -space-x-1">
         {displayIcons.map((call, index) => (
           <div
             key={call.tool_call_id ?? `${call.tool_name}-${index}`}
             className="relative flex min-w-8 items-center justify-center"
-            style={{
-              rotate:
-                displayIcons.length > 1
-                  ? index % 2 === 0
-                    ? "8deg"
-                    : "-8deg"
-                  : "0deg",
-              zIndex: index,
-            }}
           >
             {iconRenderer(call, iconSize)}
           </div>
@@ -304,19 +293,22 @@ export function ToolCallsSection({
         type="button"
         aria-expanded={isGroupExpanded}
         onClick={() => setIsExpanded(!isExpanded)}
-        className="h-auto min-h-9 cursor-pointer justify-start gap-2 px-1 py-2 text-zinc-500 hover:bg-transparent hover:text-zinc-900 dark:hover:bg-transparent dark:hover:text-white"
+        className="h-auto min-h-9 w-full cursor-pointer justify-start gap-2 rounded-lg px-2 py-1 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
         size="sm"
         variant="ghost"
       >
         {renderStackedIcons()}
         <span className="text-xs font-medium">
-          {t("Used")}
-          {toolCalls.length} tool
-          {toolCalls.length > 1 ? "s" : ""}
+          {justAIGroup ? t("JustAI tools") : t("Tool activity")}
+          <span className="ml-1.5 font-normal text-muted-foreground">
+            {t(toolCalls.length === 1 ? "{count} call" : "{count} calls", {
+              count: toolCalls.length,
+            })}
+          </span>
         </span>
         {summary && (
           <span
-            className="max-w-72 truncate text-[11px] font-normal text-zinc-400 dark:text-zinc-500"
+            className="min-w-0 flex-1 truncate text-left text-xs font-normal text-muted-foreground"
             title={summary}
           >
             · {summary}
@@ -344,12 +336,13 @@ export function ToolCallsSection({
           isGroupExpanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
         )}
       >
-        <div className="space-y-0 pt-1">
+        <div className="ml-3 border-l border-border pt-2 pl-3">
           {toolCalls.map((call, index) => {
             const hasCategoryText =
               call.show_category !== false &&
               call.tool_category &&
-              call.tool_category !== "unknown"
+              call.tool_category !== "unknown" &&
+              call.tool_category !== "justai"
             const requiresApproval = call.status === "waiting"
             const approvalIsSubmitting = Boolean(
               call.tool_call_id && submittingApprovalIds.has(call.tool_call_id)
