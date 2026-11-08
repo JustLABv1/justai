@@ -184,3 +184,8 @@ func selectedContextToolAllowed(name string) bool {
 		return false
 	}
 }
+
+// Explicit source selections are handled separately; broad retrieval always needs consent.
+func automaticStorageSearchAllowed(enabled bool, selection chatContextSelection) bool {
+	return enabled && !selection.SelectedOnly && !selection.SkipAutomatic
+}

@@ -1,5 +1,8 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Search Storage": "Speicher durchsuchen",
+  "Search workspace Storage for this conversation. Files and / references still work when this is off.":
+    "Durchsuche den Workspace-Speicher für diese Unterhaltung. Dateien und /-Verweise funktionieren auch bei deaktivierter Suche.",
   "Available tools": "Verfügbare Tools",
   "JustAI tools": "JustAI-Tools",
   "JustAI help": "JustAI-Hilfe",
