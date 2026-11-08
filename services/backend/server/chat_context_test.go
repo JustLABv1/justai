@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -67,5 +68,38 @@ func TestExplicitFileWithMCPKeepsSelectedFileContext(t *testing.T) {
 	selection := selectChatContext(&assistantUserMessage{Text: ":mcp[Scanner]{name=mcp:" + uuid.NewString() + "} :knowledge[Report]{name=knowledge:" + id.String() + "}"}, nil, nil)
 	if selection.SkipAutomatic || !selection.SelectedOnly || len(selection.SourceIDs) != 1 || selection.SourceIDs[0] != id {
 		t.Fatalf("explicit file must remain selected: %#v", selection)
+	}
+}
+
+func TestAutomaticStorageSearchRequiresOptIn(t *testing.T) {
+	for _, test := range []struct {
+		enabled   bool
+		selection chatContextSelection
+		want      bool
+	}{
+		{false, chatContextSelection{}, false},
+		{true, chatContextSelection{}, true},
+		{true, chatContextSelection{SelectedOnly: true}, false},
+		{true, chatContextSelection{SkipAutomatic: true}, false},
+	} {
+		if got := automaticStorageSearchAllowed(test.enabled, test.selection); got != test.want {
+			t.Fatalf("automatic search gate got %v want %v", got, test.want)
+		}
+	}
+}
+
+func TestStorageSearchRequestDefaultsOffEvenWithLegacyAutomaticPolicy(t *testing.T) {
+	var request assistantUIRequest
+	if err := json.Unmarshal([]byte(`{"contextPolicy":"automatic","deepContext":true}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	if automaticStorageSearchAllowed(request.SearchStorage, chatContextSelection{}) {
+		t.Fatal("legacy policy or deep context must not enable broad Storage search")
+	}
+	if err := json.Unmarshal([]byte(`{"searchStorage":true}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	if !automaticStorageSearchAllowed(request.SearchStorage, chatContextSelection{}) {
+		t.Fatal("explicit opt-in must enable retrieval")
 	}
 }

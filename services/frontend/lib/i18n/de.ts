@@ -1,5 +1,58 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Not found": "Nicht gefunden",
+  "This page wandered off": "Diese Seite ist abgewandert",
+  "The address may be mistyped, or the page was moved or removed. Nothing here for you to fix.": "Die Adresse ist vielleicht falsch geschrieben, oder die Seite wurde verschoben oder entfernt. Du musst hier nichts beheben.",
+  "Backend unreachable": "Backend nicht erreichbar",
+  "We can't reach JustAI right now": "JustAI ist gerade nicht erreichbar",
+  "The server isn't answering. It may be restarting or your connection dropped. Your work is safe, and we'll reconnect on our own.": "Der Server antwortet nicht. Möglicherweise startet er neu oder deine Verbindung ist abgebrochen. Deine Arbeit ist sicher, wir verbinden uns automatisch neu.",
+  "Server error": "Serverfehler",
+  "Something broke on our side": "Auf unserer Seite ist etwas schiefgelaufen",
+  "The server hit an unexpected problem while handling this. It isn't you. Try again in a moment.": "Der Server ist dabei auf ein unerwartetes Problem gestoßen. Das liegt nicht an dir. Versuche es gleich noch einmal.",
+  "Signed out": "Abgemeldet",
+  "Your session has ended": "Deine Sitzung ist abgelaufen",
+  "Sign in again to pick up where you left off.": "Melde dich erneut an, um dort weiterzumachen, wo du aufgehört hast.",
+  "No access": "Kein Zugriff",
+  "You don't have access to this": "Du hast darauf keinen Zugriff",
+  "Your account isn't allowed to open this page. Ask a workspace admin if you think it should be.": "Dein Konto darf diese Seite nicht öffnen. Frage eine Workspace-Administration, falls das nicht stimmt.",
+  "Timed out": "Zeitüberschreitung",
+  "That took too long": "Das hat zu lange gedauert",
+  "The request timed out before it finished. Please try again.": "Die Anfrage wurde nicht rechtzeitig abgeschlossen. Bitte versuche es erneut.",
+  "Slow down": "Etwas langsamer",
+  "Too many requests": "Zu viele Anfragen",
+  "You're going faster than we can keep up. Wait a moment, then retry.": "Du bist schneller, als wir mitkommen. Warte einen Moment und versuche es dann erneut.",
+  "Request problem": "Problem mit der Anfrage",
+  "We couldn't complete that request": "Wir konnten die Anfrage nicht abschließen",
+  "Something about the request wasn't accepted. Go back and try again, or head home.": "Die Anfrage wurde nicht akzeptiert. Geh zurück und versuche es erneut oder zur Startseite.",
+  "Reconnected": "Wieder verbunden",
+  "Checking connection…": "Verbindung wird geprüft …",
+  "Retrying in {seconds}s": "Neuer Versuch in {seconds} s",
+  "Back to workspace": "Zurück zum Workspace",
+  "Search Storage": "Speicher durchsuchen",
+  "Search workspace Storage for this conversation. Files and / references still work when this is off.":
+    "Durchsuche den Workspace-Speicher für diese Unterhaltung. Dateien und /-Verweise funktionieren auch bei deaktivierter Suche.",
+  "Available tools": "Verfügbare Tools",
+  "JustAI tools": "JustAI-Tools",
+  "JustAI help": "JustAI-Hilfe",
+  "Open JustAI page": "JustAI-Seite öffnen",
+  "Set up live transcription": "Live-Transkription einrichten",
+  "Set up video transcription": "Video-Transkription einrichten",
+  "Read transcript": "Transkript lesen",
+  "Tool activity": "Tool-Aktivität",
+  "{count} call": "{count} Aufruf",
+  "{count} calls": "{count} Aufrufe",
+  "Set up recording": "Aufnahme einrichten",
+  "Choose your audio source and settings, then start recording.":
+    "Wähle deine Audioquelle und Einstellungen und starte dann die Aufnahme.",
+  "Open this page in JustAI.": "Öffne diese Seite in JustAI.",
+  Consistency: "Regelmäßigkeit",
+  "Capture & agents": "Aufnahmen & Agenten",
+  Account: "Konto",
+  "Profile sections": "Profilbereiche",
+  "{value0} active days out of {value1}": "{value0} aktive Tage von {value1}",
+  "actions in the last 90 days": "Aktionen in den letzten 90 Tagen",
+  "Select a day to see its activity.":
+    "Wähle einen Tag, um seine Aktivität anzusehen.",
   "LiteLLM API key": "LiteLLM-API-Schlüssel",
   "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.":
     "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",
@@ -4630,4 +4683,18 @@ export const de = {
   "Good afternoon, {name}": "Guten Tag, {name}",
   "Good evening, {name}": "Guten Abend, {name}",
   "Your name": "Dein Name",
+  "Setup steps": "Einrichtungsschritte",
+  "See where you’re working, check your access and choose the name others will see.":
+    "Lerne deinen Workspace kennen, prüfe deine Zugriffsrechte und wähle deinen Anzeigenamen.",
+  "Find the models your administrator has made available and learn where your chat history lives.":
+    "Entdecke die bereitgestellten Modelle und erfahre, wo du deinen Chatverlauf findest.",
+  "Name your workspace. Invite people and organize shared resources whenever you’re ready.":
+    "Gib deinem Workspace einen Namen. Lade später weitere Personen ein und organisiere gemeinsame Ressourcen.",
+  "Use existing accounts or connect your company’s identity provider with OIDC. You can do this later.":
+    "Nutze vorhandene Konten oder verbinde den Identitätsanbieter deines Unternehmens über OIDC. Das kannst du auch später einrichten.",
+  "Connect a hosted provider or your own model server, choose a model and test the connection.":
+    "Verbinde einen gehosteten Anbieter oder deinen eigenen Modellserver, wähle ein Modell und prüfe die Verbindung.",
+  "Your account": "Dein Konto",
+  " and have {role} access to this workspace":
+    " und hast als {role} Zugriff auf diesen Workspace",
 } as const

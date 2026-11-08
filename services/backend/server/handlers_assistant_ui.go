@@ -39,6 +39,7 @@ type assistantUIRequest struct {
 	Model               string            `json:"model"`
 	RequestID           string            `json:"requestId"`
 	UseMemory           bool              `json:"useMemory"`
+	SearchStorage       bool              `json:"searchStorage"`
 	DeepContext         bool              `json:"deepContext"`
 	InheritRepositories bool              `json:"inheritRepositories"`
 	ContextPolicy       string            `json:"contextPolicy"`
@@ -436,14 +437,16 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			latestUser.SelectedOnlyContext = selectedOnlyContext
 			if selectedOnlyContext {
 				request.ContextPolicy = "selected-only"
-			} else {
+			} else if request.SearchStorage {
 				request.ContextPolicy = "automatic"
+			} else {
+				request.ContextPolicy = "none"
 			}
 			if selectedOnlyContext {
 				knowledgeAttached = true
 				knowledgeStatusRequested = true
-			} else if selection.SkipAutomatic || approval != nil {
-				// Explicit MCP turns and approval continuations must not trigger
+			} else if !automaticStorageSearchAllowed(request.SearchStorage, selection) || approval != nil {
+				// Storage is opt-in. Explicit MCP turns and approval continuations must not trigger
 				// a new automatic Storage search.
 				knowledgeStatusRequested = false
 			} else if len(request.IncludeSpaceIDs) == 0 && len(request.ExcludeSpaceIDs) == 0 && assistantUIRequestsImageGeneration(latestUser) {
@@ -458,9 +461,8 @@ func (a *App) assistantUIChat(c *gin.Context) {
 				// unavailable, automatic grounding must fail closed for this turn
 				// instead of falling back to the entire library.
 				contextResolution = knowledgeContextResolution{Restricted: true}
-				// Durable Knowledge is now background context. The server chooses
-				// relevant authorized passages on each turn; the browser no longer
-				// needs to attach a resource through a conversation drawer.
+				// The user opted into Storage search. Choose relevant authorized
+				// passages for this turn without requiring individual references.
 				// Catalog synchronization is idempotent and keeps newly-created
 				// native records visible to the resolver.
 				if catalogErr := a.syncKnowledgeCatalog(c); catalogErr != nil {
@@ -2077,7 +2079,9 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			var result json.RawMessage
 			var callErr error
 			if binding.Builtin {
-				if binding.ToolName == "discover_mcp_tools" {
+				if binding.ToolName == "list_justai_tools" {
+					result, callErr = justAIToolCatalog(definitions, bindings)
+				} else if binding.ToolName == "discover_mcp_tools" {
 					query := strings.TrimSpace(stringToolArgument(arguments, "query"))
 					if query == "" {
 						callErr = fmt.Errorf("an MCP capability query is required")

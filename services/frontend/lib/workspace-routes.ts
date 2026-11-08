@@ -405,3 +405,39 @@ export function parseWorkspaceRoute(
     legacyRedirect,
   }
 }
+
+const knownSections = new Set<string>([
+  ...validViews,
+  "conversation",
+  "chat",
+  "live-transcription",
+  "transcription",
+  "settings",
+  "workspace-settings",
+  "integrations",
+  "assistants",
+  "automations",
+  "notes",
+  "memory",
+])
+
+/** False for addresses the workspace would otherwise silently show as an empty chat. */
+export function isKnownWorkspaceRoute(pathname: string) {
+  const segments = pathname.split("/").filter(Boolean)
+  const section = segments[0]
+  if (!section) return true
+  if (isUUID(decodeSegment(section))) return segments.length === 1
+  if (!knownSections.has(section)) return false
+  // Only these sections take a second segment (an id), `join` being the participant link.
+  const takesId = [
+    "conversation",
+    "chat",
+    "live-transcription",
+    "transcription",
+    "video-transcription",
+  ]
+  return (
+    segments.length === 1 ||
+    (segments.length === 2 && takesId.includes(section))
+  )
+}

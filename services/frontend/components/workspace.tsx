@@ -1,15 +1,11 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  Fragment,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
+import { workspaceBreadcrumbs } from "@/lib/workspace-breadcrumbs"
+import type { WorkspaceRoute } from "@/lib/workspace-routes"
 import { Home, Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
@@ -34,14 +30,7 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from "@/components/panelui/alert-dialog"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+import { Breadcrumb } from "@/components/panelui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import { PAGE_ACTIONS_SLOT_ID } from "@/components/ui/page"
 import { Separator } from "@/components/ui/separator"
@@ -63,12 +52,15 @@ import type {
   Automation,
   WorkspaceProject,
 } from "@/lib/types"
-import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
-import { cn } from "@/lib/utils"
 import {
-  FocusWorkspaceSidebar,
-  railNavigation,
-} from "@/components/focus-workspace-sidebar"
+  isKnownWorkspaceRoute,
+  parseWorkspaceRoute,
+  workspacePath,
+} from "@/lib/workspace-routes"
+import { ErrorScreen } from "@/components/error-screen"
+import { errorPageKind } from "@/lib/error-pages"
+import { cn } from "@/lib/utils"
+import { FocusWorkspaceSidebar } from "@/components/focus-workspace-sidebar"
 import {
   SidebarInset,
   SidebarProvider,
@@ -98,9 +90,15 @@ export function Workspace({
   const activeView = route.view
   const requestedConversationId = route.conversationId
   const requestedSessionId = route.sessionId
+  // An explicit chat action opens the normal setup wizard; it never captures audio.
+  const liveSetupRequested =
+    activeView === "transcription" &&
+    !requestedSessionId &&
+    searchParams.get("create") === "1"
 
   const [status, setStatus] = useState<WorkspaceStatus>("loading")
   const [loadError, setLoadError] = useState("")
+  const [loadErrorStatus, setLoadErrorStatus] = useState(0)
   const [featureErrors, setFeatureErrors] = useState<Record<string, string>>({})
   const [disabledFeatures, setDisabledFeatures] = useState<
     Record<string, string>
@@ -274,6 +272,7 @@ export function Workspace({
     async function loadWorkspace() {
       setStatus("loading")
       setLoadError("")
+      setLoadErrorStatus(0)
       try {
         const me = await api.get<{ user: User; organizations: Organization[] }>(
           "/api/v1/auth/me"
@@ -458,6 +457,8 @@ export function Workspace({
           redirectToLogin()
           return
         }
+        // Anything that is not an HTTP answer (no status) means no backend.
+        setLoadErrorStatus(caught instanceof APIError ? caught.status : 0)
         setLoadError(
           caught instanceof Error
             ? caught.message
@@ -1116,22 +1117,19 @@ export function Workspace({
   if (status === "loading") return <WorkspaceLoading />
 
   if (status === "error" || !user) {
+    const errorStatus = loadErrorStatus || 0
     return (
-      <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
-        <Alert className="max-w-md" variant="destructive">
-          <AlertTitle>{t("Workspace unavailable")}</AlertTitle>
-          <AlertDescription className="flex flex-col gap-4">
-            <span>{loadError || "Please sign in again to continue."}</span>
-            <Button
-              className="w-fit"
-              variant="outline"
-              onClick={() => setReloadToken((value) => value + 1)}
-            >
-              {t("Try again")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      </main>
+      <ErrorScreen
+        kind={errorPageKind(errorStatus)}
+        status={errorStatus || null}
+        description={
+          errorStatus >= 400 && errorStatus < 500 && errorStatus !== 408
+            ? loadError || undefined
+            : undefined
+        }
+        onRetry={() => setReloadToken((value) => value + 1)}
+        homeHref={null}
+      />
     )
   }
 
@@ -1189,7 +1187,14 @@ export function Workspace({
           userInitials={initials}
         />
         <SidebarInset className="isolate min-w-0" id="workspace-inset">
-          <WorkspaceHeader activeView={activeView} />
+          <WorkspaceHeader
+            route={route}
+            detailTitle={
+              activeView === "chat"
+                ? activeConversation?.title
+                : activeSession?.title
+            }
+          />
           {Object.keys(featureErrors).length > 0 && (
             <Alert className="m-4 mb-0 shrink-0" variant="destructive">
               <AlertTitle>
@@ -1257,41 +1262,45 @@ export function Workspace({
                   : "mx-auto max-w-[1440px] overflow-y-auto p-4 sm:p-6 lg:p-8"
             )}
           >
-            {activeView === "chat" && (
-              <ChatView
-                displayName={user.displayName}
-                key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
-                // The picker is now fed by the canonical agent catalog. The
-                // compatibility assistant list remains available to the
-                // legacy editor below.
-                assistants={chatAgents}
-                cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
-                conversationId={activeConversationId}
-                conversation={activeConversation}
-                endpoints={endpoints}
-                mcpServers={servers}
-                notes={notes}
-                onAssistantSelectionChange={setDraftAssistantId}
-                onEnsureConversation={ensureConversationForContext}
-                onConversationCreated={(conversation) => {
-                  setDraftAssistantId(conversation.assistantId ?? null)
-                  setConversations((current) => {
-                    if (current.some((item) => item.id === conversation.id)) {
-                      return current
-                    }
-                    return [conversation, ...current]
-                  })
-                  navigate("chat", conversation.id, true)
-                }}
-                onConversationUpdated={() => {
-                  void refreshConversations().catch(() => undefined)
-                }}
-                onConversationSettled={settlePendingConversation}
-                onConversationMissing={handleConversationMissing}
-                onNavigate={(view) => navigate(view, null)}
-                onOpenHistory={() => setHistoryOpen(true)}
-              />
+            {!isKnownWorkspaceRoute(pathname ?? "/") && (
+              <ErrorScreen kind="not-found" status={404} />
             )}
+            {isKnownWorkspaceRoute(pathname ?? "/") &&
+              activeView === "chat" && (
+                <ChatView
+                  displayName={user.displayName}
+                  key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
+                  // The picker is now fed by the canonical agent catalog. The
+                  // compatibility assistant list remains available to the
+                  // legacy editor below.
+                  assistants={chatAgents}
+                  cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
+                  conversationId={activeConversationId}
+                  conversation={activeConversation}
+                  endpoints={endpoints}
+                  mcpServers={servers}
+                  notes={notes}
+                  onAssistantSelectionChange={setDraftAssistantId}
+                  onEnsureConversation={ensureConversationForContext}
+                  onConversationCreated={(conversation) => {
+                    setDraftAssistantId(conversation.assistantId ?? null)
+                    setConversations((current) => {
+                      if (current.some((item) => item.id === conversation.id)) {
+                        return current
+                      }
+                      return [conversation, ...current]
+                    })
+                    navigate("chat", conversation.id, true)
+                  }}
+                  onConversationUpdated={() => {
+                    void refreshConversations().catch(() => undefined)
+                  }}
+                  onConversationSettled={settlePendingConversation}
+                  onConversationMissing={handleConversationMissing}
+                  onNavigate={(view) => navigate(view, null)}
+                  onOpenHistory={() => setHistoryOpen(true)}
+                />
+              )}
             {activeView === "transcription" &&
               sessionViewMatches &&
               (disabledFeatures.transcription ? (
@@ -1302,10 +1311,14 @@ export function Workspace({
                   onStartChat={startChatWithTranscription}
                   onSessionCreated={handleTranscriptionSessionCreated}
                   onSessionsChanged={handleTranscriptionSessionsChanged}
-                  onCreateSessionRequestHandled={() =>
+                  onCreateSessionRequestHandled={() => {
                     setCreateTranscriptionRequested(false)
+                    if (liveSetupRequested)
+                      router.replace("/live-transcription", { scroll: false })
+                  }}
+                  createSessionRequested={
+                    createTranscriptionRequested || liveSetupRequested
                   }
-                  createSessionRequested={createTranscriptionRequested}
                   sessionId={activeSessionId}
                   sessions={transcriptionSessions.filter(
                     (session) => session.kind !== "video"
@@ -1513,83 +1526,77 @@ function FeatureDisabledPanel({ label }: { label: string }) {
   )
 }
 
-function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
+function WorkspaceHeader({
+  route,
+  detailTitle,
+}: {
+  route: WorkspaceRoute
+  detailTitle?: string
+}) {
   const { t } = useTranslations()
   const folderTrail = useFolderTrail()
-
-  const item = railNavigation.find((entry) => entry.id === activeView)
-  const label =
-    item?.label ??
-    (activeView === "settings"
-      ? t("Settings")
-      : activeView === "profile"
-        ? t("Profile")
-        : activeView === "admin"
-          ? t("Platform admin")
-          : "JustAI")
+  const crumbs = workspaceBreadcrumbs(route, detailTitle)
+  const folders = route.view === "knowledge" ? (folderTrail?.items ?? []) : []
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-      <SidebarTrigger className="-ml-1" />
-      <Separator className="mr-1 h-4" orientation="vertical" />
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <Home aria-label={t("Home")} className="size-3.5" />
-          </BreadcrumbItem>
-          {item?.group && t(item.group) !== t(label) && (
-            <>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem className="text-muted-foreground">
-                {item.group}
-              </BreadcrumbItem>
-            </>
-          )}
-          <BreadcrumbSeparator />
-          {activeView === "knowledge" && folderTrail?.items.length ? (
-            <>
-              <BreadcrumbItem>
-                <BreadcrumbLink
+      <SidebarTrigger className="-ml-1 md:hidden" />
+      <Separator className="mr-1 h-4 md:hidden" orientation="vertical" />
+      <Breadcrumb size="sm" className="min-w-0 flex-1">
+        <Breadcrumb.List>
+          <Breadcrumb.Item>
+            <Breadcrumb.Link aria-label={t("Home")} render={<Link href="/" />}>
+              <Home aria-hidden="true" className="size-3.5" />
+            </Breadcrumb.Link>
+          </Breadcrumb.Item>
+          {crumbs.map((crumb, index) => {
+            const label = crumb.literal ? crumb.label : t(crumb.label)
+            const current = index === crumbs.length - 1 && folders.length === 0
+            return (
+              <Breadcrumb.Item key={`${index}:${crumb.label}`}>
+                {current ? (
+                  <Breadcrumb.Page>{label}</Breadcrumb.Page>
+                ) : crumb.href ? (
+                  <Breadcrumb.Link render={<Link href={crumb.href} />}>
+                    {label}
+                  </Breadcrumb.Link>
+                ) : folders.length > 0 && index === crumbs.length - 1 ? (
+                  <Breadcrumb.Link
+                    render={
+                      <button
+                        type="button"
+                        onClick={() => folderTrail?.select("all")}
+                      />
+                    }
+                  >
+                    {label}
+                  </Breadcrumb.Link>
+                ) : (
+                  <span className="truncate text-muted-foreground">
+                    {label}
+                  </span>
+                )}
+              </Breadcrumb.Item>
+            )
+          })}
+          {folders.map((folder, index) => (
+            <Breadcrumb.Item key={folder.id}>
+              {index === folders.length - 1 ? (
+                <Breadcrumb.Page>{folder.name}</Breadcrumb.Page>
+              ) : (
+                <Breadcrumb.Link
                   render={
                     <button
-                      onClick={() => folderTrail.select("all")}
                       type="button"
+                      onClick={() => folderTrail?.select(folder.id)}
                     />
                   }
                 >
-                  {t(label)}
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              {folderTrail.items.map((folder, index) => (
-                <Fragment key={folder.id}>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem className="min-w-0">
-                    {index === folderTrail.items.length - 1 ? (
-                      <BreadcrumbPage className="truncate">
-                        {folder.name}
-                      </BreadcrumbPage>
-                    ) : (
-                      <BreadcrumbLink
-                        className="truncate"
-                        render={
-                          <button
-                            onClick={() => folderTrail.select(folder.id)}
-                            type="button"
-                          />
-                        }
-                      >
-                        {folder.name}
-                      </BreadcrumbLink>
-                    )}
-                  </BreadcrumbItem>
-                </Fragment>
-              ))}
-            </>
-          ) : (
-            <BreadcrumbItem>
-              <BreadcrumbPage>{t(label)}</BreadcrumbPage>
-            </BreadcrumbItem>
-          )}
-        </BreadcrumbList>
+                  {folder.name}
+                </Breadcrumb.Link>
+              )}
+            </Breadcrumb.Item>
+          ))}
+        </Breadcrumb.List>
       </Breadcrumb>
       <div
         className="ml-auto flex min-w-0 items-center gap-2"

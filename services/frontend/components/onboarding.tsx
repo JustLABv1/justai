@@ -5,7 +5,7 @@ import {
   useTranslations,
   useTranslatedConfig,
 } from "@/components/locale-provider"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
@@ -25,33 +25,20 @@ import type {
 import { BrandMark } from "@/components/brand-mark"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
+import { Alert } from "@/components/panelui/alert"
+import { Steps } from "@/components/panelui/steps"
+import { Frame } from "@/components/panelui/frame"
+import { Button } from "@/components/panelui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+} from "@/components/panelui/card"
+import { Field, FieldLabel, FieldDescription } from "@/components/panelui/field"
+import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
-import {
-  Stepper,
-  StepperContent,
-  StepperIndicator,
-  StepperItem,
-  StepperNav,
-  StepperPanel,
-  StepperTitle,
-  StepperTrigger,
-} from "@/components/reui/stepper"
 
 type OnboardingState = {
   installation: boolean
@@ -227,9 +214,9 @@ export function Onboarding() {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         {error ? (
-          <Alert variant="destructive" className="max-w-lg">
-            <AlertTitle>{t("Setup unavailable")}</AlertTitle>
-            <AlertDescription>
+          <Alert tone="destructive" variant="plain" className="max-w-lg">
+            <Alert.Title>{t("Setup unavailable")}</Alert.Title>
+            <Alert.Description>
               {t(error)}
               <Button
                 onClick={() => setReload((value) => value + 1)}
@@ -237,7 +224,7 @@ export function Onboarding() {
               >
                 {t("Try again")}
               </Button>
-            </AlertDescription>
+            </Alert.Description>
           </Alert>
         ) : (
           <Spinner label={t("Loading setup")} />
@@ -247,15 +234,7 @@ export function Onboarding() {
 
   return (
     <main className="flex min-h-0 w-full flex-1 overflow-y-auto bg-background p-4 sm:p-8">
-      <Stepper
-        className="m-auto grid w-full max-w-6xl overflow-hidden rounded-3xl bg-card shadow-xl shadow-black/5 md:min-h-[42rem] md:grid-cols-[16rem_minmax(0,1fr)]"
-        orientation="vertical"
-        value={index + 1}
-        onValueChange={(value) => {
-          if (value - 1 < index) void navigate(value - 1)
-        }}
-        indicators={{ completed: <Check className="size-4" /> }}
-      >
+      <div className="m-auto grid w-full max-w-6xl overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-black/5 md:min-h-[42rem] md:grid-cols-[16rem_minmax(0,1fr)]">
         <aside className="flex flex-col gap-7 bg-muted/50 p-6 md:p-7">
           <div
             className="flex justify-center md:justify-start"
@@ -276,38 +255,44 @@ export function Onboarding() {
                 : t("A quick introduction to your workspace.")}
             </p>
           </div>
-          <StepperNav className="hidden gap-1 md:flex">
+          <Steps
+            orientation="vertical"
+            value={index}
+            onValueChange={(next) => {
+              if (next < index) void navigate(next)
+            }}
+            aria-label={t("Setup steps")}
+            className="hidden md:flex"
+          >
             {steps.map((step, position) => (
-              <StepperItem
+              <Steps.Item
                 key={step.id}
-                step={position + 1}
-                disabled={busy || position > index}
-                className="w-full items-stretch not-last:flex-none"
+                step={position}
+                disabled={busy}
+                loading={busy && position === index}
               >
-                <StepperTrigger className="w-full gap-3 rounded-xl px-3 py-3 text-left disabled:opacity-100 data-[state=active]:bg-card">
-                  <StepperIndicator className="size-7">
-                    {position + 1}
-                  </StepperIndicator>
-                  <span className="flex min-w-0 flex-col gap-1.5">
-                    <StepperTitle>{step.title}</StepperTitle>
-                    <span className="text-xs leading-normal text-muted-foreground">
-                      {step.id === "welcome"
-                        ? t("What we’ll set up")
+                <Steps.Trigger className="w-full">
+                  <Steps.Indicator />
+                  <Steps.Title>{step.title}</Steps.Title>
+                  <Steps.Description className="text-xs">
+                    {t(
+                      step.id === "welcome"
+                        ? "What we’ll set up"
                         : step.id === "workspace"
                           ? state.installation
-                            ? t("Name and identity")
-                            : t("Your profile and access")
+                            ? "Name and identity"
+                            : "Your profile and access"
                           : step.id === "authentication"
-                            ? t("OIDC · optional")
+                            ? "OIDC · optional"
                             : step.id === "endpoints"
-                              ? t("Provider and model")
-                              : t("Check and launch")}
-                    </span>
-                  </span>
-                </StepperTrigger>
-              </StepperItem>
+                              ? "Provider and model"
+                              : "Check and launch"
+                    )}
+                  </Steps.Description>
+                </Steps.Trigger>
+              </Steps.Item>
             ))}
-          </StepperNav>
+          </Steps>
           <div className="mt-auto hidden flex-col gap-2 pt-5 md:flex">
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Check className="size-3.5" /> {t("Progress saved automatically")}
@@ -321,7 +306,7 @@ export function Onboarding() {
           </div>
         </aside>
         <section className="flex min-w-0 flex-col gap-6 p-6 sm:p-9 lg:p-12">
-          <StepperPanel className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1">
             <div className="mb-6 flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
                 {t("Step")} {index + 1} {t("of")} {steps.length}
@@ -346,7 +331,7 @@ export function Onboarding() {
                         : t("Ready for your first conversation")}
               </h1>
             </div>
-            <StepperContent value={1}>
+            <SetupStep current={index} step={0}>
               <div className="flex flex-col gap-6">
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   {state.installation
@@ -357,51 +342,53 @@ export function Onboarding() {
                         "Get to know your workspace and make sure you’re ready to start. Your administrator manages sign-in and shared AI models."
                       )}
                 </p>
-                <div className="flex flex-col gap-5 rounded-2xl bg-muted/50 p-5 sm:p-6">
-                  {(state.installation
-                    ? [
-                        {
-                          icon: MessageSquare,
-                          title: t("Create a home for your team"),
-                          text: "Name your workspace. Invite people and organize shared resources whenever you’re ready.",
-                        },
-                        {
-                          icon: ShieldCheck,
-                          title: t("Choose how people sign in"),
-                          text: "Use existing accounts or connect your company’s identity provider with OIDC. You can do this later.",
-                        },
-                        {
-                          icon: Sparkles,
-                          title: t("Bring your preferred AI"),
-                          text: "Connect a hosted provider or your own model server, choose a model and test the connection.",
-                        },
-                      ]
-                    : [
-                        {
-                          icon: MessageSquare,
-                          title: t("Meet your workspace"),
-                          text: "See where you’re working, check your access and choose the name others will see.",
-                        },
-                        {
-                          icon: Sparkles,
-                          title: t("Start your first conversation"),
-                          text: "Find the models your administrator has made available and learn where your chat history lives.",
-                        },
-                      ]
-                  ).map(({ icon: Icon, title, text }) => (
-                    <div key={title} className="flex items-start gap-4">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-card text-primary">
-                        <Icon className="size-4" />
-                      </span>
-                      <div className="flex flex-col gap-1">
-                        <h3 className="text-sm font-medium">{title}</h3>
-                        <p className="text-sm leading-relaxed text-muted-foreground">
-                          {text}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Frame>
+                  <Frame.Panel>
+                    {(state.installation
+                      ? [
+                          {
+                            icon: MessageSquare,
+                            title: t("Create a home for your team"),
+                            text: "Name your workspace. Invite people and organize shared resources whenever you’re ready.",
+                          },
+                          {
+                            icon: ShieldCheck,
+                            title: t("Choose how people sign in"),
+                            text: "Use existing accounts or connect your company’s identity provider with OIDC. You can do this later.",
+                          },
+                          {
+                            icon: Sparkles,
+                            title: t("Bring your preferred AI"),
+                            text: "Connect a hosted provider or your own model server, choose a model and test the connection.",
+                          },
+                        ]
+                      : [
+                          {
+                            icon: MessageSquare,
+                            title: t("Meet your workspace"),
+                            text: "See where you’re working, check your access and choose the name others will see.",
+                          },
+                          {
+                            icon: Sparkles,
+                            title: t("Start your first conversation"),
+                            text: "Find the models your administrator has made available and learn where your chat history lives.",
+                          },
+                        ]
+                    ).map(({ icon: Icon, title, text }) => (
+                      <Frame.Row key={title} className="items-start gap-3 py-4">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-card text-primary">
+                          <Icon className="size-4" />
+                        </span>
+                        <div className="flex flex-col gap-1">
+                          <h3 className="text-sm font-medium">{title}</h3>
+                          <p className="text-sm leading-relaxed text-muted-foreground">
+                            {t(text)}
+                          </p>
+                        </div>
+                      </Frame.Row>
+                    ))}
+                  </Frame.Panel>
+                </Frame>
                 {state.installation && (
                   <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
                     <Check className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -413,11 +400,13 @@ export function Onboarding() {
                   </p>
                 )}
               </div>
-            </StepperContent>
-            <StepperContent value={2}>
+            </SetupStep>
+            <SetupStep current={index} step={1}>
               <Card>
                 <CardHeader>
-                  <CardTitle>{organization?.name ?? "Your account"}</CardTitle>
+                  <CardTitle>
+                    {organization?.name ?? t("Your account")}
+                  </CardTitle>
                   <CardDescription>
                     {state.installation
                       ? t(
@@ -426,21 +415,31 @@ export function Onboarding() {
                       : t("You’re signed in as {value0}{value1}.", {
                           value0: user.email,
                           value1: organization
-                            ? ` and have ${organization.role ?? "member"} access to this workspace`
+                            ? t(" and have {role} access to this workspace", {
+                                role: t(
+                                  organization.role === "owner"
+                                    ? "Owner"
+                                    : organization.role === "admin"
+                                      ? "Admin"
+                                      : "Member"
+                                ),
+                              })
                             : "",
                         })}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <FieldGroup>
+                  <div className="flex flex-col gap-4">
                     <Field>
-                      <FieldLabel htmlFor="onboarding-name">
+                      <FieldLabel>
                         {state.installation
                           ? t("Workspace name")
                           : t("Display name")}
                       </FieldLabel>
                       <Input
                         id="onboarding-name"
+                        size="lg"
+                        disabled={busy}
                         value={name}
                         onChange={(event) => setName(event.target.value)}
                         maxLength={80}
@@ -456,12 +455,12 @@ export function Onboarding() {
                             )}
                       </FieldDescription>
                     </Field>
-                  </FieldGroup>
+                  </div>
                 </CardContent>
               </Card>
-            </StepperContent>
+            </SetupStep>
             {state.installation && (
-              <StepperContent value={3}>
+              <SetupStep current={index} step={2}>
                 <div className="flex flex-col gap-4">
                   <p className="text-sm text-muted-foreground">
                     {t(
@@ -475,10 +474,10 @@ export function Onboarding() {
                     )}
                   </p>
                 </div>
-              </StepperContent>
+              </SetupStep>
             )}
             {state.installation && (
-              <StepperContent value={4}>
+              <SetupStep current={index} step={3}>
                 <div className="flex flex-col gap-4">
                   <p className="text-sm text-muted-foreground">
                     {t(
@@ -500,9 +499,9 @@ export function Onboarding() {
                     )}
                   </p>
                 </div>
-              </StepperContent>
+              </SetupStep>
             )}
-            <StepperContent value={steps.length}>
+            <SetupStep current={index} step={steps.length - 1}>
               <div className="flex flex-col gap-4">
                 <Card>
                   <CardHeader>
@@ -551,10 +550,10 @@ export function Onboarding() {
                   </CardContent>
                 </Card>
                 {!hasChat && (
-                  <Alert>
+                  <Alert tone="warning" variant="plain">
                     <MessageSquare />
-                    <AlertTitle>{t("AI still needs a model")}</AlertTitle>
-                    <AlertDescription>
+                    <Alert.Title>{t("AI still needs a model")}</Alert.Title>
+                    <Alert.Description>
                       {state.installation
                         ? t(
                             "You can finish setup now and add an endpoint later in Platform admin → Endpoints."
@@ -562,7 +561,7 @@ export function Onboarding() {
                         : t(
                             "Ask your workspace administrator to connect an AI endpoint. You can still explore the workspace."
                           )}
-                    </AlertDescription>
+                    </Alert.Description>
                   </Alert>
                 )}
                 <p className="text-sm text-muted-foreground">
@@ -575,8 +574,8 @@ export function Onboarding() {
                       )}
                 </p>
               </div>
-            </StepperContent>
-          </StepperPanel>
+            </SetupStep>
+          </div>
           {error && <ToastFeedback message={error} type={"destructive"} />}
           <footer className="mt-auto flex items-center justify-between gap-3 pt-4">
             <Button
@@ -589,6 +588,7 @@ export function Onboarding() {
             </Button>
             <Button
               disabled={busy}
+              loading={busy}
               onClick={() =>
                 void navigate(
                   Math.min(index + 1, steps.length - 1),
@@ -596,7 +596,6 @@ export function Onboarding() {
                 )
               }
             >
-              {busy && <Spinner />}
               {index === steps.length - 1
                 ? hasChat
                   ? t("Open JustAI")
@@ -610,7 +609,19 @@ export function Onboarding() {
             </Button>
           </footer>
         </section>
-      </Stepper>
+      </div>
     </main>
   )
+}
+
+function SetupStep({
+  current,
+  step,
+  children,
+}: {
+  current: number
+  step: number
+  children: ReactNode
+}) {
+  return current === step ? <div>{children}</div> : null
 }

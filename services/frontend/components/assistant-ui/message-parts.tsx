@@ -2,6 +2,7 @@
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
+import { JustAIActionCard } from "./justai-action-card"
 import { TranscriptionCard } from "./transcription-card"
 import { MentionMessageText } from "./composer-mention"
 import { MCPActionCard } from "./mcp-action-card"
@@ -264,6 +265,12 @@ function ReasoningPart({ text }: { text: string }) {
 type ToolCallPart = Extract<PartState, { type: "tool-call" }>
 
 const toolLabelsMessages: Record<string, string> = {
+  get_justai_help: "JustAI help",
+  list_justai_tools: "Available tools",
+  navigate_justai: "Open JustAI page",
+  start_live_transcription: "Set up live transcription",
+  start_video_transcription: "Set up video transcription",
+  get_transcription: "Read transcript",
   web_search: "Web search",
   browse_url: "Browse URL",
   generate_image: "Generate image",
@@ -276,6 +283,18 @@ const toolLabelsMessages: Record<string, string> = {
 }
 
 function toolCategory(toolName: string, serverName?: string) {
+  if (
+    !serverName &&
+    [
+      "get_justai_help",
+      "list_justai_tools",
+      "navigate_justai",
+      "start_live_transcription",
+      "start_video_transcription",
+      "get_transcription",
+    ].includes(toolName)
+  )
+    return "justai"
   const provider = `${serverName ?? ""} ${toolName}`.toLowerCase()
   if (provider.includes("github")) return "github"
   if (provider.includes("gitlab")) return "gitlab"
@@ -480,29 +499,51 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
         approvals={waitingApprovals}
         messageId={messageId}
       />
-      {toolCalls.map((call) =>
-        call.integration_name ||
-        call.approval ||
-        call.tool_name.startsWith("mcp_") ? (
-          <MCPActionCard key={call.tool_call_id} call={call}>
-            <ToolResultContent toolName={call.tool_name} value={call.output} />
-          </MCPActionCard>
-        ) : (
-          <ToolCallsSection
-            key={call.tool_call_id}
-            approvalActions={false}
-            className="mb-2 w-full max-w-2xl"
-            toolCalls={[call]}
-            renderContent={(content, entry, kind) =>
-              kind === "output" ? (
-                <ToolResultContent toolName={entry.tool_name} value={content} />
-              ) : (
-                <CompactMarkdown content={content} />
-              )
-            }
-          />
+      {toolCalls
+        .reduce<Array<{ mcp: boolean; calls: ToolCallEntry[] }>>(
+          (groups, call) => {
+            const mcp = Boolean(
+              call.integration_name ||
+              call.approval ||
+              call.tool_name.startsWith("mcp_")
+            )
+            const last = groups.at(-1)
+            if (!mcp && last && !last.mcp) last.calls.push(call)
+            else groups.push({ mcp, calls: [call] })
+            return groups
+          },
+          []
         )
-      )}
+        .map((group) =>
+          group.mcp ? (
+            <MCPActionCard
+              key={group.calls[0].tool_call_id}
+              call={group.calls[0]}
+            >
+              <ToolResultContent
+                toolName={group.calls[0].tool_name}
+                value={group.calls[0].output}
+              />
+            </MCPActionCard>
+          ) : (
+            <ToolCallsSection
+              key={group.calls[0].tool_call_id}
+              approvalActions={false}
+              className="mb-3 w-full max-w-2xl"
+              toolCalls={group.calls}
+              renderContent={(content, entry, kind) =>
+                kind === "output" ? (
+                  <ToolResultContent
+                    toolName={entry.tool_name}
+                    value={content}
+                  />
+                ) : (
+                  <CompactMarkdown content={content} />
+                )
+              }
+            />
+          )
+        )}
       {indices
         .map((index) => messageParts[index])
         .filter(
@@ -515,6 +556,22 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
         .map((part) =>
           part?.type === "tool-call" ? (
             <TranscriptionCard key={part.toolCallId} value={part.result} />
+          ) : null
+        )}
+      {indices
+        .map((index) => messageParts[index])
+        .filter(
+          (part) =>
+            part?.type === "tool-call" &&
+            ["navigate_justai", "start_live_transcription"].includes(
+              part.toolName
+            ) &&
+            part.result !== undefined &&
+            !part.isError
+        )
+        .map((part) =>
+          part?.type === "tool-call" ? (
+            <JustAIActionCard key={part.toolCallId} value={part.result} />
           ) : null
         )}
       {generatedImages.map((image) => (

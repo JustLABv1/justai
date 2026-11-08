@@ -21,6 +21,7 @@ import {
   ArrowUp,
   Bot,
   BrainCircuit,
+  Database,
   Check,
   ChevronDown,
   Copy,
@@ -2368,6 +2369,8 @@ function Composer({
   onModelSelect,
   deepContext,
   onDeepContextChange,
+  searchStorage,
+  onSearchStorageChange,
   compact = false,
   onOpenHistory,
   conversationContext,
@@ -2400,6 +2403,8 @@ function Composer({
   onModelSelect: (endpointId: string, modelId: string) => void
   deepContext: boolean
   onDeepContextChange: (enabled: boolean) => void
+  searchStorage: boolean
+  onSearchStorageChange: (enabled: boolean) => void
   compact?: boolean
   onOpenHistory?: () => void
   conversationContext: ConversationContext
@@ -3190,6 +3195,21 @@ function Composer({
                               </Menu.SubContent>
                             </Menu.Sub>
                           </Prompt.Menu>
+                          <Prompt.Tool
+                            label={t("Search Storage")}
+                            pressed={searchStorage}
+                            onPressedChange={onSearchStorageChange}
+                            showLabel={!compact}
+                            className={cn(
+                              "h-8 text-xs",
+                              searchStorage && "bg-primary/10 text-primary"
+                            )}
+                            title={t(
+                              "Search workspace Storage for this conversation. Files and / references still work when this is off."
+                            )}
+                          >
+                            <Database className="size-4" aria-hidden="true" />
+                          </Prompt.Tool>
                           {onOpenHistory && (
                             <Button
                               aria-label={t("Open conversation history")}
@@ -3517,6 +3537,7 @@ function AssistantChatSurface({
   >(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [voiceTranscript, setVoiceTranscript] = useState("")
+  const [searchStorage, setSearchStorage] = useState(false)
   const [deepContext, setDeepContext] = useState(
     initialAssistant?.deepContext ?? false
   )
@@ -3738,7 +3759,9 @@ function AssistantChatSurface({
   )
   const contextPolicy = chatContextLabel(conversationContext, false, "")
     ? "selected-only"
-    : "automatic"
+    : searchStorage
+      ? "automatic"
+      : "none"
   const transport = useMemo(
     () =>
       new AssistantChatTransport<UIMessage>({
@@ -3758,6 +3781,7 @@ function AssistantChatSurface({
           model: selectedModel,
           useMemory: selectedAssistant?.useMemory ?? true,
           deepContext,
+          searchStorage,
           contextPolicy,
         }),
         resumable: {
@@ -3798,6 +3822,7 @@ function AssistantChatSurface({
               model: selectedModel,
               useMemory: selectedAssistant?.useMemory ?? true,
               deepContext,
+              searchStorage,
               contextPolicy,
               requestId,
             },
@@ -3807,6 +3832,7 @@ function AssistantChatSurface({
     [
       ensureSelectedConversation,
       deepContext,
+      searchStorage,
       contextPolicy,
       resumableStorage,
       selectedAssistant?.useMemory,
@@ -3967,6 +3993,8 @@ function AssistantChatSurface({
           modelId: selectedModel,
           deepContext,
           onDeepContextChange: setDeepContext,
+          searchStorage,
+          onSearchStorageChange: setSearchStorage,
           onModelSelect: (nextEndpointId, model) => {
             setEndpointId(nextEndpointId)
             setModelByEndpoint((current) => ({
