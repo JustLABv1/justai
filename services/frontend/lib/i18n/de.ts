@@ -4630,4 +4630,18 @@ export const de = {
   "Good afternoon, {name}": "Guten Tag, {name}",
   "Good evening, {name}": "Guten Abend, {name}",
   "Your name": "Dein Name",
+  "Setup steps": "Einrichtungsschritte",
+  "See where you’re working, check your access and choose the name others will see.":
+    "Lerne deinen Workspace kennen, prüfe deine Zugriffsrechte und wähle deinen Anzeigenamen.",
+  "Find the models your administrator has made available and learn where your chat history lives.":
+    "Entdecke die bereitgestellten Modelle und erfahre, wo du deinen Chatverlauf findest.",
+  "Name your workspace. Invite people and organize shared resources whenever you’re ready.":
+    "Gib deinem Workspace einen Namen. Lade später weitere Personen ein und organisiere gemeinsame Ressourcen.",
+  "Use existing accounts or connect your company’s identity provider with OIDC. You can do this later.":
+    "Nutze vorhandene Konten oder verbinde den Identitätsanbieter deines Unternehmens über OIDC. Das kannst du auch später einrichten.",
+  "Connect a hosted provider or your own model server, choose a model and test the connection.":
+    "Verbinde einen gehosteten Anbieter oder deinen eigenen Modellserver, wähle ein Modell und prüfe die Verbindung.",
+  "Your account": "Dein Konto",
+  " and have {role} access to this workspace":
+    " und hast als {role} Zugriff auf diesen Workspace",
 } as const
