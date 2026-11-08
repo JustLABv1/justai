@@ -259,6 +259,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/transcription/video-uploads/:id/thumbnail", a.platformFeature("transcription"), a.videoTranscriptionThumbnail)
 	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)
 	org.GET("/transcription/sessions/:id", a.platformFeature("transcription"), a.getTranscriptionSession)
+	org.PATCH("/transcription/sessions", a.platformFeature("transcription"), a.bulkUpdateTranscriptionSessions)
 	org.PATCH("/transcription/sessions/:id", a.platformFeature("transcription"), a.updateTranscriptionSession)
 	org.DELETE("/transcription/sessions/:id", a.platformFeature("transcription"), a.deleteTranscriptionSession)
 	org.POST("/transcription/sessions/:id/pause", a.platformFeature("transcription"), a.pauseTranscriptionSession)

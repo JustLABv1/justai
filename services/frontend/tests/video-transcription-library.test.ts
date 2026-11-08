@@ -83,3 +83,16 @@ test("live sessions keep their own routes and expose capture and post-processing
     "Improving transcript…"
   )
 })
+
+test("open and done filters round-trip through the library URL", () => {
+  assert.equal(videoLibraryFilter("done"), "done")
+  assert.equal(videoLibraryFilter("open"), "open")
+  assert.equal(
+    videoLibraryPath(1, "", "done"),
+    "/video-transcription?status=done"
+  )
+  assert.equal(
+    videoLibraryPath(2, "", "open", "live"),
+    "/live-transcription?status=open&page=2"
+  )
+})

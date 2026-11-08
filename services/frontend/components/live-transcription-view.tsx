@@ -1,5 +1,6 @@
 "use client"
 import { ToastFeedback } from "@/components/toast-feedback"
+import { TranscriptionDoneButton } from "@/components/transcription-done-button"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { ChoiceCards } from "@/components/panelui/choice-cards"
@@ -2229,12 +2230,27 @@ export function LiveTranscriptionView({
         </div>
       ) : snapshot && !createOpen && snapshot.session.status === "completed" ? (
         <>
-          <Link
-            href="/transcription"
-            className="self-start rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {t("All live sessions")}
-          </Link>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Link
+              href="/transcription"
+              className="rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("All live sessions")}
+            </Link>
+            <TranscriptionDoneButton
+              onChange={(doneAt) =>
+                setSnapshot((current) =>
+                  current
+                    ? {
+                        ...current,
+                        session: { ...current.session, doneAt },
+                      }
+                    : current
+                )
+              }
+              session={snapshot.session}
+            />
+          </div>
           {snapshot.liveProcessing ? (
             <LiveTranscriptProcessingPanel
               snapshot={snapshot}

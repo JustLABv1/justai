@@ -102,6 +102,7 @@ import {
   uploadVideoParts as uploadVideoFileParts,
   VideoUploadError,
 } from "@/lib/video-upload"
+import { TranscriptionDoneButton } from "@/components/transcription-done-button"
 import { VideoTranscriptWorkspace } from "@/components/video-transcript-workspace"
 import { VideoProcessingOutput } from "@/components/video-processing-output"
 import { VideoProcessingProgress } from "@/components/video-processing-progress"
@@ -1298,6 +1299,22 @@ export function VideoTranscriptionView({
                   </Button>
                 ) : null}
                 {snapshot && !showProcessingView ? (
+                  <TranscriptionDoneButton
+                    className="flex-1 sm:flex-none"
+                    onChange={(doneAt) =>
+                      setSnapshot((current) =>
+                        current
+                          ? {
+                              ...current,
+                              session: { ...current.session, doneAt },
+                            }
+                          : current
+                      )
+                    }
+                    session={snapshot.session}
+                  />
+                ) : null}
+                {snapshot && !showProcessingView ? (
                   <Button
                     className="flex-1 sm:flex-none"
                     disabled={chatStarting || !snapshot.segments.length}
@@ -1357,7 +1374,17 @@ export function VideoTranscriptionView({
                 </span>
               </>
             }
-            title={snapshot.session.title}
+            title={
+              <span className="inline-flex flex-wrap items-center gap-2">
+                {snapshot.session.title}
+                {snapshot.session.doneAt ? (
+                  <Badge size="sm" variant="success">
+                    <Check aria-hidden="true" className="size-3" />
+                    {t("Done")}
+                  </Badge>
+                ) : null}
+              </span>
+            }
           />
 
           {showProcessingDetails ? (

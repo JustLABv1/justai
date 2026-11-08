@@ -41,8 +41,8 @@ func TestVideoLibraryPaginationUsesCurrentUserAndWorkspace(t *testing.T) {
 			// Both queries must carry ownership, tenant and archive restrictions; only the
 			// latest upload can contribute a card, and the order has a stable ID tie-breaker.
 			scope := `(?s)FROM transcription_sessions s.*JOIN LATERAL.*WHERE s.user_id=\$1 AND s.organization_id=\$2 AND s.archived_at IS NULL`
-			mock.ExpectQuery(`SELECT COUNT\(\*\)`+`.*`+scope).WithArgs(user, organization, "%Budget%").WillReturnRows(sqlmock.NewRows([]string{"total", "pending", "completed", "failed", "cancelled"}).AddRow(test.total, 0, test.total, 0, 0))
-			mock.ExpectQuery(`(?s)SELECT s.id,s.title,video.file_name.*`+scope+`.*ORDER BY s.created_at DESC,s.id DESC LIMIT \$4 OFFSET \$5`).WithArgs(user, organization, "%Budget%", 12, test.offset).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "file_name", "status", "language", "duration_ms", "has_summary", "created_at", "updated_at", "stage", "thumbnail_upload_id"}).AddRow(id, "Budget debate", "budget.mp4", "completed", "de", 240000, true, now, now, "completed", id.String()))
+			mock.ExpectQuery(`SELECT COUNT\(\*\)`+`.*`+scope).WithArgs(user, organization, "%Budget%").WillReturnRows(sqlmock.NewRows([]string{"total", "pending", "completed", "failed", "cancelled", "open", "done"}).AddRow(test.total, 0, test.total, 0, 0, test.total, 0))
+			mock.ExpectQuery(`(?s)SELECT s.id,s.title,video.file_name.*`+scope+`.*ORDER BY s.created_at DESC,s.id DESC LIMIT \$4 OFFSET \$5`).WithArgs(user, organization, "%Budget%", 12, test.offset).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "file_name", "status", "language", "duration_ms", "has_summary", "created_at", "updated_at", "stage", "done_at", "thumbnail_upload_id"}).AddRow(id, "Budget debate", "budget.mp4", "completed", "de", 240000, true, now, now, "completed", nil, id.String()))
 			c, w := videoLibraryTestContext(test.url, user, organization)
 			(&App{DB: db}).listVideoTranscriptionLibrary(c)
 			if w.Code != 200 {
@@ -74,7 +74,7 @@ func TestVideoLibraryEmptyResultIsAnEmptyPage(t *testing.T) {
 	}
 	defer db.Close()
 	user, org := uuid.New(), uuid.New()
-	mock.ExpectQuery(`SELECT COUNT\(\*\)`).WithArgs(user, org, "").WillReturnRows(sqlmock.NewRows([]string{"total", "pending", "completed", "failed", "cancelled"}).AddRow(0, 0, 0, 0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(\*\)`).WithArgs(user, org, "").WillReturnRows(sqlmock.NewRows([]string{"total", "pending", "completed", "failed", "cancelled", "open", "done"}).AddRow(0, 0, 0, 0, 0, 0, 0))
 	c, w := videoLibraryTestContext("/?page=20", user, org)
 	(&App{DB: db}).listVideoTranscriptionLibrary(c)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"items":[]`) || !strings.Contains(w.Body.String(), `"page":1`) {
@@ -109,8 +109,8 @@ func TestVideoLibraryFailedFilterUsesScopedCounts(t *testing.T) {
 	defer db.Close()
 	user, org, id := uuid.New(), uuid.New(), uuid.New()
 	now := time.Now()
-	mock.ExpectQuery(`SELECT COUNT\(\*\)`).WithArgs(user, org, "").WillReturnRows(sqlmock.NewRows([]string{"all", "pending", "completed", "failed", "cancelled"}).AddRow(20, 3, 12, 4, 1))
-	mock.ExpectQuery(`(?s)SELECT s.id.*AND video.status='failed'.*LIMIT \$4 OFFSET \$5`).WithArgs(user, org, "", 12, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "file_name", "status", "language", "duration_ms", "has_summary", "created_at", "updated_at", "stage", "thumbnail_upload_id"}).AddRow(id, "Failed recording", "video.mp4", "failed", "de", 1000, false, now, now, "diarizing", ""))
+	mock.ExpectQuery(`SELECT COUNT\(\*\)`).WithArgs(user, org, "").WillReturnRows(sqlmock.NewRows([]string{"all", "pending", "completed", "failed", "cancelled", "open", "done"}).AddRow(20, 3, 12, 4, 1, 19, 1))
+	mock.ExpectQuery(`(?s)SELECT s.id.*AND video.status='failed'.*LIMIT \$4 OFFSET \$5`).WithArgs(user, org, "", 12, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "file_name", "status", "language", "duration_ms", "has_summary", "created_at", "updated_at", "stage", "done_at", "thumbnail_upload_id"}).AddRow(id, "Failed recording", "video.mp4", "failed", "de", 1000, false, now, now, "diarizing", nil, ""))
 	c, w := videoLibraryTestContext("/?status=failed", user, org)
 	(&App{DB: db}).listVideoTranscriptionLibrary(c)
 	var response struct {
