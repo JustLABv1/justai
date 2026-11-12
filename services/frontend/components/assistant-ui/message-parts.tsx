@@ -31,6 +31,7 @@ import {
   type EnrichedPartState,
 } from "@assistant-ui/react"
 
+import { parseMCPResultImages } from "@/lib/file-result-logic"
 import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { AssistantSource } from "@/components/assistant-ui/sources"
 import {
@@ -468,6 +469,15 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
     () =>
       indices.flatMap((index) => {
         const part = messageParts[index]
+        if (part?.type === "tool-call" && !part.isError) {
+          if (!["generate_image", "edit_image"].includes(part.toolName)) {
+            return parseMCPResultImages(part.result).map((image, position) => ({
+              id: `${part.toolCallId}-${position}`,
+              isGenerating: false,
+              value: { image: { url: image.url, mode: "generate" } },
+            }))
+          }
+        }
         if (
           !part ||
           part.type !== "tool-call" ||
