@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm"
 
 import { api } from "@/lib/api"
 import { isGeneratedPDFURL } from "@/lib/file-result-logic"
+import { replaceInlineMathSymbols } from "@/lib/inline-math"
 import { cn } from "@/lib/utils"
 
 type AssistantMarkdownProps = {
@@ -92,6 +93,7 @@ export function AssistantMarkdown({ className }: AssistantMarkdownProps = {}) {
   return (
     <MarkdownTextPrimitive
       components={markdownComponents}
+      preprocess={replaceInlineMathSymbols}
       remarkPlugins={[remarkGfm]}
       className={cn(markdownClassName, className)}
     />
@@ -109,7 +111,7 @@ export function StaticAssistantMarkdown({
         components={markdownComponents}
         remarkPlugins={[remarkGfm]}
       >
-        {content}
+        {replaceInlineMathSymbols(content)}
       </ReactMarkdown>
     </div>
   )

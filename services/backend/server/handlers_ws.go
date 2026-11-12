@@ -1237,6 +1237,9 @@ func (a *App) executeChatMCPTool(ctx context.Context, userID, organizationID, co
 		details["error"] = err.Error()
 	}
 	a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.completed", binding.ServerID, details)
+	if err == nil {
+		result = a.persistMCPResultImages(ctx, userID, organizationID, binding.ToolName, result)
+	}
 	return result, err
 }
 

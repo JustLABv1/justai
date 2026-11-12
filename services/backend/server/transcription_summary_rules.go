@@ -73,8 +73,31 @@ func requestSummaryJSONAttempt(ctx context.Context, endpoint provider.Endpoint, 
 			text = strings.Join(lines[1:len(lines)-1], "\n")
 		}
 	}
-	if err = json.Unmarshal([]byte(text), target); err != nil {
+	if err = decodeSummaryJSON(text, target); err != nil {
 		return fmt.Errorf("the model returned an invalid summary customization response: %w", err)
+	}
+	return nil
+}
+
+// decodeSummaryJSON decodes the first complete JSON value in text. Models occasionally
+// append stray closing brackets or code-fence remnants after an otherwise complete object;
+// those are tolerated, but any other trailing content is still treated as a syntax error.
+func decodeSummaryJSON(text string, target any) error {
+	if start := strings.IndexAny(text, "{["); start > 0 {
+		text = text[start:]
+	}
+	decoder := json.NewDecoder(strings.NewReader(text))
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	offset := int(decoder.InputOffset())
+	trailing := strings.Trim(text[offset:], " \t\r\n]}`")
+	if trailing != "" {
+		var extra json.RawMessage
+		if err := json.Unmarshal([]byte(text[offset:]), &extra); err != nil {
+			return err
+		}
+		return &json.SyntaxError{Offset: int64(offset)}
 	}
 	return nil
 }

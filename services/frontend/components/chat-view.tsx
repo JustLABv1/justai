@@ -1081,8 +1081,10 @@ function ContextDisplay({
   onRemoveKnowledge,
   onRemoveTranscription,
   onSaveKnowledge,
+  statusOpen = false,
 }: {
   context: ConversationContext
+  statusOpen?: boolean
   onRemoveMCP?: (serverId: string) => Promise<void>
   onRemoveNote?: (noteId: string) => Promise<void>
   onRemoveRepository?: (repositoryId: string) => Promise<void>
@@ -1186,7 +1188,10 @@ function ContextDisplay({
   }
 
   return (
-    <Prompt.Context open={items.length > 0 || Boolean(removeError)}>
+    <Prompt.Context
+      open={items.length > 0 || Boolean(removeError)}
+      tucked={!statusOpen}
+    >
       <span className="sr-only">{t("Attached context")}</span>
       {items.map((item) => (
         <Prompt.ContextItem
@@ -3306,6 +3311,7 @@ function Composer({
                 : t("Writing the answer…")}
             </Prompt.Status>
             <ContextDisplay
+              statusOpen={isThreadRunning && !voiceActive}
               context={railContext}
               onRemoveMCP={onRemoveMCP}
               onRemoveNote={onRemoveNote}

@@ -104,3 +104,17 @@ export function formatFileSize(size: number | undefined): string | undefined {
   const formatted = value.toFixed(1).replace(/\.0$/, "")
   return `${formatted} ${units[unitIndex]}`
 }
+
+/** Stored image references that the backend swaps in for MCP base64 images. */
+export function parseMCPResultImages(value: unknown): { url: string }[] {
+  const parsed = parseToolResult(value)
+  if (!isRecord(parsed) || !Array.isArray(parsed.content)) return []
+  return parsed.content.flatMap((block: unknown) =>
+    isRecord(block) &&
+    block.type === "image" &&
+    typeof block.url === "string" &&
+    block.url.startsWith("/api/v1/images/")
+      ? [{ url: block.url }]
+      : []
+  )
+}
