@@ -621,6 +621,8 @@ export const de = {
   Fullscreen: "Vollbild",
   "Reset session": "Sitzung zurücksetzen",
   "Fix error": "Fehler beheben",
+  Dictate: "Diktieren",
+  "Stop dictation": "Diktieren beenden",
   "Show all {value0} lines": "Alle {value0} Zeilen anzeigen",
   "Show less": "Weniger anzeigen",
   "Run code": "Code ausführen",

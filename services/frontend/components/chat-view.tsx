@@ -28,10 +28,8 @@ import {
   FileText,
   History,
   Pencil,
-  AudioLines,
   Gauge,
   Mic,
-  MicOff,
   Plug,
   RefreshCw,
   RotateCcw,
@@ -67,7 +65,6 @@ import {
   useAuiState,
   useVoiceControls,
   useVoiceState,
-  useVoiceVolume,
   type Unstable_TriggerItem,
   unstable_defaultDirectiveFormatter,
 } from "@assistant-ui/react"
@@ -88,7 +85,6 @@ import {
   ChatAttachmentPreview,
   ChatMessageAttachment,
 } from "@/components/assistant-ui/attachment-preview"
-import { VoiceToolApproval } from "@/components/assistant-ui/voice"
 import {
   MCPApprovalCards,
   MCPApprovalProvider,
@@ -2390,8 +2386,8 @@ function Composer({
   onRemoveKnowledge,
   onRemoveTranscription,
   onSaveKnowledge,
-  toolApproval,
-  voiceTranscript,
+  dictatedPhrases = [],
+  onDictatedPhrasesUsed,
   voiceError,
   onVoiceErrorClear,
 }: {
@@ -2424,15 +2420,15 @@ function Composer({
   onRemoveKnowledge: (sourceId: string) => Promise<void>
   onRemoveTranscription: (sessionId: string) => Promise<void>
   onSaveKnowledge: (sourceId: string) => Promise<void>
-  toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
-  voiceTranscript?: string
+  /** Phrases the microphone recognised; they are appended to the message. */
+  dictatedPhrases?: string[]
+  onDictatedPhrasesUsed?: () => void
   voiceError?: string | null
   onVoiceErrorClear?: () => void
 }) {
   const { t, locale } = useTranslations()
 
   const voiceControls = useVoiceControls()
-  const voiceVolume = useVoiceVolume()
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
   const usage = useUsage(isThreadRunning)
   const composerAnchor = useRef<HTMLDivElement | null>(null)
@@ -2444,6 +2440,8 @@ function Composer({
   const voiceActive =
     voiceState?.status.type === "running" ||
     voiceState?.status.type === "starting"
+  // The microphone only dictates: a running session means "dictating".
+  const dictating = voiceActive
   const awaitingFirstToken = useAuiState(
     (state) => state.thread.messages.at(-1)?.role === "user"
   )
@@ -2810,11 +2808,36 @@ function Composer({
   const sendBlocked =
     hasUnreadyAttachments || attachingMcpIds.size > 0 || !!attachingNoteId
   const blockedSubmit = useRef(false)
+  const stopDictation = () => {
+    if (voiceActive) voiceControls.disconnect()
+  }
+  const toggleDictation = () => {
+    if (voiceActive) stopDictation()
+    else voiceControls.connect()
+  }
+  // Dictated phrases go to the end of the current text, with a space between.
+  useEffect(() => {
+    if (dictatedPhrases.length === 0) return
+    let text = composerText
+    for (const phrase of dictatedPhrases) {
+      const spoken = phrase.trim()
+      if (!spoken) continue
+      text = `${text}${text && !/\s$/.test(text) ? " " : ""}${spoken}`
+    }
+    composerAui.composer().setText(text)
+    onDictatedPhrasesUsed?.()
+  }, [dictatedPhrases, composerText, composerAui, onDictatedPhrasesUsed])
+  // Sending a message (or the assistant starting to answer) ends a dictation, so
+  // late phrases cannot land in the next, empty message.
+  useEffect(() => {
+    if (voiceActive && isThreadRunning) voiceControls.disconnect()
+  }, [voiceActive, isThreadRunning, voiceControls])
   const submitMessage = () => {
     if (sendBlocked) {
       blockedSubmit.current = true
       return
     }
+    stopDictation()
     const composer = composerAui.composer()
     const directives = pendingRefs
       .map((ref) => unstable_defaultDirectiveFormatter.serialize(ref))
@@ -3042,269 +3065,244 @@ function Composer({
                       </ComposerPrimitive.Attachments>
                     </div>
                   )}
-                  {voiceActive ? (
-                    <>
-                      <Prompt.Recorder
-                        cancelLabel={t("End voice")}
-                        className={cn(compact && "order-1 basis-full")}
-                        doneLabel={t("End voice")}
-                        level={voiceState?.isMuted ? 0 : voiceVolume}
-                        onCancel={voiceControls.disconnect}
-                        onDone={voiceControls.disconnect}
-                        placeholder={
-                          voiceState?.status.type === "starting"
-                            ? t("Connecting to voice")
-                            : voiceState?.isMuted
-                              ? t("Voice muted")
-                              : t("Listening")
-                        }
-                        transcript={voiceTranscript || undefined}
-                      />
-                      <div className="flex justify-end px-1 pt-1">
-                        <Prompt.Tool
-                          label={
-                            voiceState?.isMuted
-                              ? t("Unmute voice")
-                              : t("Mute voice")
-                          }
-                          onPressedChange={() =>
-                            voiceState?.isMuted
-                              ? voiceControls.unmute()
-                              : voiceControls.mute()
-                          }
-                          pressed={voiceState?.isMuted === true}
-                        >
-                          <MicOff aria-hidden="true" />
-                        </Prompt.Tool>
-                      </div>
-                      <VoiceToolApproval toolApproval={toolApproval} />
-                    </>
-                  ) : (
-                    <>
-                      {pendingRefs.length > 0 && (
-                        <div
-                          className={cn(
-                            "flex w-full flex-wrap gap-1.5 px-1.5 pt-1",
-                            compact && "order-1 basis-full"
-                          )}
-                        >
-                          {pendingRefs.map((ref) => (
-                            <span
-                              className={cn(
-                                "inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-medium",
-                                ref.type === "mcp"
-                                  ? "bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300"
-                                  : "bg-muted text-foreground"
-                              )}
-                              key={ref.id}
-                            >
-                              <span className="truncate">
-                                {ref.type === "mcp" ? "@" : "/"}
-                                {ref.label}
-                              </span>
-                              <button
-                                aria-label={t(
-                                  "Remove {value0} from this chat",
-                                  {
-                                    value0: ref.label,
-                                  }
-                                )}
-                                className="shrink-0 rounded-full p-0.5 opacity-70 hover:opacity-100"
-                                onClick={() =>
-                                  setPendingRefs((current) =>
-                                    current.filter(
-                                      (candidate) => candidate.id !== ref.id
-                                    )
-                                  )
-                                }
-                                type="button"
-                              >
-                                <X className="size-3" aria-hidden="true" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <Prompt.Textarea
-                        aria-label={t("Message")}
+                  <>
+                    {pendingRefs.length > 0 && (
+                      <div
                         className={cn(
-                          "px-1.5 py-3 text-sm leading-6",
-                          compact && "order-1 min-w-0 basis-full"
-                        )}
-                        minRows={1}
-                        maxRows={6}
-                        onKeyDown={(event) => {
-                          // Enter sends a message that has files or mentions
-                          // but no text, which Prompt itself would not.
-                          if (
-                            event.key === "Enter" &&
-                            !event.shiftKey &&
-                            !event.nativeEvent.isComposing &&
-                            composerText.trim() === "" &&
-                            (composerAttachments.length > 0 ||
-                              pendingRefs.length > 0)
-                          ) {
-                            event.preventDefault()
-                            submitMessage()
-                          }
-                        }}
-                        placeholder={t("Let's turn your ideas into a plan.")}
-                      />
-                      <Prompt.Footer
-                        className={cn(
-                          "items-center gap-2 p-0 px-1",
-                          compact && "contents"
+                          "flex w-full flex-wrap gap-1.5 px-1.5 pt-1",
+                          compact && "order-1 basis-full"
                         )}
                       >
-                        <Prompt.Tools
-                          className={cn(
-                            "flex-nowrap gap-1 py-0",
-                            compact && "order-2"
-                          )}
-                        >
-                          <Prompt.Menu label={t("Attach a file")}>
-                            <Prompt.AttachItem shortcut={null}>
-                              {t("Add files")}
-                            </Prompt.AttachItem>
-                            <Menu.Separator />
-                            <Menu.Sub>
-                              <Menu.SubTrigger
-                                disabled={assistantSelectionLocked}
-                                end={
-                                  <span className="max-w-32 truncate text-xs text-muted-foreground">
-                                    {assistantSelectionLocked
-                                      ? t("Locked after the first message")
-                                      : assistantLabel}
-                                  </span>
-                                }
-                              >
-                                <Bot aria-hidden="true" />
-                                {t("Agent")}
-                              </Menu.SubTrigger>
-                              <Menu.SubContent>
-                                <Menu.RadioGroup
-                                  onValueChange={(value) =>
-                                    onAssistantChange(String(value))
-                                  }
-                                  value={assistantId}
-                                >
-                                  <Menu.RadioItem value="">
-                                    {t("JustAI default")}
-                                  </Menu.RadioItem>
-                                  {assistants.map((assistant) => (
-                                    <Menu.RadioItem
-                                      key={assistant.id}
-                                      value={assistant.id}
-                                    >
-                                      {assistant.name}
-                                    </Menu.RadioItem>
-                                  ))}
-                                </Menu.RadioGroup>
-                              </Menu.SubContent>
-                            </Menu.Sub>
-                          </Prompt.Menu>
-                          <Prompt.Tool
-                            label={t("Search Storage")}
-                            pressed={searchStorage}
-                            onPressedChange={onSearchStorageChange}
-                            showLabel={!compact}
+                        {pendingRefs.map((ref) => (
+                          <span
                             className={cn(
-                              "h-8 text-xs",
-                              searchStorage && "bg-primary/10 text-primary"
+                              "inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-medium",
+                              ref.type === "mcp"
+                                ? "bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300"
+                                : "bg-muted text-foreground"
                             )}
-                            title={t(
-                              "Search workspace Storage for this conversation. Files and / references still work when this is off."
-                            )}
+                            key={ref.id}
                           >
-                            <Database className="size-4" aria-hidden="true" />
-                          </Prompt.Tool>
-                          {onOpenHistory && (
-                            <Button
-                              aria-label={t("Open conversation history")}
-                              className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
-                              onClick={onOpenHistory}
-                              size="icon-sm"
+                            <span className="truncate">
+                              {ref.type === "mcp" ? "@" : "/"}
+                              {ref.label}
+                            </span>
+                            <button
+                              aria-label={t("Remove {value0} from this chat", {
+                                value0: ref.label,
+                              })}
+                              className="shrink-0 rounded-full p-0.5 opacity-70 hover:opacity-100"
+                              onClick={() =>
+                                setPendingRefs((current) =>
+                                  current.filter(
+                                    (candidate) => candidate.id !== ref.id
+                                  )
+                                )
+                              }
                               type="button"
-                              variant="ghost"
                             >
-                              <History className="size-4" />
-                            </Button>
-                          )}
-                          {assistantId && (
-                            <Prompt.Tool
+                              <X className="size-3" aria-hidden="true" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <Prompt.Textarea
+                      aria-label={t("Message")}
+                      className={cn(
+                        "px-1.5 py-3 text-sm leading-6",
+                        compact && "order-1 min-w-0 basis-full"
+                      )}
+                      minRows={1}
+                      maxRows={6}
+                      onKeyDown={(event) => {
+                        // Enter sends a message that has files or mentions
+                        // but no text, which Prompt itself would not.
+                        if (
+                          event.key === "Enter" &&
+                          !event.shiftKey &&
+                          !event.nativeEvent.isComposing &&
+                          composerText.trim() === "" &&
+                          (composerAttachments.length > 0 ||
+                            pendingRefs.length > 0)
+                        ) {
+                          event.preventDefault()
+                          submitMessage()
+                        }
+                      }}
+                      placeholder={t("Let's turn your ideas into a plan.")}
+                    />
+                    <Prompt.Footer
+                      className={cn(
+                        "items-center gap-2 p-0 px-1",
+                        compact && "contents"
+                      )}
+                    >
+                      <Prompt.Tools
+                        className={cn(
+                          "flex-nowrap gap-1 py-0",
+                          compact && "order-2"
+                        )}
+                      >
+                        <Prompt.Menu label={t("Attach a file")}>
+                          <Prompt.AttachItem shortcut={null}>
+                            {t("Add files")}
+                          </Prompt.AttachItem>
+                          <Menu.Separator />
+                          <Menu.Sub>
+                            <Menu.SubTrigger
                               disabled={assistantSelectionLocked}
-                              label={assistantLabel}
-                              onPressedChange={() => onAssistantChange("")}
-                              pressed
-                              showLabel
-                              title={
-                                assistantSelectionLocked
-                                  ? t("Locked after the first message")
-                                  : t("Remove {value0} from this chat", {
-                                      value0: assistantLabel,
-                                    })
+                              end={
+                                <span className="max-w-32 truncate text-xs text-muted-foreground">
+                                  {assistantSelectionLocked
+                                    ? t("Locked after the first message")
+                                    : assistantLabel}
+                                </span>
                               }
                             >
                               <Bot aria-hidden="true" />
-                            </Prompt.Tool>
-                          )}
-                        </Prompt.Tools>
-                        <div
+                              {t("Agent")}
+                            </Menu.SubTrigger>
+                            <Menu.SubContent>
+                              <Menu.RadioGroup
+                                onValueChange={(value) =>
+                                  onAssistantChange(String(value))
+                                }
+                                value={assistantId}
+                              >
+                                <Menu.RadioItem value="">
+                                  {t("JustAI default")}
+                                </Menu.RadioItem>
+                                {assistants.map((assistant) => (
+                                  <Menu.RadioItem
+                                    key={assistant.id}
+                                    value={assistant.id}
+                                  >
+                                    {assistant.name}
+                                  </Menu.RadioItem>
+                                ))}
+                              </Menu.RadioGroup>
+                            </Menu.SubContent>
+                          </Menu.Sub>
+                        </Prompt.Menu>
+                        <Prompt.Tool
+                          label={t("Search Storage")}
+                          pressed={searchStorage}
+                          onPressedChange={onSearchStorageChange}
+                          showLabel={!compact}
                           className={cn(
-                            "order-3 flex shrink-0 items-center gap-1",
-                            compact &&
-                              "ml-auto max-w-full min-w-0 flex-wrap justify-end"
+                            "h-8 text-xs",
+                            searchStorage && "bg-primary/10 text-primary"
+                          )}
+                          title={t(
+                            "Search workspace Storage for this conversation. Files and / references still work when this is off."
                           )}
                         >
-                          <ModelEndpointPicker
-                            endpoints={endpoints}
-                            endpointId={endpointId}
-                            modelsByEndpoint={modelsByEndpoint}
-                            modelId={modelId}
-                            modelDiscoveryLoading={modelDiscoveryLoading}
-                            modelDiscoveryFailed={modelDiscoveryFailed}
-                            onRetryModelDiscovery={onRetryModelDiscovery}
-                            onSelect={onModelSelect}
-                            compact={compact}
-                          />
-                          <UsageIndicator usage={usage} />
+                          <Database className="size-4" aria-hidden="true" />
+                        </Prompt.Tool>
+                        {onOpenHistory && (
+                          <Button
+                            aria-label={t("Open conversation history")}
+                            className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
+                            onClick={onOpenHistory}
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <History className="size-4" />
+                          </Button>
+                        )}
+                        {assistantId && (
+                          <Prompt.Tool
+                            disabled={assistantSelectionLocked}
+                            label={assistantLabel}
+                            onPressedChange={() => onAssistantChange("")}
+                            pressed
+                            showLabel
+                            title={
+                              assistantSelectionLocked
+                                ? t("Locked after the first message")
+                                : t("Remove {value0} from this chat", {
+                                    value0: assistantLabel,
+                                  })
+                            }
+                          >
+                            <Bot aria-hidden="true" />
+                          </Prompt.Tool>
+                        )}
+                      </Prompt.Tools>
+                      <div
+                        className={cn(
+                          "order-3 flex shrink-0 items-center gap-1",
+                          compact &&
+                            "ml-auto max-w-full min-w-0 flex-wrap justify-end"
+                        )}
+                      >
+                        <ModelEndpointPicker
+                          endpoints={endpoints}
+                          endpointId={endpointId}
+                          modelsByEndpoint={modelsByEndpoint}
+                          modelId={modelId}
+                          modelDiscoveryLoading={modelDiscoveryLoading}
+                          modelDiscoveryFailed={modelDiscoveryFailed}
+                          onRetryModelDiscovery={onRetryModelDiscovery}
+                          onSelect={onModelSelect}
+                          compact={compact}
+                        />
+                        <UsageIndicator usage={usage} />
 
-                          {isThreadRunning ? (
-                            <ComposerPrimitive.Cancel
-                              aria-label={t("Cancel response")}
-                              className="flex size-8 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
-                            >
-                              <RotateCcw className="size-4" />
-                            </ComposerPrimitive.Cancel>
-                          ) : (
-                            // One button: the microphone while there is nothing to send, the
-                            // arrow as soon as there is.
-                            <button
-                              aria-label={
-                                hasContent
-                                  ? t("Send message")
-                                  : t("Start voice")
-                              }
-                              className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                              disabled={hasContent && !canSubmit}
-                              onClick={
-                                hasContent
-                                  ? submitMessage
-                                  : voiceControls.connect
-                              }
-                              type="button"
-                            >
-                              {hasContent ? (
-                                <ArrowUp className="size-4" />
-                              ) : (
-                                <AudioLines className="size-4" />
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      </Prompt.Footer>
-                    </>
-                  )}
+                        {isThreadRunning ? (
+                          <ComposerPrimitive.Cancel
+                            aria-label={t("Cancel response")}
+                            className="flex size-8 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                          >
+                            <RotateCcw className="size-4" />
+                          </ComposerPrimitive.Cancel>
+                        ) : (
+                          <>
+                            {/* Dictation writes into the field and never sends: this
+                                  button stops it while it runs. */}
+                            {dictating && (
+                              <button
+                                aria-label={t("Stop dictation")}
+                                aria-pressed
+                                className="flex size-8 animate-pulse items-center justify-center rounded-full bg-destructive text-white transition-opacity hover:opacity-90"
+                                onClick={stopDictation}
+                                title={t("Stop dictation")}
+                                type="button"
+                              >
+                                <Mic aria-hidden="true" className="size-4" />
+                              </button>
+                            )}
+                            {/* One button: the microphone while there is nothing to
+                                  send, the arrow as soon as there is. */}
+                            {(hasContent || !dictating) && (
+                              <button
+                                aria-label={
+                                  hasContent ? t("Send message") : t("Dictate")
+                                }
+                                className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                                disabled={hasContent && !canSubmit}
+                                onClick={
+                                  hasContent ? submitMessage : toggleDictation
+                                }
+                                title={
+                                  hasContent ? t("Send message") : t("Dictate")
+                                }
+                                type="button"
+                              >
+                                {hasContent ? (
+                                  <ArrowUp className="size-4" />
+                                ) : (
+                                  <Mic aria-hidden="true" className="size-4" />
+                                )}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </Prompt.Footer>
+                  </>
                 </div>
               </ComposerPrimitive.Root>
             </Prompt.Field>
@@ -3541,11 +3539,15 @@ function AssistantChatSurface({
         }
       : {}
   )
-  const [voiceApproval, setVoiceApproval] = useState<
-    import("@assistant-ui/react").ToolCallMessagePartProps | null
-  >(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
-  const [voiceTranscript, setVoiceTranscript] = useState("")
+  // Dictation: the microphone writes into the message field and sends nothing.
+  // Phrases wait here until the composer, which owns the field, appends them.
+  const [dictatedPhrases, setDictatedPhrases] = useState<string[]>([])
+  const handleDictation = useCallback(
+    (text: string) => setDictatedPhrases((current) => [...current, text]),
+    []
+  )
+  const clearDictatedPhrases = useCallback(() => setDictatedPhrases([]), [])
   const [searchStorage, setSearchStorage] = useState(false)
   const [deepContext, setDeepContext] = useState(
     initialAssistant?.deepContext ?? false
@@ -3877,11 +3879,12 @@ function AssistantChatSurface({
           })
         },
         onConversationUpdated,
-        onToolApproval: setVoiceApproval,
-        onTranscript: (item) => setVoiceTranscript(item.text),
+        dictation: true,
+        onDictation: handleDictation,
         onError: (error) => setVoiceError(error.message),
       }),
     [
+      handleDictation,
       conversationId,
       endpoint?.id,
       onConversationCreated,
@@ -4020,8 +4023,8 @@ function AssistantChatSurface({
           onRemoveKnowledge,
           onRemoveTranscription,
           onSaveKnowledge,
-          toolApproval: voiceApproval,
-          voiceTranscript,
+          dictatedPhrases,
+          onDictatedPhrasesUsed: clearDictatedPhrases,
         }}
         onVoiceErrorClear={() => setVoiceError(null)}
         voiceError={voiceError}

@@ -20,6 +20,12 @@ type VoiceAdapterOptions = {
   onConversationUpdated?: () => void
   onToolApproval?: (approval: ToolCallMessagePartProps | null) => void
   onTranscript?: (item: { role: "user" | "assistant"; text: string }) => void
+  /**
+   * Read when a session starts. In dictation mode the session only transcribes:
+   * finished phrases go to `onDictation` instead of being sent to the assistant.
+   */
+  dictation?: boolean
+  onDictation?: (text: string) => void
   onError?: (error: Error) => void
 }
 
@@ -112,6 +118,8 @@ async function setupVoiceSession(
   let voiceMode: RealtimeVoiceAdapter.Mode = "listening"
   let micResumeAt = 0
   let bargeInFrames = 0
+  // Fixed for the whole session: a dictation never turns into a conversation.
+  const dictation = options.dictation === true
   let resolveOpen: (() => void) | null = null
   let rejectOpen: ((error: Error) => void) | null = null
   let openSettled = false
@@ -132,7 +140,7 @@ async function setupVoiceSession(
     options.onTranscript?.({ role: item.role, text: item.text })
   }
   // A new session starts with nothing heard.
-  options.onTranscript?.({ role: "user", text: "" })
+  if (!dictation) options.onTranscript?.({ role: "user", text: "" })
 
   const setMode = (mode: RealtimeVoiceAdapter.Mode) => {
     voiceMode = mode
@@ -194,6 +202,15 @@ async function setupVoiceSession(
     silentGain?.disconnect()
     stream?.getTracks().forEach((track) => track.stop())
     void audioContext.close().catch(() => undefined)
+    if (dictation && createdConversationId && !conversationNotified) {
+      // The session needed a conversation to exist, but a dictation sends
+      // nothing. Remove the empty one instead of adding it to the history.
+      conversationNotified = true
+      void api
+        .delete(`/api/v1/conversations/${createdConversationId}`)
+        .catch(() => undefined)
+      return
+    }
     // Keep the runtime mounted for the whole voice session. The root route is
     // promoted only after the session ends, otherwise changing the thread id
     // would tear down the live microphone/SSE session.
@@ -245,6 +262,7 @@ async function setupVoiceSession(
           endpointId: options.chatEndpointId ?? "",
           transcriptionEndpointId: options.transcriptionEndpointId ?? "",
           language: "auto",
+          dictation,
         },
       })
     }
@@ -326,6 +344,7 @@ async function setupVoiceSession(
           setMode("listening")
           break
         case "input.transcript.partial":
+          if (dictation) break
           emitTranscript({
             role: "user",
             text: String(data.text ?? ""),
@@ -334,6 +353,12 @@ async function setupVoiceSession(
           setMode("listening")
           break
         case "input.transcript.final":
+          if (dictation) {
+            // Straight into the message field; the user decides when to send.
+            options.onDictation?.(String(data.text ?? ""))
+            setMode("listening")
+            break
+          }
           emitTranscript({
             role: "user",
             text: String(data.text ?? ""),
