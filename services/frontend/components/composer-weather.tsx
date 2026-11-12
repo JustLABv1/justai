@@ -1,19 +1,99 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { createPortal } from "react-dom"
+import { ComposerFrost } from "@/components/composer-frost"
+import { advanceSeasonalFrost, seasonalWindImpulse } from "@/lib/season-play"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { getCurrentSeason } from "@/lib/season"
 import { useSeasonsDisabled } from "@/lib/season-preference"
 
 const leafOutline =
   "m16 1 4 9 5-4-1 8 7-1-4 7 4 3-12 5-2 7h-2l1-8L3 23l4-4-6-6 9 1-1-8 5 4z"
 
+type SeasonalInteraction = {
+  blowing: boolean
+  gustUntil: number
+  pointerX: number
+  pointerY: number
+  pointerInside: boolean
+  summonUntil: number
+  thaws: number
+}
+function subscribeComposer(onChange: () => void) {
+  const observer = new MutationObserver(onChange)
+  observer.observe(
+    document.getElementById("workspace-inset") ?? document.body,
+    { childList: true, subtree: true }
+  )
+  return () => observer.disconnect()
+}
+const composerSnapshot = () =>
+  document.querySelector<HTMLElement>(
+    "#workspace-inset [data-seasonal-composer]"
+  )
+const noComposer = () => null
+function subscribeSeason(onChange: () => void) {
+  const timer = window.setInterval(onChange, 60000)
+  window.addEventListener("popstate", onChange)
+  return () => {
+    window.clearInterval(timer)
+    window.removeEventListener("popstate", onChange)
+  }
+}
+function subscribeMotion(onChange: () => void) {
+  const query = window.matchMedia("(prefers-reduced-motion: reduce)")
+  query.addEventListener("change", onChange)
+  return () => query.removeEventListener("change", onChange)
+}
+const reducedMotionSnapshot = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches
+const motionServerSnapshot = () => true
+const seasonServerSnapshot = () => "autumn" as const
+
 /** A bounded weather layer: particles land on the actual composer edge. */
 export function ComposerWeather() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const seasonsDisabled = useSeasonsDisabled()
+  const composer = useSyncExternalStore(
+    subscribeComposer,
+    composerSnapshot,
+    noComposer
+  )
+  const currentSeason = useSyncExternalStore(
+    subscribeSeason,
+    getCurrentSeason,
+    seasonServerSnapshot
+  )
+  const motionReduced = useSyncExternalStore(
+    subscribeMotion,
+    reducedMotionSnapshot,
+    motionServerSnapshot
+  )
+  const interaction = useRef<SeasonalInteraction>({
+    blowing: false,
+    gustUntil: 0,
+    pointerX: 0,
+    pointerY: 0,
+    pointerInside: false,
+    summonUntil: 0,
+    thaws: 0,
+  })
+
+  const [frost, setFrost] = useState(0)
+  const onThaw = useCallback(() => {
+    interaction.current.thaws++
+    setFrost(0)
+  }, [])
 
   useEffect(() => {
-    if (seasonsDisabled) return
+    if (seasonsDisabled || motionReduced) return
+    const controls = interaction.current
     const canvas = canvasRef.current
     const shell = canvas?.parentElement
     if (!canvas || !shell) return
@@ -32,12 +112,60 @@ export function ComposerWeather() {
     let initialFallHeight = 0
     let season = getCurrentSeason()
     const summerStarted = performance.now()
+    let seenThaws = interaction.current.thaws
+    let frostProgress = 0
+    let frostPublished = 0
+    let thawUntil = 0
+    let lastWriting = performance.now()
+    const writing = (event: Event) => {
+      const target = event.target
+      if (
+        !(target instanceof HTMLElement) ||
+        !target.closest("[data-seasonal-composer]") ||
+        !target.matches(
+          'textarea, [contenteditable="true"], input:not([type="file"])'
+        )
+      )
+        return
+      lastWriting = performance.now()
+      frostProgress = 0
+      snow.fill(0)
+      setFrost(0)
+    }
+    shell.addEventListener("input", writing)
+    shell.addEventListener("keydown", writing)
+
+    let lureX = width / 2
+    let lureY = 120
+    const followPointer = (event: PointerEvent) => {
+      const origin = shell!.getBoundingClientRect()
+      interaction.current.pointerX = event.clientX - origin.left
+      interaction.current.pointerY = event.clientY - origin.top
+      interaction.current.pointerInside = true
+    }
+    const touchBreeze = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return
+      followPointer(event)
+      const input = shell!.querySelector<HTMLElement>(
+        "[data-seasonal-composer]"
+      )
+      const bounds = input?.getBoundingClientRect()
+      if (bounds && Math.abs(event.clientY - bounds.top) < 30)
+        interaction.current.gustUntil = performance.now() + 1200
+    }
+    shell.addEventListener("pointerdown", touchBreeze, { passive: true })
+    const leavePointer = () => {
+      interaction.current.pointerInside = false
+    }
+    shell.addEventListener("pointermove", followPointer, { passive: true })
+    shell.addEventListener("pointerleave", leavePointer)
 
     function drawButterflies(
       now: number,
       edge: number,
       left: number,
-      right: number
+      right: number,
+      delta: number
     ) {
       if (!context) return
       const count = width < 640 ? 2 : 3
@@ -55,8 +183,20 @@ export function ComposerWeather() {
           65,
           edge * (0.38 + Math.sin(time * 0.23 + index) * 0.2)
         )
-        const x = flightX + (targetX - flightX) * perch
-        const y = flightY + (edge - 8 - flightY) * perch
+        let x = flightX + (targetX - flightX) * perch
+        let y = flightY + (edge - 8 - flightY) * perch
+        const call = Math.min(
+          1,
+          Math.max(0, (interaction.current.summonUntil - now) / 1000)
+        )
+        const smoothing = 1 - Math.exp(-delta * 5)
+        lureX += (interaction.current.pointerX - lureX) * smoothing
+        lureY += (interaction.current.pointerY - lureY) * smoothing
+        x +=
+          (lureX + (index - 1) * 40 + Math.sin(time * 2 + index) * 18 - x) *
+          call
+        y +=
+          (lureY - 24 - index * 10 + Math.cos(time * 2 + index) * 14 - y) * call
         const resting = cycle > 15 && cycle < 21
         const flap = resting
           ? 0.4 + Math.sin(time * 2) * 0.12
@@ -123,6 +263,9 @@ export function ComposerWeather() {
       landingX: number
       color: string
       depth: number
+      vx: number
+      vy: number
+      lifted: boolean
     }
     const particles: Particle[] = []
     function reset(particle: Particle, initial = false) {
@@ -147,6 +290,9 @@ export function ComposerWeather() {
           Math.floor(Math.random() * colors.length)
         ],
         depth: 0.3 + Math.random() * 0.7,
+        vx: 0,
+        vy: 0,
+        lifted: false,
       })
     }
     function resize() {
@@ -211,14 +357,63 @@ export function ComposerWeather() {
       const edge = bounds.top - origin.top
       const left = bounds.left - origin.left + 24
       const right = bounds.right - origin.left - 24
+      const pointer = interaction.current
+      const nearRim =
+        pointer.pointerInside &&
+        pointer.pointerX >= left - 40 &&
+        pointer.pointerX <= right + 40 &&
+        Math.abs(pointer.pointerY - edge) < 95
+      const deposits = particles.some((particle) => particle.landedAt > 0)
+      if (season === "autumn" && nearRim && deposits)
+        pointer.gustUntil = now + 1200
+      pointer.blowing =
+        season === "autumn" && nearRim && (deposits || now < pointer.gustUntil)
+      if (season === "spring" && nearRim && deposits)
+        pointer.gustUntil = now + 250
+      if (
+        season === "summer" &&
+        pointer.pointerInside &&
+        pointer.pointerX >= left &&
+        pointer.pointerX <= right &&
+        Math.abs(pointer.pointerY - edge) < 180
+      )
+        pointer.summonUntil = now + 1200
+      if (seenThaws !== pointer.thaws) {
+        seenThaws = pointer.thaws
+        frostProgress = 0
+        snow.fill(0)
+        thawUntil = now + 45000
+      }
       if (season === "summer") {
-        drawButterflies(now, edge, left, right)
+        drawButterflies(now, edge, left, right, delta)
         return
       }
       if (season === "winter") {
         // Snow merges into a shallow, uneven dusting rather than a row of beads.
         for (let index = 0; index < snow.length; index++)
-          snow[index] *= Math.exp(-delta / 35)
+          snow[index] *= Math.exp(-delta / 180)
+        const input = composer.querySelector<
+          HTMLTextAreaElement | HTMLInputElement | HTMLElement
+        >('textarea, [contenteditable="true"], input:not([type="file"])')
+        const text =
+          input instanceof HTMLTextAreaElement ||
+          input instanceof HTMLInputElement
+            ? input.value
+            : (input?.textContent ?? "")
+        const idle =
+          now > thawUntil && now - lastWriting > 12000 && !text.trim()
+        const snowDepth =
+          snow.reduce((sum, amount) => sum + amount, 0) / snow.length
+        frostProgress = advanceSeasonalFrost(
+          frostProgress,
+          snowDepth,
+          idle,
+          delta
+        )
+        if (now - frostPublished > 300) {
+          frostPublished = now
+          setFrost(Math.round(frostProgress * 100) / 100)
+        }
         const spacing = (right - left) / (snow.length - 1)
         const frost = context.createLinearGradient(0, edge - 6, 0, edge + 2)
         frost.addColorStop(0, "#ffffffed")
@@ -239,6 +434,39 @@ export function ComposerWeather() {
         context.fill()
       }
       for (const particle of particles) {
+        const windOn =
+          (season === "autumn" &&
+            interaction.current.blowing &&
+            interaction.current.pointerInside) ||
+          now < interaction.current.gustUntil
+        if (windOn && season !== "winter") {
+          const impulse = seasonalWindImpulse(
+            particle.x,
+            particle.y,
+            interaction.current.pointerX,
+            interaction.current.pointerY,
+            delta
+          )
+          if (Math.abs(impulse.x) + Math.abs(impulse.y) > 0.5) {
+            particle.landedAt = 0
+            particle.vx += impulse.x
+            particle.vy += impulse.y
+            particle.lifted = true
+          }
+        }
+        particle.x += particle.vx * delta
+        particle.y += particle.vy * delta
+        particle.vx *= Math.exp(-delta * 1.5)
+        particle.vy *= Math.exp(-delta * 1.1)
+        if (particle.lifted && particle.vy > -5) particle.lifted = false
+        if (
+          particle.x < -60 ||
+          particle.x > width + 60 ||
+          particle.y < -height
+        ) {
+          reset(particle)
+          continue
+        }
         let opacity = season === "winter" ? particle.depth * 0.8 : 0.65
         if (particle.landedAt) {
           const age = (now - particle.landedAt) / 1000
@@ -256,6 +484,7 @@ export function ComposerWeather() {
           particle.y += particle.speed * delta
           particle.rotation += delta * 0.35
           if (
+            !particle.lifted &&
             oldBottom <= edge &&
             particle.y + particle.size * 0.4 >= edge &&
             particle.x >= left &&
@@ -332,20 +561,77 @@ export function ComposerWeather() {
         }
         context.restore()
       }
+      if (pointer.blowing) {
+        context.save()
+        context.translate(pointer.pointerX - 18, pointer.pointerY + 12)
+        context.rotate(-0.35)
+        context.fillStyle = "#e69b3b"
+        context.strokeStyle = "#705332"
+        context.lineWidth = 1.5
+        context.beginPath()
+        context.roundRect(-12, -10, 22, 20, 6)
+        context.fill()
+        context.stroke()
+        context.fillStyle = "#52616a"
+        context.beginPath()
+        context.roundRect(8, -3, 24, 7, 2)
+        context.fill()
+        context.strokeStyle = "#6b5339"
+        context.lineWidth = 4
+        context.beginPath()
+        context.moveTo(-5, -10)
+        context.lineTo(0, -17)
+        context.lineTo(7, -13)
+        context.stroke()
+        context.strokeStyle = "#b5cddc99"
+        context.lineWidth = 1
+        for (let line = 0; line < 3; line++) {
+          const shift = (now / 45 + line * 5) % 12
+          context.beginPath()
+          context.moveTo(34 + shift, -5 + line * 5)
+          context.quadraticCurveTo(
+            46 + shift,
+            -10 + line * 7,
+            59 + shift,
+            -5 + line * 5
+          )
+          context.stroke()
+        }
+        context.restore()
+      }
     }
     frame = requestAnimationFrame(draw)
     return () => {
       cancelAnimationFrame(frame)
       observer.disconnect()
+      shell.removeEventListener("input", writing)
+      shell.removeEventListener("keydown", writing)
+      shell.removeEventListener("pointerdown", touchBreeze)
+      shell.removeEventListener("pointermove", followPointer)
+      shell.removeEventListener("pointerleave", leavePointer)
+      controls.blowing = false
       context.clearRect(0, 0, width, height)
     }
-  }, [seasonsDisabled])
+  }, [seasonsDisabled, motionReduced, currentSeason])
 
   return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-20 size-full"
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-20 size-full"
+      />
+      {!seasonsDisabled && !motionReduced && composer
+        ? createPortal(
+            <ComposerFrost
+              key={currentSeason}
+              composer={composer}
+              frost={currentSeason === "winter" ? frost : 0}
+              onThaw={onThaw}
+            />,
+            composer
+          )
+        : null}
+    </>
   )
 }

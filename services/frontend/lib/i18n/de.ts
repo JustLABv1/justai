@@ -1,5 +1,9 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Esc to thaw": "Esc zum Auftauen",
+  "Crack the ice · {value0} taps left": "Eis aufbrechen · noch {value0} Mal tippen",
+  "Tap to crack the ice": "Tippe, um das Eis aufzubrechen",
+  "{value0} taps left": "Noch {value0} Mal tippen",
   Suggestion: "Vorschlag",
   "Filter speaker results": "Sprecherergebnisse filtern",
   "No name found": "Kein Name gefunden",

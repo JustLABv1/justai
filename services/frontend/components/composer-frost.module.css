@@ -1,0 +1,94 @@
+@property --frost {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The layer inherits the card's radius, so every effect hugs the card outline. */
+.ice {
+  --veil: clamp(0, calc((var(--frost) - 0.3) / 0.7), 1);
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: --frost 400ms linear;
+}
+
+/* Frost creeps inward from the rim, following the card shape. */
+.rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 calc(var(--frost) * 22px) calc(var(--frost) * 10px) rgb(236 249 255 / 0.92),
+    inset 0 0 calc(var(--frost) * 54px) calc(var(--frost) * 18px) rgb(168 212 238 / 0.55);
+}
+
+/* Frosted glass that thickens once the rim has closed in. */
+.veil {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: var(--veil);
+  background:
+    radial-gradient(120% 90% at 18% 12%, rgb(255 255 255 / 0.55), transparent 55%),
+    linear-gradient(135deg, rgb(214 238 252 / 0.78), rgb(176 215 238 / 0.72) 55%, rgb(228 245 255 / 0.8));
+  backdrop-filter: blur(calc(var(--veil) * 7px)) saturate(1.15);
+  -webkit-backdrop-filter: blur(calc(var(--veil) * 7px)) saturate(1.15);
+}
+
+/* Fine crystalline grain, strongest at the edges. */
+.grain {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: calc(var(--frost) * 0.75);
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.6 -.35'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mask-image: radial-gradient(ellipse at center, rgb(0 0 0 / calc(var(--veil) * 0.6)) 20%, #000 100%);
+}
+
+/* Glassy bevel once the surface is sealed. */
+.bevel {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: var(--veil);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.85),
+    inset 0 2px 3px rgb(255 255 255 / 0.9),
+    inset 0 -3px 8px rgb(96 160 204 / 0.45);
+}
+
+.iceSurface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: auto;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='m8 27 13-17' stroke='%23855537' stroke-width='6' stroke-linecap='round'/%3E%3Cpath d='m12 6 6-3 12 9-6 6z' fill='%23b5cbd7' stroke='%232a4657' stroke-width='2'/%3E%3C/svg%3E") 16 8, pointer;
+  outline: none;
+  color: #183f59;
+}
+.iceSurface:focus-visible { box-shadow: inset 0 0 0 3px var(--primary); }
+.iceHint {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  padding: 12px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 500;
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.7);
+}
+.cracks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cracks path { fill: none; stroke: rgb(255 255 255 / 0.94); stroke-width: 0.65; vector-effect: non-scaling-stroke; filter: drop-shadow(0 1px 1px rgb(35 88 119 / 0.45)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ice { transition: none; }
+}
