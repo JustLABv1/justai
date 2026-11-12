@@ -2,10 +2,12 @@
 
 import { useTranslations } from "@/components/locale-provider"
 import {
+  type ComponentProps,
   type ComponentPropsWithoutRef,
   type MouseEvent,
   type ReactNode,
   isValidElement,
+  useEffect,
   useState,
 } from "react"
 import {
@@ -13,12 +15,25 @@ import {
   type SyntaxHighlighterProps,
 } from "@assistant-ui/react-markdown"
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
+import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
+import "katex/dist/katex.min.css"
 
+import { CodeRunBlock } from "@/components/assistant-ui/code-run-block"
+import {
+  DelimitedTable,
+  JsonTree,
+} from "@/components/assistant-ui/data-previews"
 import { api } from "@/lib/api"
-import { buildPreviewDocument, previewLanguage } from "@/lib/code-preview"
+import {
+  buildPreviewDocument,
+  previewKind,
+  previewLanguage,
+  runnerLanguage,
+} from "@/lib/code-preview"
 import { isGeneratedPDFURL } from "@/lib/file-result-logic"
-import { replaceInlineMathSymbols } from "@/lib/inline-math"
+import { normalizeMath, replaceInlineMathSymbols } from "@/lib/inline-math"
 import { cn } from "@/lib/utils"
 
 type AssistantMarkdownProps = {
@@ -116,7 +131,75 @@ function urlTransform(url: string) {
   return inlineImagePattern.test(url) ? url : defaultUrlTransform(url)
 }
 
-/** Code/Preview switch with a sandboxed frame for HTML and SVG code blocks. */
+/** Renders mermaid source to an <img>, so the SVG can never run scripts. */
+function MermaidPreview({ code }: { code: string }) {
+  const { t } = useTranslations()
+  const [result, setResult] = useState<{
+    code: string
+    src?: string
+    error?: string
+  }>({ code: "" })
+
+  useEffect(() => {
+    let active = true
+    const id = `mermaid-${Math.random().toString(36).slice(2)}`
+    void (async () => {
+      try {
+        const { default: mermaid } = await import("mermaid")
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: "neutral",
+          flowchart: { htmlLabels: false },
+        })
+        const { svg } = await mermaid.render(id, code)
+        if (active) {
+          setResult({
+            code,
+            src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+          })
+        }
+      } catch (caught) {
+        // mermaid leaves its temporary render node behind on syntax errors
+        document.getElementById(`d${id}`)?.remove()
+        if (active) {
+          setResult({
+            code,
+            error: caught instanceof Error ? caught.message : String(caught),
+          })
+        }
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [code])
+
+  if (result.code !== code) {
+    return (
+      <p className="rounded-xl bg-muted/50 p-3 text-muted-foreground" role="status">
+        {t("Loading…")}
+      </p>
+    )
+  }
+  if (result.error || !result.src) {
+    return (
+      <p className="rounded-xl bg-destructive/10 p-3 text-destructive" role="alert">
+        {t("The diagram could not be rendered.")}
+      </p>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      alt={t("Diagram")}
+      className="max-h-[32rem] w-full rounded-xl bg-white p-3"
+      src={result.src}
+    />
+  )
+}
+
+/** Code/Preview switch for HTML, SVG, Mermaid and Markdown code blocks. */
 function CodePreviewBlock({
   code,
   language,
@@ -127,7 +210,8 @@ function CodePreviewBlock({
   codeView: ReactNode
 }) {
   const { t } = useTranslations()
-  const [showPreview, setShowPreview] = useState(false)
+  const kind = previewKind(language)
+  const [showPreview, setShowPreview] = useState(kind === "mermaid")
   const tabClass = (active: boolean) =>
     cn(
       "rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
@@ -139,13 +223,25 @@ function CodePreviewBlock({
   return (
     <div className="my-3">
       {showPreview ? (
-        <iframe
-          className="h-96 w-full rounded-xl bg-white"
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-modals"
-          srcDoc={buildPreviewDocument(code, language)}
-          title={t("Preview")}
-        />
+        kind === "mermaid" ? (
+          <MermaidPreview code={code} />
+        ) : kind === "json" ? (
+          <JsonTree code={code} />
+        ) : kind === "table" ? (
+          <DelimitedTable code={code} language={language} />
+        ) : kind === "markdown" ? (
+          <div className="rounded-xl bg-muted/30 p-3">
+            <StaticAssistantMarkdown content={code} />
+          </div>
+        ) : (
+          <iframe
+            className="h-96 w-full rounded-xl bg-white"
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-modals"
+            srcDoc={buildPreviewDocument(code, language)}
+            title={t("Preview")}
+          />
+        )
       ) : (
         codeView
       )}
@@ -192,8 +288,22 @@ function MarkdownPre({ node: _node, children, ...props }: MarkdownPreProps) {
   )
     ? children
     : null
-  const language = previewLanguage(codeElement?.props.className)
-  if (!codeElement || !language) return <pre {...props}>{children}</pre>
+  const className = codeElement?.props.className
+  const language = previewLanguage(className)
+  const runLanguage = runnerLanguage(className)
+  if (!codeElement || (!language && !runLanguage)) {
+    return <pre {...props}>{children}</pre>
+  }
+  if (runLanguage) {
+    return (
+      <CodeRunBlock
+        code={textOf(codeElement.props.children)}
+        codeView={<pre {...props}>{children}</pre>}
+        language={runLanguage}
+      />
+    )
+  }
+  if (!language) return <pre {...props}>{children}</pre>
   return (
     <CodePreviewBlock
       code={textOf(codeElement.props.children)}
@@ -226,11 +336,58 @@ function PreviewSyntaxHighlighter({
   )
 }
 
+function RunnableSyntaxHighlighter({
+  code,
+  language,
+  components: { Pre, Code },
+}: SyntaxHighlighterProps) {
+  const runLanguage = runnerLanguage(`language-${language}`) ?? "javascript"
+  return (
+    <CodeRunBlock
+      code={code}
+      codeView={
+        <Pre>
+          <Code className={`language-${language}`}>{code}</Code>
+        </Pre>
+      }
+      language={runLanguage}
+    />
+  )
+}
+
 const componentsByLanguage = {
   html: { SyntaxHighlighter: PreviewSyntaxHighlighter },
   htm: { SyntaxHighlighter: PreviewSyntaxHighlighter },
   svg: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  mermaid: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  markdown: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  md: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  json: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  csv: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  tsv: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  javascript: { SyntaxHighlighter: RunnableSyntaxHighlighter },
+  js: { SyntaxHighlighter: RunnableSyntaxHighlighter },
+  mjs: { SyntaxHighlighter: RunnableSyntaxHighlighter },
+  python: { SyntaxHighlighter: RunnableSyntaxHighlighter },
+  python3: { SyntaxHighlighter: RunnableSyntaxHighlighter },
+  py: { SyntaxHighlighter: RunnableSyntaxHighlighter },
 }
+
+type MarkdownPlugins = Pick<
+  ComponentProps<typeof ReactMarkdown>,
+  "remarkPlugins" | "rehypePlugins"
+>
+
+// Single-dollar math is normalised by `normalizeMath`, so prices stay text.
+const markdownPlugins: MarkdownPlugins = {
+  remarkPlugins: [remarkGfm, [remarkMath, { singleDollarTextMath: false }]],
+  rehypePlugins: [
+    [rehypeKatex, { output: "html", throwOnError: false, strict: false }],
+  ],
+}
+
+const prepareMarkdown = (text: string) =>
+  normalizeMath(replaceInlineMathSymbols(text))
 
 const markdownComponents = { a: MarkdownLink, img: MarkdownImage }
 // Only the static renderer needs the `pre` override; assistant-ui uses its own
@@ -242,9 +399,9 @@ export function AssistantMarkdown({ className }: AssistantMarkdownProps = {}) {
     <MarkdownTextPrimitive
       components={markdownComponents}
       componentsByLanguage={componentsByLanguage}
-      preprocess={replaceInlineMathSymbols}
+      preprocess={prepareMarkdown}
       urlTransform={urlTransform}
-      remarkPlugins={[remarkGfm]}
+      {...markdownPlugins}
       className={cn(markdownClassName, className)}
     />
   )
@@ -259,10 +416,10 @@ export function StaticAssistantMarkdown({
     <div className={cn(markdownClassName, className)}>
       <ReactMarkdown
         components={staticMarkdownComponents}
-        remarkPlugins={[remarkGfm]}
+        {...markdownPlugins}
         urlTransform={urlTransform}
       >
-        {replaceInlineMathSymbols(content)}
+        {prepareMarkdown(content)}
       </ReactMarkdown>
     </div>
   )

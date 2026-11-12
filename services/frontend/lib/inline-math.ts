@@ -65,3 +65,35 @@ export function replaceInlineMathSymbols(text: string): string {
     )
     .join("")
 }
+
+// `$...$` only counts as math when it clearly is: no space inside the
+// delimiters, not glued to word characters, and the body either contains a
+// LaTeX-ish character or is a single letter. Prices like "$5 and $10" stay text.
+const singleDollarMath = /(?<![\\$\w])\$(?!\s)([^$\n]*[^$\s\n])\$(?![\w$])/g
+const mathCharacters = /[\\^_{}=]/
+
+/**
+ * Prepares text for remark-math, which runs with single-dollar math disabled:
+ * `\(...\)`, `\[...\]` and unambiguous `$...$` spans become `$$...$$`.
+ * Fenced and inline code is left untouched.
+ */
+export function normalizeMath(text: string): string {
+  if (!/[$\\]/.test(text)) return text
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    .map((segment, index) => {
+      if (index % 2 === 1) return segment
+      return segment
+        .replace(
+          /\\\[([\s\S]+?)\\\]/g,
+          (_m, body: string) => `\n$$\n${body.trim()}\n$$\n`
+        )
+        .replace(/\\\((.+?)\\\)/g, (_m, body: string) => `$$${body.trim()}$$`)
+        .replace(singleDollarMath, (match, body: string) =>
+          mathCharacters.test(body) || /^[A-Za-z]$/.test(body)
+            ? `$$${body}$$`
+            : match
+        )
+    })
+    .join("")
+}

@@ -610,6 +610,22 @@ export const de = {
   Copied: "Kopiert",
   Preview: "Vorschau",
   "Hide preview": "Vorschau ausblenden",
+  "No output": "Keine Ausgabe",
+  "Loading Python…": "Python wird geladen…",
+  "Runs in an isolated sandbox in your browser.":
+    "Läuft in einer isolierten Sandbox in deinem Browser.",
+  "The code ran for too long and was stopped.":
+    "Der Code lief zu lange und wurde gestoppt.",
+  "This is not valid JSON.": "Das ist kein gültiges JSON.",
+  "No rows to show.": "Keine Zeilen vorhanden.",
+  "Inputs for input() (one line per call)":
+    "Eingaben für input() (eine Zeile pro Aufruf)",
+  "e.g. 1\n-3\n2": "z. B. 1\n-3\n2",
+  "The program asked for more input than provided. Add one line per input() call above.":
+    "Das Programm hat mehr Eingaben verlangt als angegeben. Trage oben pro input()-Aufruf eine Zeile ein.",
+  Diagram: "Diagramm",
+  "The diagram could not be rendered.":
+    "Das Diagramm konnte nicht dargestellt werden.",
   Code: "Code",
   "Copy message": "Nachricht kopieren",
   "Edit message": "Nachricht bearbeiten",

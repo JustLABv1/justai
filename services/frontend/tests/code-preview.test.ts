@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { buildPreviewDocument, previewLanguage } from "../lib/code-preview.ts"
+import { buildPreviewDocument, previewKind, previewLanguage } from "../lib/code-preview.ts"
 
 test("detects previewable languages from code class names", () => {
   assert.equal(previewLanguage("language-html"), "html")
@@ -27,4 +27,12 @@ test("keeps full documents and prepends the CSP", () => {
 test("wraps svg in a centered body", () => {
   const doc = buildPreviewDocument("<svg></svg>", "svg")
   assert.match(doc, /<body[^>]*><svg><\/svg><\/body>/)
+})
+
+test("maps languages to preview kinds", () => {
+  assert.equal(previewLanguage("language-mermaid"), "mermaid")
+  assert.equal(previewKind("mermaid"), "mermaid")
+  assert.equal(previewKind("md"), "markdown")
+  assert.equal(previewKind("markdown"), "markdown")
+  assert.equal(previewKind("html"), "frame")
 })

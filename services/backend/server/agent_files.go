@@ -13,7 +13,7 @@ import (
 
 func agentFileTool() provider.ToolDefinition {
 	parameters, _ := json.Marshal(map[string]any{"type": "object", "properties": map[string]any{"format": map[string]any{"type": "string", "enum": []string{"pdf", "md", "txt", "json", "csv", "html"}}, "filename": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"format", "content"}})
-	return provider.ToolDefinition{Name: "justai_create_file", Description: "Create a downloadable file attached to this run. Use for requested reports or exports. Supports pdf (Markdown content), md, txt, json, csv, html. Does not publish or save to knowledge storage; the user chooses that separately.", Parameters: parameters}
+	return provider.ToolDefinition{Name: "justai_create_file", Description: "Create a downloadable file attached to this run. Use for requested reports or exports, only when a file is explicitly wanted; show code, examples, and snippets inline instead. Supports pdf (Markdown content), md, txt, json, csv, html. Does not publish or save to knowledge storage; the user chooses that separately.", Parameters: parameters}
 }
 
 func validAgentOutputFormat(format string) bool {

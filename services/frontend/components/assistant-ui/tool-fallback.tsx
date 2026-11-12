@@ -18,9 +18,11 @@ import type {
   ToolCallMessagePartProps,
 } from "@assistant-ui/react"
 
+import { DelimitedTable, JsonTree } from "@/components/assistant-ui/data-previews"
+import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
-import { buildPreviewDocument } from "@/lib/code-preview"
+import { buildPreviewDocument, filePreviewLanguage } from "@/lib/code-preview"
 import {
   formatFileSize,
   hasFileResultShape,
@@ -295,12 +297,11 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
   const [preview, setPreview] = useState({ source: "", url: "" })
   const [loadError, setLoadError] = useState({ source: "", message: "" })
   const previewRef = useRef("")
-  const [htmlSource, setHtmlSource] = useState({ source: "", html: "" })
-  const [showHtmlPreview, setShowHtmlPreview] = useState(false)
-  const isHTMLFile =
-    !!file &&
-    (file.mimeType.toLowerCase().startsWith("text/html") ||
-      /\.html?$/i.test(file.filename))
+  const [textSource, setTextSource] = useState({ source: "", text: "" })
+  const [showPreview, setShowPreview] = useState(false)
+  const previewLanguage = file
+    ? filePreviewLanguage(file.mimeType, file.filename)
+    : null
 
   useEffect(() => {
     let active = true
@@ -321,9 +322,9 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         }
         previewRef.current = nextURL
         setPreview({ source: fileURL, url: nextURL })
-        if (isHTMLFile && blob.size <= 2 * 1024 * 1024) {
-          void blob.text().then((html) => {
-            if (active) setHtmlSource({ source: fileURL, html })
+        if (previewLanguage && blob.size <= 2 * 1024 * 1024) {
+          void blob.text().then((text) => {
+            if (active) setTextSource({ source: fileURL, text })
           })
         }
       })
@@ -343,7 +344,7 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
       active = false
       controller.abort()
     }
-  }, [fileURL, isHTMLFile])
+  }, [fileURL, previewLanguage])
 
   useEffect(() => {
     return () => {
@@ -424,26 +425,43 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
           </p>
         </div>
       </div>
-      {showHtmlPreview && htmlSource.source === fileURL && (
-        <iframe
-          className="h-96 w-full border-t bg-white"
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-modals"
-          srcDoc={buildPreviewDocument(htmlSource.html, "html")}
-          title={t("Preview")}
-        />
+      {showPreview && previewLanguage && textSource.source === fileURL && (
+        <div className="border-t">
+          {previewLanguage === "html" ? (
+            <iframe
+              className="h-96 w-full bg-white"
+              referrerPolicy="no-referrer"
+              sandbox="allow-scripts allow-modals"
+              srcDoc={buildPreviewDocument(textSource.text, "html")}
+              title={t("Preview")}
+            />
+          ) : (
+            <div className="p-3">
+              {previewLanguage === "json" ? (
+                <JsonTree code={textSource.text} />
+              ) : previewLanguage === "md" ? (
+                <StaticAssistantMarkdown content={textSource.text} />
+              ) : (
+                <DelimitedTable
+                  code={textSource.text}
+                  language={previewLanguage}
+                />
+              )}
+            </div>
+          )}
+        </div>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
         <span className="text-muted-foreground">{t("Generated file")}</span>
         <div className="flex flex-wrap items-center gap-1.5">
-          {isHTMLFile && htmlSource.source === fileURL && (
+          {previewLanguage && textSource.source === fileURL && (
             <button
-              aria-pressed={showHtmlPreview}
+              aria-pressed={showPreview}
               className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-              onClick={() => setShowHtmlPreview((value) => !value)}
+              onClick={() => setShowPreview((value) => !value)}
               type="button"
             >
-              {showHtmlPreview ? t("Hide preview") : t("Preview")}
+              {showPreview ? t("Hide preview") : t("Preview")}
             </button>
           )}
           {canOpen && (

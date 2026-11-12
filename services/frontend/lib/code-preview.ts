@@ -1,5 +1,44 @@
-/** Languages whose fenced code blocks can be previewed in a sandboxed frame. */
-const previewableLanguages = new Set(["html", "htm", "svg"])
+/** Languages whose fenced code blocks can be previewed. */
+const previewableLanguages = new Set([
+  "html",
+  "htm",
+  "svg",
+  "mermaid",
+  "markdown",
+  "md",
+  "json",
+  "csv",
+  "tsv",
+])
+
+export type PreviewKind = "frame" | "mermaid" | "markdown" | "json" | "table"
+
+export function previewKind(language: string): PreviewKind {
+  if (language === "mermaid") return "mermaid"
+  if (language === "markdown" || language === "md") return "markdown"
+  if (language === "json") return "json"
+  if (language === "csv" || language === "tsv") return "table"
+  return "frame"
+}
+
+export type RunnerLanguage = "javascript" | "python"
+
+const runnerLanguages: Record<string, RunnerLanguage> = {
+  js: "javascript",
+  javascript: "javascript",
+  mjs: "javascript",
+  py: "python",
+  python: "python",
+  python3: "python",
+}
+
+/** Languages whose code blocks can be run in the browser sandbox. */
+export function runnerLanguage(
+  className: string | undefined
+): RunnerLanguage | null {
+  const match = /(?:^|\s)language-([\w-]+)/.exec(className ?? "")
+  return runnerLanguages[match?.[1]?.toLowerCase() ?? ""] ?? null
+}
 
 /**
  * Network lockdown for previews: inline scripts/styles and a few well-known
@@ -30,4 +69,19 @@ export function buildPreviewDocument(code: string, language: string): string {
   const viewport = '<meta name="viewport" content="width=device-width, initial-scale=1">'
   if (isFullDocument) return `${meta}${viewport}${body}`
   return `<!doctype html><html><head><meta charset="utf-8">${meta}${viewport}</head><body>${body}</body></html>`
+}
+
+/** Preview language for a generated file, from its MIME type or extension. */
+export function filePreviewLanguage(
+  mimeType: string,
+  filename: string
+): "html" | "csv" | "tsv" | "json" | "md" | null {
+  const mime = mimeType.toLowerCase()
+  const name = filename.toLowerCase()
+  if (mime.startsWith("text/html") || /\.html?$/.test(name)) return "html"
+  if (mime.startsWith("text/csv") || name.endsWith(".csv")) return "csv"
+  if (mime.startsWith("text/tab-separated-values") || name.endsWith(".tsv")) return "tsv"
+  if (mime.startsWith("application/json") || name.endsWith(".json")) return "json"
+  if (mime.startsWith("text/markdown") || /\.(md|markdown)$/.test(name)) return "md"
+  return null
 }
