@@ -1380,7 +1380,9 @@ func (a *App) conversationHistory(ctx context.Context, conversationID uuid.UUID)
 		if err := rows.Scan(&role, &content, &rawUIMessage); err != nil {
 			return nil, err
 		}
-		result = append(result, providerMessageFromStored(storedChatMessage{Role: role, Content: content, UIMessage: rawUIMessage}))
+		if message := providerMessageFromStored(storedChatMessage{Role: role, Content: content, UIMessage: rawUIMessage}); historyMessageHasContent(message) {
+			result = append(result, message)
+		}
 	}
 	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
 		result[left], result[right] = result[right], result[left]
@@ -1396,10 +1398,19 @@ func (a *App) conversationHistoryFromHead(ctx context.Context, conversationID, h
 	result := make([]provider.Message, 0, len(stored))
 	for _, item := range stored {
 		if item.Role == "user" || item.Role == "assistant" {
-			result = append(result, providerMessageFromStored(item))
+			if message := providerMessageFromStored(item); historyMessageHasContent(message) {
+				result = append(result, message)
+			}
 		}
 	}
 	return result, nil
+}
+
+// historyMessageHasContent reports whether a replayed message carries any text
+// or image. Turns that only made tool calls are stored with empty content, and
+// many providers (for example LiteLLM custom endpoints) reject empty messages.
+func historyMessageHasContent(message provider.Message) bool {
+	return strings.TrimSpace(message.Content) != "" || len(message.ContentParts) > 0
 }
 
 func providerMessageFromStored(item storedChatMessage) provider.Message {

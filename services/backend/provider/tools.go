@@ -75,9 +75,97 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		return onEvent(event)
 	}, true)
 	if err != nil && !delivered && rejectsStreamOptions(err) {
-		return streamChatWithToolsOnce(ctx, endpoint, options, onEvent, false)
+		err = streamChatWithToolsOnce(ctx, endpoint, options, onEvent, false)
+	}
+	// Some gateways advertise tool calling but restrict the history they take.
+	// Adapt to what the error says, at most once per kind: replay tool activity
+	// as plain text, then shrink the history until it fits.
+	flattened := false
+	windows := historyWindows
+	for err != nil && !delivered {
+		switch {
+		case rejectsToolHistory(err) && !flattened:
+			flattened = true
+			options.Messages = flattenToolHistory(options.Messages)
+		case rejectsHistoryLimit(err) && len(windows) > 0:
+			options.Messages = trimToolHistory(options.Messages, windows[0])
+			windows = windows[1:]
+		default:
+			return err
+		}
+		err = streamChatWithToolsOnce(ctx, endpoint, options, onEvent, true)
 	}
 	return err
+}
+
+// historyWindows are the numbers of recent non-system messages tried, in
+// order, when a gateway reports that the history is too long.
+var historyWindows = []int{12, 6, 3, 1}
+
+func rejectsHistoryLimit(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "(400)") && strings.Contains(text, "message limit")
+}
+
+// trimToolHistory keeps every system message and the last keep others,
+// starting the kept part at a user message and never at a tool result.
+func trimToolHistory(messages []ToolMessage, keep int) []ToolMessage {
+	system := []ToolMessage{}
+	rest := []ToolMessage{}
+	for _, message := range messages {
+		if message.Role == "system" {
+			system = append(system, message)
+		} else {
+			rest = append(rest, message)
+		}
+	}
+	if len(rest) > keep {
+		rest = rest[len(rest)-keep:]
+	}
+	for len(rest) > 1 && rest[0].Role != "user" {
+		rest = rest[1:]
+	}
+	return append(system, rest...)
+}
+
+func rejectsToolHistory(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "(400)") &&
+		(strings.Contains(text, "non-empty user and assistant messages") ||
+			strings.Contains(text, "tool role") ||
+			strings.Contains(text, "role 'tool'"))
+}
+
+// flattenToolHistory turns assistant tool_calls and tool results into plain
+// assistant text and drops messages that would be empty.
+func flattenToolHistory(messages []ToolMessage) []ToolMessage {
+	names := map[string]string{}
+	result := make([]ToolMessage, 0, len(messages))
+	for _, message := range messages {
+		for _, call := range message.ToolCalls {
+			names[call.ID] = call.Name
+		}
+		switch {
+		case message.Role == "tool":
+			name := names[message.ToolCallID]
+			if name == "" {
+				name = "tool"
+			}
+			content := strings.TrimSpace(message.Content)
+			if runes := []rune(content); len(runes) > 6000 {
+				content = string(runes[:6000]) + "…"
+			}
+			if content != "" {
+				result = append(result, ToolMessage{Role: "assistant", Content: "Result of " + name + ":\n" + content})
+			}
+		case strings.TrimSpace(message.Content) == "" && len(message.ContentParts) == 0:
+			continue
+		default:
+			message.ToolCalls = nil
+			result = append(result, message)
+		}
+	}
+	return result
 }
 
 func streamChatWithToolsOnce(ctx context.Context, endpoint Endpoint, options ToolChatOptions, onEvent func(ToolChatEvent) error, includeUsage bool) error {
