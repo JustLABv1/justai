@@ -160,6 +160,7 @@ export function ComposerWeather() {
     shell.addEventListener("pointermove", followPointer, { passive: true })
     shell.addEventListener("pointerleave", leavePointer)
 
+    const flight = [0, 1, 2].map(() => ({ x: 0, y: 0, tilt: 0, seen: false }))
     function drawButterflies(
       now: number,
       edge: number,
@@ -173,6 +174,9 @@ export function ComposerWeather() {
         const t = Math.max(0, Math.min(1, value))
         return t * t * (3 - 2 * t)
       }
+      const smoothing = 1 - Math.exp(-delta * 3)
+      lureX += (interaction.current.pointerX - lureX) * smoothing
+      lureY += (interaction.current.pointerY - lureY) * smoothing
       for (let index = 0; index < count; index++) {
         const time = (now - summerStarted) / 1000 + index * 14
         const cycle = time % 42
@@ -185,26 +189,38 @@ export function ComposerWeather() {
         )
         let x = flightX + (targetX - flightX) * perch
         let y = flightY + (edge - 8 - flightY) * perch
-        const call = Math.min(
-          1,
-          Math.max(0, (interaction.current.summonUntil - now) / 1000)
+        const call = smooth(
+          (interaction.current.summonUntil - now) / 1000
         )
-        const smoothing = 1 - Math.exp(-delta * 5)
-        lureX += (interaction.current.pointerX - lureX) * smoothing
-        lureY += (interaction.current.pointerY - lureY) * smoothing
         x +=
-          (lureX + (index - 1) * 40 + Math.sin(time * 2 + index) * 18 - x) *
+          (lureX + (index - 1) * 46 + Math.sin(time * 1.3 + index) * 22 - x) *
           call
         y +=
-          (lureY - 24 - index * 10 + Math.cos(time * 2 + index) * 14 - y) * call
+          (lureY - 28 - index * 12 + Math.cos(time * 1.7 + index) * 16 - y) *
+          call
+        // Lazy, slightly erratic flutter while airborne.
+        const airborne = 1 - perch * (1 - call)
+        x += Math.sin(time * 3.1 + index * 5) * 5 * airborne
+        y += Math.sin(time * 7 + index * 3) * 3 * airborne
+        // Bank into the direction of travel instead of hanging upright.
+        const state = flight[index]
+        if (!state.seen) {
+          state.x = x
+          state.y = y
+          state.seen = true
+        }
+        const vx = (x - state.x) / Math.max(delta, 0.001)
+        state.tilt += (Math.max(-0.6, Math.min(0.6, vx * 0.006)) - state.tilt) * 0.12
+        state.x = x
+        state.y = y
         const resting = cycle > 15 && cycle < 21
         const flap = resting
           ? 0.4 + Math.sin(time * 2) * 0.12
-          : 0.25 + Math.abs(Math.sin(time * 10)) * 0.75
+          : 0.3 + Math.abs(Math.sin(time * 9 + index)) * 0.7
         context.save()
         context.translate(x, y)
-        context.rotate(Math.sin(time * 0.9) * 0.25 * (1 - perch))
-        context.scale(index === 1 ? 0.8 : 0.95, index === 1 ? 0.8 : 0.95)
+        context.rotate(state.tilt * (1 - perch) + Math.sin(time * 0.9) * 0.08)
+        context.scale(index === 1 ? 0.95 : 1.15, index === 1 ? 0.95 : 1.15)
         context.globalAlpha = 0.85
         for (const side of [-1, 1]) {
           context.save()
