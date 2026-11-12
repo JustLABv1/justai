@@ -104,7 +104,22 @@ func StreamChat(ctx context.Context, endpoint Endpoint, options ChatOptions, onD
 	}
 	switch endpoint.ProviderType {
 	case "openai", "openai-compatible":
-		return streamOpenAI(ctx, endpoint, options, onDelta)
+		delivered := false
+		err := streamOpenAI(ctx, endpoint, options, func(chunk string) error {
+			delivered = true
+			return onDelta(chunk)
+		})
+		for _, keep := range historyWindows {
+			if err == nil || delivered || !rejectsHistoryLimit(err) {
+				break
+			}
+			options.Messages = trimChatHistory(options.Messages, keep)
+			err = streamOpenAI(ctx, endpoint, options, func(chunk string) error {
+				delivered = true
+				return onDelta(chunk)
+			})
+		}
+		return err
 	case "ollama":
 		return streamOllama(ctx, endpoint, options, onDelta)
 	case "gemini":
@@ -911,4 +926,25 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// trimChatHistory keeps the system messages and the last keep others,
+// starting the kept part at a user message.
+func trimChatHistory(messages []Message, keep int) []Message {
+	system := []Message{}
+	rest := []Message{}
+	for _, message := range messages {
+		if message.Role == "system" {
+			system = append(system, message)
+		} else {
+			rest = append(rest, message)
+		}
+	}
+	if len(rest) > keep {
+		rest = rest[len(rest)-keep:]
+	}
+	for len(rest) > 1 && rest[0].Role != "user" {
+		rest = rest[1:]
+	}
+	return append(system, rest...)
 }

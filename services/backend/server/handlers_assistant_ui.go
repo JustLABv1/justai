@@ -1477,7 +1477,7 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 			part["approval"] = map[string]any{"id": event.ApprovalID, "approved": true}
 		}
 	default:
-		result := firstNonEmptyChatToolString(event.Result, event.ResultPreview)
+		result := redactInlineImageData(firstNonEmptyChatToolString(event.Result, event.ResultPreview))
 		part["output"] = assistantUIJSONValue(result)
 		if event.ApprovalID != "" {
 			part["approval"] = map[string]any{"id": event.ApprovalID, "approved": true}
@@ -2947,7 +2947,7 @@ func (a *App) legacyAssistantUIMessage(ctx context.Context, id uuid.UUID, role, 
 			case "running":
 				part["state"] = "input-available"
 			default:
-				part["output"] = assistantUIJSONValue(firstNonEmptyChatToolString(event.Result, event.ResultPreview))
+				part["output"] = assistantUIJSONValue(redactInlineImageData(firstNonEmptyChatToolString(event.Result, event.ResultPreview)))
 				if event.ApprovalID != "" {
 					part["approval"] = map[string]any{"id": event.ApprovalID, "approved": true}
 				}

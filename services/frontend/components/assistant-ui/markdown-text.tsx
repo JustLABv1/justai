@@ -3,7 +3,7 @@
 import { useTranslations } from "@/components/locale-provider"
 import { type ComponentPropsWithoutRef, type MouseEvent, useState } from "react"
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { api } from "@/lib/api"
@@ -87,13 +87,33 @@ function MarkdownLink({
 const markdownClassName =
   "max-w-none text-sm leading-7 text-foreground [&_a]:text-primary [&_a]:underline-offset-2 [&_a:hover]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:bg-muted/50 [&_pre]:p-3 [&_strong]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
 
-const markdownComponents = { a: MarkdownLink }
+type MarkdownImageProps = ComponentPropsWithoutRef<"img"> & { node?: unknown }
+
+/** Models sometimes emit `![alt]()`; an empty src would reload the whole page. */
+function MarkdownImage({ node: _node, src, alt, ...props }: MarkdownImageProps) {
+  void _node
+  if (typeof src !== "string" || src.trim() === "") {
+    return alt ? <span className="text-muted-foreground">[{alt}]</span> : null
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img alt={alt ?? ""} src={src} {...props} />
+}
+
+const inlineImagePattern = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/
+
+/** The default transform blanks every `data:` URL; keep safe raster images. */
+function urlTransform(url: string) {
+  return inlineImagePattern.test(url) ? url : defaultUrlTransform(url)
+}
+
+const markdownComponents = { a: MarkdownLink, img: MarkdownImage }
 
 export function AssistantMarkdown({ className }: AssistantMarkdownProps = {}) {
   return (
     <MarkdownTextPrimitive
       components={markdownComponents}
       preprocess={replaceInlineMathSymbols}
+      urlTransform={urlTransform}
       remarkPlugins={[remarkGfm]}
       className={cn(markdownClassName, className)}
     />
@@ -110,6 +130,7 @@ export function StaticAssistantMarkdown({
       <ReactMarkdown
         components={markdownComponents}
         remarkPlugins={[remarkGfm]}
+        urlTransform={urlTransform}
       >
         {replaceInlineMathSymbols(content)}
       </ReactMarkdown>

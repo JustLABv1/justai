@@ -116,3 +116,15 @@ func (a *App) storeMCPResultImage(ctx context.Context, userID, organizationID uu
 	replacement["note"] = mcpResultImageNote
 	return replacement
 }
+
+var legacyInlineImagePattern = regexp.MustCompile(`data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=_-]{200,}`)
+
+// redactInlineImageData removes base64 images from tool results saved before
+// they were stored as image references. Replaying them to the model wastes
+// context and makes it copy the payload into its answer.
+func redactInlineImageData(result string) string {
+	if !strings.Contains(result, "data:image/") {
+		return result
+	}
+	return legacyInlineImagePattern.ReplaceAllString(result, "[image already shown to the user]")
+}
