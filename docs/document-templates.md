@@ -55,7 +55,7 @@ Both Docker images include Python and pinned pypdf. For a local Go server:
 
 ```sh
 python3 -m venv .venv-templates
-.venv-templates/bin/pip install pypdf==6.19.0
+.venv-templates/bin/pip install pypdf==6.21.4
 export JUSTAI_TEMPLATE_PYTHON="$PWD/.venv-templates/bin/python"
 ```
 
