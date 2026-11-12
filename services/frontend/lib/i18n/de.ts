@@ -4579,6 +4579,9 @@ export const de = {
     "Melde dich per OAuth an, um die Verbindung zu prüfen.",
   "{value0} was saved.": "{value0} wurde gespeichert.",
   "Allowed tools (optional)": "Erlaubte Tools (optional)",
+  "Denied tools (optional)": "Gesperrte Tools (optional)",
+  "Enter tool names separated by commas. These tools are hidden and blocked for everyone, even if they are listed under allowed tools.":
+    "Tool-Namen durch Kommas trennen. Diese Tools werden für alle ausgeblendet und blockiert, auch wenn sie unter erlaubten Tools stehen.",
   "Enter tool names separated by commas. Leave empty to allow all tools under the approval policy.":
     "Tool-Namen durch Kommas trennen. Leer lassen, um alle Tools gemäß den Freigaberegeln zu erlauben.",
   "Only fill these in if automatic sign-in setup fails.":

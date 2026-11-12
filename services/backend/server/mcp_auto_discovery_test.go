@@ -41,8 +41,8 @@ func TestDiscoverAutomaticMCPToolResolvesExactShortName(t *testing.T) {
 	userID := uuid.New()
 	organizationID := uuid.New()
 	serverID := uuid.New()
-	rows := sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
-		AddRow(serverID, "Shell", "", []byte(`[]`), "ls", "List items", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`))
+	rows := sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "denied_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
+		AddRow(serverID, "Shell", "", []byte(`[]`), []byte(`[]`), "ls", "List items", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`))
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE ms.id = $1 AND mst.name = $2")).
 		WithArgs(serverID, "ls", userID, organizationID).
 		WillReturnRows(rows)
@@ -89,8 +89,8 @@ func TestDiscoverHistoricalAutomaticMCPToolRestoresLaterTurnBinding(t *testing.T
 			AddRow("user", "List them again", []byte(`{}`)))
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE ms.id = $1 AND mst.name = $2")).
 		WithArgs(serverID, "List Watchlists", userID, organizationID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
-			AddRow(serverID, "MCP", "", []byte(`[]`), "List Watchlists", "List saved watchlists", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "denied_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
+			AddRow(serverID, "MCP", "", []byte(`[]`), []byte(`[]`), "List Watchlists", "List saved watchlists", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)))
 
 	discovery := (&App{DB: database}).discoverHistoricalAutomaticMCPTool(context.Background(), userID, organizationID, conversationID, headID, providerName)
 	binding, ok := discovery.Bindings[providerName]
@@ -147,9 +147,9 @@ func TestDiscoverAutomaticMCPToolsIsBoundedAndApprovalGated(t *testing.T) {
 	userID := uuid.New()
 	organizationID := uuid.New()
 	serverID := uuid.New()
-	rows := sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "tool_name", "description", "input_schema", "annotations", "metadata"})
+	rows := sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "denied_tools", "tool_name", "description", "input_schema", "annotations", "metadata"})
 	for index := 0; index < maxAutomaticMCPTools+3; index++ {
-		rows.AddRow(serverID, "Calendar", "", []byte("[]"), "calendar_lookup_"+string(rune('a'+index)), "Look up calendar events and meetings", []byte(`{"type":"object"}`), []byte(`{"readOnlyHint":true,"destructiveHint":false}`), []byte(`{}`))
+		rows.AddRow(serverID, "Calendar", "", []byte("[]"), []byte(`[]`), "calendar_lookup_"+string(rune('a'+index)), "Look up calendar events and meetings", []byte(`{"type":"object"}`), []byte(`{"readOnlyHint":true,"destructiveHint":false}`), []byte(`{}`))
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM mcp_servers ms")).WithArgs(userID, organizationID).WillReturnRows(rows)
 
@@ -177,9 +177,9 @@ func TestDiscoverAutomaticMCPToolsRespectsAllowlistAndAttachedBindings(t *testin
 	userID := uuid.New()
 	organizationID := uuid.New()
 	serverID := uuid.New()
-	rows := sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
-		AddRow(serverID, "Mail", "", []byte(`["send_mail"]`), "send_mail", "Send an email message", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)).
-		AddRow(serverID, "Mail", "", []byte(`["send_mail"]`), "delete_mail", "Delete an email message", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`))
+	rows := sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "denied_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
+		AddRow(serverID, "Mail", "", []byte(`["send_mail"]`), []byte(`[]`), "send_mail", "Send an email message", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)).
+		AddRow(serverID, "Mail", "", []byte(`["send_mail"]`), []byte(`[]`), "delete_mail", "Delete an email message", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM mcp_servers ms")).WithArgs(userID, organizationID).WillReturnRows(rows)
 
 	existingName := voiceToolName(serverID, "send_mail", nil)

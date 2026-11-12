@@ -403,7 +403,7 @@ func (e *AgentEngine) discoverNativeMCPTools(ctx context.Context, userID, organi
 			}
 		}
 		for _, tool := range tools {
-			if !mcpToolAllowed(server.Allowed, tool.Name) || !agentMCPToolSelected(scope.MCPTools, serverID, tool.Name) {
+			if !server.ToolAllowed(tool.Name) || !agentMCPToolSelected(scope.MCPTools, serverID, tool.Name) {
 				continue
 			}
 			parameters := tool.InputSchema
@@ -469,7 +469,7 @@ func (e *AgentEngine) executeNativeMCPTool(ctx context.Context, userID, organiza
 	if callErr != nil && !binding.RequiresApproval {
 		if tools, refreshErr := e.app.refreshMCPTools(ctx, server, binding.ServerID); refreshErr == nil {
 			for _, tool := range tools {
-				if tool.Name == binding.ToolName && mcpToolAllowed(server.Allowed, tool.Name) && !mcpToolRequiresApproval(server, tool) {
+				if tool.Name == binding.ToolName && server.ToolAllowed(tool.Name) && !mcpToolRequiresApproval(server, tool) {
 					result, callErr = server.CallTool(ctx, binding.ToolName, arguments)
 					break
 				}

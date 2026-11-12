@@ -28,6 +28,7 @@ type Server struct {
 	OAuthRefreshToken string
 	OAuthExpiresAt    time.Time
 	Allowed           map[string]bool
+	Denied            map[string]bool
 	AllowPrivate      bool
 	TrustedReadOnly   bool
 	ProtocolVersion   string
@@ -353,7 +354,7 @@ func (s *Server) sdkListTools(ctx context.Context) ([]Tool, error) {
 			}
 		}
 		entry.release()
-		return filterTools(s.Allowed, allTools), nil
+		return s.filterTools(allTools), nil
 	}
 	return nil, fmt.Errorf("MCP tool discovery failed after reconnect")
 }
@@ -378,7 +379,7 @@ func (s *Server) sdkListToolsLegacy(ctx context.Context) ([]Tool, error) {
 		}
 	}
 	entry.release()
-	return filterTools(s.Allowed, allTools), nil
+	return s.filterTools(allTools), nil
 }
 
 func (s *Server) sdkCallTool(ctx context.Context, name string, arguments map[string]any) (json.RawMessage, error) {
@@ -448,13 +449,22 @@ func sdkTool(tool *sdkmcp.Tool) Tool {
 	return result
 }
 
-func filterTools(allowed map[string]bool, tools []Tool) []Tool {
-	if len(allowed) == 0 {
+// ToolAllowed reports whether a tool may be listed or called. A non-empty
+// allowlist restricts to its entries; the denylist always wins.
+func (s Server) ToolAllowed(name string) bool {
+	if s.Denied[name] {
+		return false
+	}
+	return len(s.Allowed) == 0 || s.Allowed[name]
+}
+
+func (s Server) filterTools(tools []Tool) []Tool {
+	if len(s.Allowed) == 0 && len(s.Denied) == 0 {
 		return tools
 	}
 	filtered := make([]Tool, 0, len(tools))
 	for _, tool := range tools {
-		if allowed[tool.Name] {
+		if s.ToolAllowed(tool.Name) {
 			filtered = append(filtered, tool)
 		}
 	}
@@ -626,7 +636,7 @@ func (s *Server) ListTools(ctx context.Context) ([]Tool, error) {
 		}
 		allTools = append(allTools, payload.Tools...)
 	}
-	return filterTools(s.Allowed, allTools), nil
+	return s.filterTools(allTools), nil
 }
 
 // listToolsLegacy is the compatibility path for MCP servers that still expose
@@ -691,14 +701,14 @@ func (s Server) listToolsLegacy(ctx context.Context) ([]Tool, error) {
 		allTools = append(allTools, payload.Tools...)
 		nextID++
 	}
-	return filterTools(s.Allowed, allTools), nil
+	return s.filterTools(allTools), nil
 }
 
 func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]any) (json.RawMessage, error) {
 	if err := s.ensureOAuthToken(ctx); err != nil {
 		return nil, err
 	}
-	if len(s.Allowed) > 0 && !s.Allowed[name] {
+	if !s.ToolAllowed(name) {
 		return nil, fmt.Errorf("MCP tool is not allowlisted")
 	}
 	if result, err := s.sdkCallTool(ctx, name, arguments); err == nil {

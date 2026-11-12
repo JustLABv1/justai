@@ -1224,7 +1224,7 @@ func (a *App) executeChatMCPTool(ctx context.Context, userID, organizationID, co
 		// snapshot that changed upstream without duplicating a destructive call.
 		if tools, refreshErr := a.refreshMCPTools(ctx, server, binding.ServerID); refreshErr == nil {
 			for _, tool := range tools {
-				if tool.Name != binding.ToolName || !mcpToolAllowed(server.Allowed, tool.Name) {
+				if tool.Name != binding.ToolName || !server.ToolAllowed(tool.Name) {
 					continue
 				}
 				result, err = server.CallTool(ctx, binding.ToolName, arguments)

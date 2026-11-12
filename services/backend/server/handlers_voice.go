@@ -758,7 +758,7 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 			}
 		}
 		for _, tool := range tools {
-			if !mcpToolAllowed(server.Allowed, tool.Name) {
+			if !server.ToolAllowed(tool.Name) {
 				continue
 			}
 			appMetadata := tool.AppMetadata()
@@ -986,7 +986,7 @@ func (a *App) executeVoiceTool(ctx context.Context, userID, organizationID, conv
 		// snapshot that changed upstream without duplicating a destructive call.
 		if tools, refreshErr := a.refreshMCPTools(ctx, server, binding.ServerID); refreshErr == nil {
 			for _, tool := range tools {
-				if tool.Name != binding.ToolName || !mcpToolAllowed(server.Allowed, tool.Name) {
+				if tool.Name != binding.ToolName || !server.ToolAllowed(tool.Name) {
 					continue
 				}
 				result, err = server.CallTool(ctx, binding.ToolName, arguments)
