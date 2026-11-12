@@ -20,6 +20,7 @@ import type {
 
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
+import { buildPreviewDocument } from "@/lib/code-preview"
 import {
   formatFileSize,
   hasFileResultShape,
@@ -294,6 +295,12 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
   const [preview, setPreview] = useState({ source: "", url: "" })
   const [loadError, setLoadError] = useState({ source: "", message: "" })
   const previewRef = useRef("")
+  const [htmlSource, setHtmlSource] = useState({ source: "", html: "" })
+  const [showHtmlPreview, setShowHtmlPreview] = useState(false)
+  const isHTMLFile =
+    !!file &&
+    (file.mimeType.toLowerCase().startsWith("text/html") ||
+      /\.html?$/i.test(file.filename))
 
   useEffect(() => {
     let active = true
@@ -314,6 +321,11 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         }
         previewRef.current = nextURL
         setPreview({ source: fileURL, url: nextURL })
+        if (isHTMLFile && blob.size <= 2 * 1024 * 1024) {
+          void blob.text().then((html) => {
+            if (active) setHtmlSource({ source: fileURL, html })
+          })
+        }
       })
       .catch((caught) => {
         if (active) {
@@ -331,7 +343,7 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
       active = false
       controller.abort()
     }
-  }, [fileURL])
+  }, [fileURL, isHTMLFile])
 
   useEffect(() => {
     return () => {
@@ -412,9 +424,28 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
           </p>
         </div>
       </div>
+      {showHtmlPreview && htmlSource.source === fileURL && (
+        <iframe
+          className="h-96 w-full border-t bg-white"
+          referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-modals"
+          srcDoc={buildPreviewDocument(htmlSource.html, "html")}
+          title={t("Preview")}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
         <span className="text-muted-foreground">{t("Generated file")}</span>
         <div className="flex flex-wrap items-center gap-1.5">
+          {isHTMLFile && htmlSource.source === fileURL && (
+            <button
+              aria-pressed={showHtmlPreview}
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+              onClick={() => setShowHtmlPreview((value) => !value)}
+              type="button"
+            >
+              {showHtmlPreview ? t("Hide preview") : t("Preview")}
+            </button>
+          )}
           {canOpen && (
             <a
               aria-label={t("Open {value0} in a new tab", {

@@ -1,12 +1,22 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { type ComponentPropsWithoutRef, type MouseEvent, useState } from "react"
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown"
+import {
+  type ComponentPropsWithoutRef,
+  type MouseEvent,
+  type ReactNode,
+  isValidElement,
+  useState,
+} from "react"
+import {
+  MarkdownTextPrimitive,
+  type SyntaxHighlighterProps,
+} from "@assistant-ui/react-markdown"
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { api } from "@/lib/api"
+import { buildPreviewDocument, previewLanguage } from "@/lib/code-preview"
 import { isGeneratedPDFURL } from "@/lib/file-result-logic"
 import { replaceInlineMathSymbols } from "@/lib/inline-math"
 import { cn } from "@/lib/utils"
@@ -106,12 +116,132 @@ function urlTransform(url: string) {
   return inlineImagePattern.test(url) ? url : defaultUrlTransform(url)
 }
 
+/** Code/Preview switch with a sandboxed frame for HTML and SVG code blocks. */
+function CodePreviewBlock({
+  code,
+  language,
+  codeView,
+}: {
+  code: string
+  language: string
+  codeView: ReactNode
+}) {
+  const { t } = useTranslations()
+  const [showPreview, setShowPreview] = useState(false)
+  const tabClass = (active: boolean) =>
+    cn(
+      "rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+      active
+        ? "bg-primary text-primary-foreground"
+        : "text-muted-foreground hover:text-foreground"
+    )
+
+  return (
+    <div className="my-3">
+      {showPreview ? (
+        <iframe
+          className="h-96 w-full rounded-xl bg-white"
+          referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-modals"
+          srcDoc={buildPreviewDocument(code, language)}
+          title={t("Preview")}
+        />
+      ) : (
+        codeView
+      )}
+      <div className="mt-1 flex gap-1" role="tablist">
+        <button
+          aria-selected={!showPreview}
+          className={tabClass(!showPreview)}
+          onClick={() => setShowPreview(false)}
+          role="tab"
+          type="button"
+        >
+          {t("Code")}
+        </button>
+        <button
+          aria-selected={showPreview}
+          className={tabClass(showPreview)}
+          onClick={() => setShowPreview(true)}
+          role="tab"
+          type="button"
+        >
+          {t("Preview")}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & { node?: unknown }
+
+function textOf(node: ReactNode): string {
+  if (typeof node === "string") return node
+  if (Array.isArray(node)) return node.map(textOf).join("")
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return textOf(node.props.children)
+  }
+  return ""
+}
+
+/** `pre` override for the static react-markdown renderer. */
+function MarkdownPre({ node: _node, children, ...props }: MarkdownPreProps) {
+  void _node
+  const codeElement = isValidElement<{ className?: string; children?: ReactNode }>(
+    children
+  )
+    ? children
+    : null
+  const language = previewLanguage(codeElement?.props.className)
+  if (!codeElement || !language) return <pre {...props}>{children}</pre>
+  return (
+    <CodePreviewBlock
+      code={textOf(codeElement.props.children)}
+      codeView={<pre {...props}>{children}</pre>}
+      language={language}
+    />
+  )
+}
+
+/**
+ * assistant-ui replaces `pre`/`code` for fenced blocks, so previews hook in
+ * through its per-language `SyntaxHighlighter` slot instead.
+ */
+function PreviewSyntaxHighlighter({
+  code,
+  language,
+  components: { Pre, Code },
+}: SyntaxHighlighterProps) {
+  const lang = previewLanguage(`language-${language}`) ?? "html"
+  return (
+    <CodePreviewBlock
+      code={code}
+      codeView={
+        <Pre>
+          <Code className={`language-${language}`}>{code}</Code>
+        </Pre>
+      }
+      language={lang}
+    />
+  )
+}
+
+const componentsByLanguage = {
+  html: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  htm: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+  svg: { SyntaxHighlighter: PreviewSyntaxHighlighter },
+}
+
 const markdownComponents = { a: MarkdownLink, img: MarkdownImage }
+// Only the static renderer needs the `pre` override; assistant-ui uses its own
+// per-language SyntaxHighlighter slot and would otherwise wrap the block twice.
+const staticMarkdownComponents = { ...markdownComponents, pre: MarkdownPre }
 
 export function AssistantMarkdown({ className }: AssistantMarkdownProps = {}) {
   return (
     <MarkdownTextPrimitive
       components={markdownComponents}
+      componentsByLanguage={componentsByLanguage}
       preprocess={replaceInlineMathSymbols}
       urlTransform={urlTransform}
       remarkPlugins={[remarkGfm]}
@@ -128,7 +258,7 @@ export function StaticAssistantMarkdown({
   return (
     <div className={cn(markdownClassName, className)}>
       <ReactMarkdown
-        components={markdownComponents}
+        components={staticMarkdownComponents}
         remarkPlugins={[remarkGfm]}
         urlTransform={urlTransform}
       >
