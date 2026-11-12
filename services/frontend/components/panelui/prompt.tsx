@@ -648,10 +648,12 @@ export interface PromptContextProps extends ComponentProps<'div'> {
   open?: boolean;
   /** The prompt modes it is shown in. It folds away in any other. */
   mode?: PromptBandMode;
+  /** Whether it tucks under the field's card. Turn off when another band (the status) sits between them. Default `true`. */
+  tucked?: boolean;
 }
 
 /** A strip under the field, inset from its edges, for where the message is going: a branch, a folder, a ticket. */
-function PromptContext({ open, mode, className, render, ...props }: PromptContextProps & RenderProp<'div'>) {
+function PromptContext({ open, mode, tucked = true, className, render, ...props }: PromptContextProps & RenderProp<'div'>) {
   const shown = useBandOpen('Prompt.Context', open, mode, () => true);
   const slots = promptVariants();
   const clip = useRef<HTMLDivElement>(null);
@@ -661,14 +663,19 @@ function PromptContext({ open, mode, className, render, ...props }: PromptContex
   const element = useRender({
     defaultTagName: 'div',
     render,
-    props: mergeProps({ className: slots.context({ className }) }, props),
+    props: mergeProps(
+      { className: slots.context({ className: tucked ? className : ['pt-2 rounded-t-[1rem]', className] }) },
+      props
+    ),
   });
   return (
     <div
       data-slot="prompt-context"
       data-open={shown ? '' : undefined}
       className={slots.contextFold({
-        className: shown ? '-mt-5 grid-rows-[1fr] opacity-100' : 'mt-0 grid-rows-[0fr] opacity-0',
+        className: shown
+          ? `${tucked ? '-mt-5' : 'mt-2'} grid-rows-[1fr] opacity-100`
+          : 'mt-0 grid-rows-[0fr] opacity-0',
       })}
     >
       <div ref={clip} className="min-h-0 overflow-hidden">
