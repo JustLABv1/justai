@@ -621,6 +621,13 @@ export const de = {
   Fullscreen: "Vollbild",
   "Reset session": "Sitzung zurücksetzen",
   "Fix error": "Fehler beheben",
+  "Show all {value0} lines": "Alle {value0} Zeilen anzeigen",
+  "Show less": "Weniger anzeigen",
+  "Run code": "Code ausführen",
+  "Running code": "Code wird ausgeführt",
+  "Finished in {value0} s": "Fertig in {value0} s",
+  "Exit code {value0}": "Exit-Code {value0}",
+  "The output was shortened.": "Die Ausgabe wurde gekürzt.",
   "Error:": "Fehler:",
   "The following {value0} code failed with an error when run. Please fix it and show the corrected code.":
     "Der folgende {value0}-Code hat beim Ausführen einen Fehler verursacht. Bitte korrigiere ihn und zeige den korrigierten Code.",

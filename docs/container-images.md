@@ -18,6 +18,13 @@ JustAI follows the JustScan/JustCD multi-stage pattern:
   or static archives are shipped. filelock 4.2.1 fixes CVE-2026-112940.
 - FFmpeg: unchanged source-verified static 9.0.1/OpenSSL 3.5.9 artifact; CI passes
   its digest-pinned image through the named `ffmpeg-builder` build context.
+- Code runner: official CPython 3.13 slim image with pandas, numpy and
+  matplotlib for the `run_code` chat tool. pip, setuptools and wheel are removed
+  after installation (the service has no network at run time). The service
+  starts as root so each run can get its own unprivileged user; it is deployed
+  with every capability dropped except the six it needs, a read-only root file
+  system and no network. PR checks run its tests and a sandbox-boundary probe
+  with the production settings and scan the image like the others.
 - Expat: backend and combined images build the checksum-verified 2.9.0 security
   backport as a signed APK, following JustCD. All runtime repositories stay on
   stable Alpine. See `services/backend/packaging/expat/README.md`.

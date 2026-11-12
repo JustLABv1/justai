@@ -1535,6 +1535,9 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
       ) {
         return t("Creating file")
       }
+      if (toolCall.toolName === "run_code") {
+        return t("Running code")
+      }
       return `Using ${toolCall.toolName.replaceAll("_", " ")}`
     }
 

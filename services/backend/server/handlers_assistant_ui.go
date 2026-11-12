@@ -803,7 +803,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 
 	definitions := []provider.ToolDefinition{}
 	bindings := map[string]voiceToolBinding{}
-	builtInTools := assistantBuiltInToolDiscovery()
+	builtInTools := a.builtInToolDiscovery()
 	definitions = append(definitions, builtInTools.Definitions...)
 	for name, binding := range builtInTools.Bindings {
 		bindings[name] = binding

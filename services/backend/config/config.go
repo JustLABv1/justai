@@ -31,6 +31,14 @@ type Config struct {
 	CookieDomain        string
 	RepositoryMaxFiles  int
 	Transcription       TranscriptionConfig
+	CodeRunner          CodeRunnerConfig
+}
+
+// CodeRunnerConfig points at the isolated code-runner service. The run_code
+// chat tool is only offered when URL is set.
+type CodeRunnerConfig struct {
+	URL   string
+	Token string
 }
 
 type TranscriptionConfig struct {
@@ -85,6 +93,12 @@ type fileConfig struct {
 	CookieDomain        string                  `yaml:"cookie_domain"`
 	RepositoryMaxFiles  int                     `yaml:"repository_max_files"`
 	Transcription       fileTranscriptionConfig `yaml:"transcription"`
+	CodeRunner          fileCodeRunnerConfig    `yaml:"code_runner"`
+}
+
+type fileCodeRunnerConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
 }
 
 type fileTranscriptionConfig struct {
@@ -167,6 +181,10 @@ func Load(configPath string) (Config, error) {
 	if repositoryMaxFiles < 1 || repositoryMaxFiles > 5000 {
 		return Config{}, fmt.Errorf("JUSTAI_REPOSITORY_MAX_FILES must be between 1 and 5000")
 	}
+	codeRunner, err := codeRunnerConfig(fileValues.CodeRunner)
+	if err != nil {
+		return Config{}, err
+	}
 	metricsToken := getenvOrFile("JUSTAI_METRICS_TOKEN", fileValues.MetricsToken, "")
 	if metricsToken != "" && len(metricsToken) < 16 {
 		return Config{}, fmt.Errorf("JUSTAI_METRICS_TOKEN must be at least 16 characters")
@@ -195,7 +213,26 @@ func Load(configPath string) (Config, error) {
 		CookieDomain:        getenvOrFile("JUSTAI_COOKIE_DOMAIN", fileValues.CookieDomain, ""),
 		RepositoryMaxFiles:  repositoryMaxFiles,
 		Transcription:       transcriptionConfig(fileValues.Transcription),
+		CodeRunner:          codeRunner,
 	}, nil
+}
+
+func codeRunnerConfig(values fileCodeRunnerConfig) (CodeRunnerConfig, error) {
+	result := CodeRunnerConfig{
+		URL:   strings.TrimRight(getenvOrFile("JUSTAI_CODE_RUNNER_URL", values.URL, ""), "/"),
+		Token: getenvOrFile("JUSTAI_CODE_RUNNER_TOKEN", values.Token, ""),
+	}
+	if result.URL == "" {
+		return CodeRunnerConfig{}, nil
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return CodeRunnerConfig{}, fmt.Errorf("JUSTAI_CODE_RUNNER_URL must be an absolute http(s) URL")
+	}
+	if len(result.Token) < 16 {
+		return CodeRunnerConfig{}, fmt.Errorf("JUSTAI_CODE_RUNNER_TOKEN must be at least 16 characters when the code runner is enabled")
+	}
+	return result, nil
 }
 
 func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {

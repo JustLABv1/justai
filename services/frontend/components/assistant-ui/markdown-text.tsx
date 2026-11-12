@@ -28,7 +28,11 @@ import {
   CodeActionsProvider,
 } from "@/components/assistant-ui/code-actions"
 import { CodeRunBlock } from "@/components/assistant-ui/code-run-block"
-import { CodeToolbar } from "@/components/assistant-ui/code-toolbar"
+import {
+  CodeShell,
+  CollapsibleCode,
+  ShellTabs,
+} from "@/components/assistant-ui/code-shell"
 import {
   DelimitedTable,
   JsonTree,
@@ -223,73 +227,72 @@ function MermaidPreview({ code }: { code: string }) {
   )
 }
 
-/** Code/Preview switch for every block type that has a rendered form. */
+/** Code / Preview switch for every block type that has a rendered form. */
 function CodePreviewBlock({
   code,
   language,
-  codeView,
 }: {
   code: string
   language: string
-  codeView: ReactNode
 }) {
   const { t } = useTranslations()
   const kind = previewKind(language)
-  const [showPreview, setShowPreview] = useState(opensAsPreview(kind))
-  const tabClass = (active: boolean) =>
-    cn(
-      "rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-      active
-        ? "bg-primary text-primary-foreground"
-        : "text-muted-foreground hover:text-foreground"
-    )
+  const [tab, setTab] = useState(opensAsPreview(kind) ? "preview" : "code")
 
   return (
-    <div className="my-3">
-      {showPreview ? (
-        kind === "mermaid" ? (
-          <MermaidPreview code={code} />
-        ) : kind === "graphviz" ? (
-          <GraphvizPreview code={code} />
-        ) : kind === "chart" ? (
-          <ChartPreview code={code} />
-        ) : kind === "diff" ? (
-          <DiffPreview code={code} />
-        ) : kind === "json" ? (
-          <JsonTree code={code} />
-        ) : kind === "table" ? (
-          <DelimitedTable code={code} language={language} />
-        ) : kind === "markdown" ? (
-          <div className="rounded-xl bg-muted/30 p-3">
+    <CodeShell
+      code={code}
+      language={language}
+      tabs={
+        <ShellTabs
+          onChange={setTab}
+          tabs={[
+            { id: "code", label: t("Code") },
+            { id: "preview", label: t("Preview") },
+          ]}
+          value={tab}
+        />
+      }
+    >
+      {tab === "preview" ? (
+        <div className="p-3">
+          {kind === "mermaid" ? (
+            <MermaidPreview code={code} />
+          ) : kind === "graphviz" ? (
+            <GraphvizPreview code={code} />
+          ) : kind === "chart" ? (
+            <ChartPreview code={code} />
+          ) : kind === "diff" ? (
+            <DiffPreview code={code} />
+          ) : kind === "json" ? (
+            <JsonTree code={code} />
+          ) : kind === "table" ? (
+            <DelimitedTable code={code} language={language} />
+          ) : kind === "markdown" ? (
             <StaticAssistantMarkdown content={code} />
-          </div>
-        ) : (
-          <HtmlPreviewFrame srcDoc={buildPreviewDocument(code, language)} />
-        )
+          ) : (
+            <HtmlPreviewFrame srcDoc={buildPreviewDocument(code, language)} />
+          )}
+        </div>
       ) : (
-        codeView
+        <CollapsibleCode code={code} />
       )}
-      <div className="mt-1 flex gap-1" role="tablist">
-        <button
-          aria-selected={!showPreview}
-          className={tabClass(!showPreview)}
-          onClick={() => setShowPreview(false)}
-          role="tab"
-          type="button"
-        >
-          {t("Code")}
-        </button>
-        <button
-          aria-selected={showPreview}
-          className={tabClass(showPreview)}
-          onClick={() => setShowPreview(true)}
-          role="tab"
-          type="button"
-        >
-          {t("Preview")}
-        </button>
-      </div>
-    </div>
+    </CodeShell>
+  )
+}
+
+/** Every other code block: the terminal frame with collapsible code. */
+function PlainCodeBlock({
+  code,
+  language,
+}: {
+  code: string
+  language?: string | undefined
+}) {
+  return (
+    <CodeShell code={code} language={language}>
+      <CollapsibleCode code={code} />
+    </CodeShell>
   )
 }
 
@@ -318,90 +321,49 @@ function MarkdownPre({ node: _node, children, ...props }: MarkdownPreProps) {
   const code = textOf(codeElement.props.children)
   const language = resolvePreviewLanguage(className, code)
   const runLanguage = runnerLanguage(className)
-  const codeView = <pre {...props}>{children}</pre>
 
-  return (
-    <>
-      <CodeToolbar code={code} language={fenceLanguage(className)} />
-      {runLanguage ? (
-        <CodeRunBlock code={code} codeView={codeView} language={runLanguage} />
-      ) : language ? (
-        <CodePreviewBlock code={code} codeView={codeView} language={language} />
-      ) : (
-        codeView
-      )}
-    </>
-  )
+  if (runLanguage) return <CodeRunBlock code={code} language={runLanguage} />
+  if (language) return <CodePreviewBlock code={code} language={language} />
+  return <PlainCodeBlock code={code} language={fenceLanguage(className)} />
 }
 
-/**
- * assistant-ui replaces `pre`/`code` for fenced blocks, so previews hook in
- * through its per-language `SyntaxHighlighter` slot instead.
- */
-function PreviewSyntaxHighlighter({
-  code,
-  language,
-  components: { Pre, Code },
-}: SyntaxHighlighterProps) {
-  const lang = previewLanguage(`language-${language}`) ?? "html"
+// assistant-ui replaces `pre`/`code` for fenced blocks, so the frame hooks in
+// through its per-language `SyntaxHighlighter` slot (and a global fallback).
+
+function PreviewSyntaxHighlighter({ code, language }: SyntaxHighlighterProps) {
   return (
     <CodePreviewBlock
       code={code}
-      codeView={
-        <Pre>
-          <Code className={`language-${language}`}>{code}</Code>
-        </Pre>
-      }
-      language={lang}
+      language={previewLanguage(`language-${language}`) ?? "html"}
     />
   )
 }
 
-function RunnableSyntaxHighlighter({
-  code,
-  language,
-  components: { Pre, Code },
-}: SyntaxHighlighterProps) {
-  const runLanguage = runnerLanguage(`language-${language}`) ?? "javascript"
+function RunnableSyntaxHighlighter({ code, language }: SyntaxHighlighterProps) {
   return (
     <CodeRunBlock
       code={code}
-      codeView={
-        <Pre>
-          <Code className={`language-${language}`}>{code}</Code>
-        </Pre>
-      }
-      language={runLanguage}
+      language={runnerLanguage(`language-${language}`) ?? "javascript"}
     />
   )
 }
 
 /** Blocks without a language tag: only full HTML documents get a preview. */
-function UntaggedSyntaxHighlighter({
-  code,
-  components: { Pre, Code },
-}: SyntaxHighlighterProps) {
-  const codeView = (
-    <Pre>
-      <Code>{code}</Code>
-    </Pre>
-  )
+function UntaggedSyntaxHighlighter({ code }: SyntaxHighlighterProps) {
   return looksLikeHTML(code) ? (
-    <CodePreviewBlock code={code} codeView={codeView} language="html" />
+    <CodePreviewBlock code={code} language="html" />
   ) : (
-    codeView
+    <PlainCodeBlock code={code} />
   )
 }
 
-/** Language label plus Copy/Save, shown above every fenced code block. */
-function CodeToolbarHeader({
-  language,
-  code,
-}: {
-  language?: string | undefined
-  code: string
-}) {
-  return <CodeToolbar code={code} language={language} />
+function PlainSyntaxHighlighter({ code, language }: SyntaxHighlighterProps) {
+  return <PlainCodeBlock code={code} language={language} />
+}
+
+/** The frame has its own title bar, so the library's header is not used. */
+function NoCodeHeader() {
+  return null
 }
 
 const preview = { SyntaxHighlighter: PreviewSyntaxHighlighter }
@@ -457,7 +419,8 @@ const prepareMarkdown = (text: string) =>
 const markdownComponents = { a: MarkdownLink, img: MarkdownImage }
 const assistantComponents = {
   ...markdownComponents,
-  CodeHeader: CodeToolbarHeader,
+  CodeHeader: NoCodeHeader,
+  SyntaxHighlighter: PlainSyntaxHighlighter,
 }
 // Only the static renderer needs the `pre` override; assistant-ui uses its own
 // per-language SyntaxHighlighter slot and would otherwise wrap the block twice.

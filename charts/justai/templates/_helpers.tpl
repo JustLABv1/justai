@@ -78,7 +78,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "justai.validateSecretRefs" -}}
 {{- $root := . -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "codeRunnerToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $_ := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- end }}
 {{- end }}
@@ -112,7 +112,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $root := . -}}
 {{- $generatedName := printf "%s-secrets" (include "justai.fullname" $root) -}}
 {{- $seen := dict -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "codeRunnerToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $name := include "justai.secretRefName" (dict "root" $root "ref" $refName) -}}
 {{- $key := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- if eq $name $generatedName }}
@@ -178,6 +178,37 @@ app.kubernetes.io/instance: {{ .Release.Name }}
     items:
       - key: {{ include "justai.secretRefKey" (dict "root" . "ref" "streamRelayToken") | quote }}
         path: token
+{{- end }}
+{{- end }}
+
+{{/* The runner and the backend share one token; both read it from the Secret. */}}
+{{- define "justai.validateCodeRunner" -}}
+{{- if .Values.codeRunner.enabled -}}
+{{- $ref := .Values.secrets.refs.codeRunnerToken -}}
+{{- $data := .Values.secrets.data.codeRunnerToken | default "" -}}
+{{- $external := or $ref.name .Values.secrets.existingSecret .Values.secrets.vault.enabled -}}
+{{- if and (not $external) (not .Values.secrets.create) -}}
+{{- fail "codeRunner.enabled requires secrets.refs.codeRunnerToken.name, secrets.existingSecret, Vault, or secrets.create=true with secrets.data.codeRunnerToken" -}}
+{{- end -}}
+{{- if and (not $external) .Values.secrets.create (lt (len (trim $data)) 32) -}}
+{{- fail "secrets.data.codeRunnerToken must contain at least 32 characters when creating the code runner token Secret" -}}
+{{- end -}}
+{{- if or (lt (int .Values.codeRunner.maxConcurrent) 1) (gt (int .Values.codeRunner.maxConcurrent) 32) -}}
+{{- fail "codeRunner.maxConcurrent must be between 1 and 32" -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Backend settings that switch the run_code chat tool on. */}}
+{{- define "justai.codeRunnerEnv" -}}
+{{- if .Values.codeRunner.enabled }}
+- name: JUSTAI_CODE_RUNNER_URL
+  value: {{ printf "http://%s-code-runner:%d" (include "justai.fullname" .) (.Values.codeRunner.service.port | int) | quote }}
+- name: JUSTAI_CODE_RUNNER_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "justai.secretRefName" (dict "root" . "ref" "codeRunnerToken") | quote }}
+      key: {{ include "justai.secretRefKey" (dict "root" . "ref" "codeRunnerToken") | quote }}
 {{- end }}
 {{- end }}
 

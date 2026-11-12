@@ -118,3 +118,50 @@ export function parseMCPResultImages(value: unknown): { url: string }[] {
       : []
   )
 }
+
+export interface CodeRunResult {
+  language: string
+  /** null when the run was stopped (for example by the time limit). */
+  exitCode: number | null
+  timedOut: boolean
+  durationMs: number
+  stdout: string
+  stderr: string
+  truncated: boolean
+  files: GeneratedFileResult[]
+}
+
+/** Parses the result of the `run_code` tool: `{ codeRun: { … } }`. */
+export function parseCodeRunResult(value: unknown): CodeRunResult | null {
+  const parsed = parseToolResult(value)
+  if (!isRecord(parsed) || !isRecord(parsed.codeRun)) return null
+  const run = parsed.codeRun
+  const files = Array.isArray(run.files)
+    ? run.files.flatMap((file: unknown) => {
+        const item = parseGeneratedFileResult({ file })
+        return item ? [item] : []
+      })
+    : []
+  return {
+    language: typeof run.language === "string" ? run.language : "python",
+    exitCode: typeof run.exitCode === "number" ? run.exitCode : null,
+    timedOut: run.timedOut === true,
+    durationMs:
+      typeof run.durationMs === "number" && Number.isFinite(run.durationMs)
+        ? Math.max(0, run.durationMs)
+        : 0,
+    stdout: typeof run.stdout === "string" ? run.stdout : "",
+    stderr: typeof run.stderr === "string" ? run.stderr : "",
+    truncated: run.truncated === true,
+    files,
+  }
+}
+
+/** Run succeeded when it exited with 0 and did not time out. */
+export function codeRunSucceeded(run: CodeRunResult): boolean {
+  return !run.timedOut && run.exitCode === 0
+}
+
+export function isImageFile(file: GeneratedFileResult): boolean {
+  return /^image\/(?:png|jpeg|gif)$/i.test(file.mimeType)
+}

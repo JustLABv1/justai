@@ -93,3 +93,13 @@ jobs:
             ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ steps.ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=pyannote
           cache-to: type=gha,scope=pyannote,mode=max
+
+      - name: Build & Push Code Runner
+        uses: docker/build-push-action@v7
+        with:
+          context: services/code-runner
+          file: services/code-runner/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:code-runner-${{ github.event.inputs.branch }}
+          cache-from: type=gha,scope=code-runner
+          cache-to: type=gha,scope=code-runner,mode=max

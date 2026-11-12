@@ -65,6 +65,8 @@ function toolLabel(toolName: string) {
       return "Read attachment"
     case "create_file":
       return "Create file"
+    case "run_code":
+      return "Run code"
     default:
       return toolName
   }

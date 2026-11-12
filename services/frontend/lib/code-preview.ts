@@ -279,3 +279,26 @@ export function filePreviewLanguage(
   if (mime.startsWith("text/markdown") || /\.(md|markdown)$/.test(name)) return "md"
   return null
 }
+
+/** Blocks longer than this start collapsed to {@link COLLAPSED_LINES} lines. */
+export const COLLAPSE_AFTER_LINES = 14
+export const COLLAPSED_LINES = 10
+
+/** Lines of a code block; a trailing newline does not add an empty line. */
+export function codeLines(code: string): string[] {
+  return code.replace(/\r?\n$/, "").split(/\r?\n/)
+}
+
+/** Name of the shell command a run would correspond to, for the terminal prompt. */
+export function runCommand(language: string): string {
+  switch (language) {
+    case "python":
+      return "python main.py"
+    case "typescript":
+      return "tsx main.ts"
+    case "sql":
+      return "sqlite3 session.db"
+    default:
+      return "node main.js"
+  }
+}

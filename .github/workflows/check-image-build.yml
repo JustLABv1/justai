@@ -25,6 +25,9 @@ jobs:
       ffmpeg_image: ${{ steps.filter.outputs.ffmpeg_image }}
       pyannote: ${{ steps.filter.outputs.pyannote }}
       pyannote_image: ${{ steps.filter.outputs.pyannote_image }}
+      code_runner: ${{ steps.filter.outputs.code_runner }}
+      code_runner_image: ${{ steps.filter.outputs.code_runner_image }}
+      chart: ${{ steps.filter.outputs.chart }}
     steps:
       - uses: actions/checkout@v7
 
@@ -59,6 +62,18 @@ jobs:
               - 'services/pyannote-diarizer/app.py'
               - 'services/pyannote-diarizer/model_sync.py'
               - 'services/pyannote-diarizer/tests/**'
+            code_runner:
+              - 'services/code-runner/**'
+              - '.github/workflows/check-image-build.yml'
+            code_runner_image:
+              - 'services/code-runner/Dockerfile'
+              - 'services/code-runner/requirements.txt'
+              - 'services/code-runner/app.py'
+              - 'services/code-runner/bootstrap.py'
+              - 'services/code-runner/tests/**'
+            chart:
+              - 'charts/**'
+              - '.github/workflows/check-image-build.yml'
 
   frontend-compile:
     name: Frontend — Compile Check
@@ -301,3 +316,120 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
             aquasec/trivy:0.76.1 image --scanners vuln \
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-pyannote:ci
+
+  code-runner-test:
+    name: Code Runner — Unit Tests
+    needs: changes
+    if: needs.changes.outputs.code_runner == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Run tests without user separation
+        working-directory: services/code-runner
+        run: python -m unittest discover -s tests -v
+
+  code-runner-image-build:
+    name: Code Runner — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.code_runner_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: services/code-runner
+          file: services/code-runner/Dockerfile
+          push: false
+          load: true
+          tags: justai-code-runner:ci
+          cache-from: type=gha,scope=code-runner
+          cache-to: type=gha,scope=code-runner,mode=max
+
+      - name: Run tests with the production isolation settings
+        run: |
+          docker run --rm --network=none --read-only --tmpfs /work:size=512m \
+            --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+            --cap-add SETUID --cap-add SETGID --cap-add KILL \
+            --security-opt no-new-privileges:true \
+            -v "${{ github.workspace }}/services/code-runner/tests:/tests:ro" \
+            --entrypoint python justai-code-runner:ci -m unittest discover -s /tests -v
+
+      - name: Verify the sandbox boundaries
+        run: |
+          set -euo pipefail
+          docker run -d --name runner --read-only --tmpfs /work:size=512m \
+            --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+            --cap-add SETUID --cap-add SETGID --cap-add KILL \
+            --security-opt no-new-privileges:true \
+            -e CODE_RUNNER_TOKEN=ci-token-0123456789abcdef justai-code-runner:ci
+          for attempt in $(seq 1 20); do
+            docker exec runner python -I -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=2)" && break
+            sleep 1
+          done
+          docker exec -i runner python -I - <<'PY'
+          import json, urllib.request
+          probe = """
+          import os
+          assert os.getuid() >= 20000, os.getuid()
+          capabilities = [l for l in open('/proc/self/status') if l.startswith('CapEff')][0].split()[1]
+          assert int(capabilities, 16) == 0, capabilities
+          for path in ('/proc/1/environ', '/proc/1/mem'):
+              try:
+                  open(path, 'rb').read(1)
+              except PermissionError:
+                  continue
+              raise SystemExit(path + ' must not be readable')
+          try:
+              os.setuid(0)
+          except PermissionError:
+              print('isolated')
+          """
+          request = urllib.request.Request(
+              'http://127.0.0.1:8090/v1/run',
+              data=json.dumps({'code': probe}).encode(),
+              headers={'Authorization': 'Bearer ci-token-0123456789abcdef', 'Content-Type': 'application/json'},
+              method='POST',
+          )
+          result = json.loads(urllib.request.urlopen(request, timeout=30).read())
+          assert result['exitCode'] == 0 and result['stdout'].strip() == 'isolated', result
+          print(result['stdout'].strip())
+          PY
+          docker rm -f runner
+
+      - name: Verify runtime packaging
+        run: |
+          set -euo pipefail
+          if docker run --rm --entrypoint python justai-code-runner:ci -m pip --version; then
+            echo "pip must not be present in the code runner image"
+            exit 1
+          fi
+          docker run --rm --entrypoint python justai-code-runner:ci -c 'import numpy, pandas, matplotlib; print(numpy.__version__, pandas.__version__, matplotlib.__version__)'
+
+      - name: Reject high and critical image vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.76.1 image --scanners vuln \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-code-runner:ci
+
+  chart-checks:
+    name: Helm Chart — Lint and Tests
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - name: Lint chart
+        run: helm lint charts/justai
+      - name: Render and verify the chart
+        run: |
+          set -euo pipefail
+          for test in charts/justai/tests/*_test.rb; do
+            echo "== $test"
+            ruby "$test"
+          done

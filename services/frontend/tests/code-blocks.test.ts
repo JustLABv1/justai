@@ -149,3 +149,49 @@ test("validates table and file messages from the sandbox", () => {
   assert.equal(parseRunnerMessage({ type: "file", name: "../x", mime: "text/csv", data: "AAAA" }), null)
   assert.equal(parseRunnerMessage({ type: "file", name: "x.csv", mime: "text/csv", data: "<script>" }), null)
 })
+
+test("parses run_code tool results", async () => {
+  const { parseCodeRunResult, codeRunSucceeded, isImageFile } = await import(
+    "../lib/file-result-logic.ts"
+  )
+  const id = "0b5f3bd0-4f3c-4a3b-8f33-0d6a1f1f0a11"
+  const result = parseCodeRunResult(
+    JSON.stringify({
+      codeRun: {
+        language: "python",
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 420,
+        stdout: "42\n",
+        stderr: "",
+        truncated: false,
+        files: [
+          { id, url: `/api/v1/files/${id}`, filename: "figure-1.png", title: "figure-1.png", mimeType: "image/png", size: 10 },
+          { url: "https://evil.test/x", filename: "x", title: "x", mimeType: "text/csv" },
+        ],
+      },
+    })
+  )
+  assert.ok(result)
+  assert.equal(result.stdout, "42\n")
+  assert.equal(codeRunSucceeded(result), true)
+  // Only stored files with a valid JustAI URL are kept.
+  assert.equal(result.files.length, 1)
+  assert.equal(isImageFile(result.files[0]), true)
+
+  const failed = parseCodeRunResult({ codeRun: { exitCode: null, timedOut: true } })
+  assert.ok(failed)
+  assert.equal(codeRunSucceeded(failed), false)
+  assert.equal(parseCodeRunResult({ file: {} }), null)
+  assert.equal(parseCodeRunResult("nope"), null)
+})
+
+test("splits code into lines and decides when to collapse", async () => {
+  const { codeLines, COLLAPSE_AFTER_LINES, runCommand } = await import("../lib/code-preview.ts")
+  assert.deepEqual(codeLines("a\nb\n"), ["a", "b"])
+  assert.deepEqual(codeLines("a\r\nb"), ["a", "b"])
+  assert.deepEqual(codeLines(""), [""])
+  assert.equal(codeLines("x\n".repeat(COLLAPSE_AFTER_LINES)).length, COLLAPSE_AFTER_LINES)
+  assert.equal(runCommand("python"), "python main.py")
+  assert.equal(runCommand("javascript"), "node main.js")
+})

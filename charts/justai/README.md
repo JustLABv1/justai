@@ -444,12 +444,61 @@ Ingresses and reverse proxies must allow request bodies at least as large as
 streaming for clients on constrained connections. Configure their request
 timeout to at least ten minutes so it matches the browser's per-part timeout.
 
+## Optional code runner (`run_code` chat tool)
+
+With the code runner enabled the assistant can write and run Python itself,
+read the output and continue from the real result (calculations, data analysis,
+charts). The program runs in a separate service, never inside the backend, which
+holds the database, JWT and encryption secrets. It is disabled by default.
+
+```sh
+kubectl create secret generic justai-code-runner \
+  --from-literal=code-runner-token="$(openssl rand -hex 32)"
+
+helm upgrade --install justai ./charts/justai \
+  --set codeRunner.enabled=true \
+  --set secrets.refs.codeRunnerToken.name=justai-code-runner
+```
+
+The backend finds the runner automatically (`JUSTAI_CODE_RUNNER_URL` and the
+shared token are set in both deployment modes), and the chat offers the tool as
+soon as the pods are ready. Python 3.13 with pandas, numpy and matplotlib is
+included; a program may run for up to 60 seconds.
+
+What isolates untrusted code, and what the chart enforces:
+
+- **Own Deployment, no Kubernetes credentials.** The pod does not mount a
+  service account token and receives no service environment variables.
+- **No network at all.** A `NetworkPolicy` lets only the JustAI backend connect
+  and defines no egress rules. This needs a CNI that enforces NetworkPolicy
+  (Calico, Cilium and similar); on a cluster that does not, the runner is not
+  network-isolated, so do not enable it there.
+- **Read-only root file system, size-limited scratch volume, fixed CPU and
+  memory limits.** Every run also gets its own unprivileged user, a private
+  directory and hard process, file and memory limits, and is cleaned up
+  afterwards.
+- **Optional extra sandbox.** Set `codeRunner.runtimeClassName` (for example
+  `gvisor`) when the cluster provides a RuntimeClass. This is strongly
+  recommended on shared clusters.
+
+The runner starts as root so it can give each run its own user, with all
+capabilities dropped except `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`,
+`SETGID` and `KILL`. The Pod Security `baseline` standard allows this, the
+`restricted` standard does not, so deploy it in a namespace that enforces
+`baseline` (the other JustAI workloads keep their restricted defaults).
+`services/code-runner/README.md` describes the isolation model and its limits.
+Scale with `codeRunner.replicaCount`, `codeRunner.maxConcurrent` and the
+resource limits; a replica rejects work with "busy" when all slots are in use.
+
 ## Chart configuration checks
 
-Run `helm lint charts/justai` and
-`ruby charts/justai/tests/stream_relay_test.rb` from the repository root. The relay
-checks render both deployment modes and verify credential mounts, frontend
-isolation, Secret/Vault selection, and rejection of invalid configuration.
+Run `helm lint charts/justai` and each test in `charts/justai/tests` from the
+repository root, for example
+`ruby charts/justai/tests/stream_relay_test.rb`. The relay checks render both
+deployment modes and verify credential mounts, frontend isolation, Secret/Vault
+selection, and rejection of invalid configuration. `code_runner_test.rb` verifies
+that the runner pod is locked down, that only the backend can reach it and that
+it cannot connect anywhere.
 
 ## Usage metrics (Prometheus)
 

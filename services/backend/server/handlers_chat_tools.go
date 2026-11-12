@@ -83,7 +83,7 @@ func isAssistantBuiltInToolName(name string) bool {
 		return true
 	}
 	switch name {
-	case "get_justai_help", "list_justai_tools", "navigate_justai", "start_live_transcription", "start_video_transcription", "get_transcription", "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "create_file", "delegate_agent", "discover_mcp_tools":
+	case "get_justai_help", "list_justai_tools", "navigate_justai", "start_live_transcription", "start_video_transcription", "get_transcription", "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "create_file", "run_code", "delegate_agent", "discover_mcp_tools":
 		return true
 	default:
 		return false
@@ -126,7 +126,7 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 	case "get_justai_help", "navigate_justai", "start_live_transcription":
 		return a.executeJustAIControl(ctx, userID, toolName, arguments)
 	case "list_justai_tools":
-		discovery := assistantBuiltInToolDiscovery()
+		discovery := a.builtInToolDiscovery()
 		return justAIToolCatalog(discovery.Definitions, discovery.Bindings)
 	case "start_video_transcription", "get_transcription":
 		return a.transcriptionChatTool(ctx, userID, organizationID, toolName, arguments)
@@ -178,6 +178,8 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 			return nil, err
 		}
 		return json.Marshal(map[string]any{"file": item})
+	case codeRunnerToolName:
+		return a.runCodeForChat(ctx, userID, organizationID, arguments)
 	case "delegate_agent":
 		if !a.platformCapabilityEnabled(ctx, "agents") {
 			return nil, fmt.Errorf("agent delegation is temporarily disabled by the platform administrator")

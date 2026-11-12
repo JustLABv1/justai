@@ -32,6 +32,7 @@ import {
 } from "@assistant-ui/react"
 
 import { parseMCPResultImages } from "@/lib/file-result-logic"
+import { CodeRunCard } from "@/components/assistant-ui/code-run-card"
 import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { AssistantSource } from "@/components/assistant-ui/sources"
 import {
@@ -278,6 +279,7 @@ const toolLabelsMessages: Record<string, string> = {
   edit_image: "Edit image",
   create_pdf: "Create PDF",
   create_file: "Create file",
+  run_code: "Run code",
   list_templates: "Find templates",
   read_template: "Read template",
   fill_template: "Fill template",
@@ -451,7 +453,9 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
             inputs: parseToolInputs(part),
             output:
               part.result === undefined ||
-              ["generate_image", "edit_image"].includes(part.toolName)
+              ["generate_image", "edit_image", "run_code"].includes(
+                part.toolName
+              )
                 ? undefined
                 : formatToolValue(part.result),
             error: toolCallError(part),
@@ -593,6 +597,37 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
       ))}
     </>
   )
+}
+
+/** Output, charts and files of the model's `run_code` calls. */
+function CodeRuns() {
+  const messageParts = useAuiState((state) => state.message.parts)
+  const runs = useMemo(
+    () =>
+      messageParts.flatMap((part) =>
+        part.type === "tool-call" &&
+        part.toolName === "run_code" &&
+        part.result !== undefined &&
+        !part.isError &&
+        part.status.type !== "incomplete"
+          ? [
+              {
+                id: part.toolCallId,
+                code:
+                  typeof part.args?.code === "string"
+                    ? part.args.code
+                    : undefined,
+                value: part.result,
+              },
+            ]
+          : []
+      ),
+    [messageParts]
+  )
+
+  return runs.map((run) => (
+    <CodeRunCard code={run.code} key={run.id} value={run.value} />
+  ))
 }
 
 function GeneratedFiles() {
@@ -840,6 +875,7 @@ export function AssistantMessageParts() {
         suppressAutomatic={suppressAutomatic}
       />
       <GeneratedFiles />
+      <CodeRuns />
     </>
   )
 }

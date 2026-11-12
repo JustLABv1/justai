@@ -1,0 +1,19 @@
+{{- if .Values.codeRunner.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "justai.fullname" . }}-code-runner
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: code-runner
+spec:
+  type: {{ .Values.codeRunner.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.codeRunner.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "justai.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: code-runner
+{{- end }}

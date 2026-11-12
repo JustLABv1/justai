@@ -1,0 +1,103 @@
+{{- if .Values.codeRunner.enabled }}
+{{- include "justai.validateSecretRefs" . -}}
+{{- include "justai.validateCodeRunner" . -}}
+{{- $imageTag := .Values.codeRunner.image.tag | default (printf "code-runner-%s" .Chart.AppVersion) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "justai.fullname" . }}-code-runner
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: code-runner
+spec:
+  replicas: {{ .Values.codeRunner.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "justai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: code-runner
+  template:
+    metadata:
+      labels:
+        {{- include "justai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: code-runner
+      {{- with .Values.codeRunner.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      # Code running here must not be able to talk to the Kubernetes API or find
+      # other services: no API credentials, no service environment variables.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.codeRunner.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.codeRunner.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: code-runner
+          image: "{{ .Values.codeRunner.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.codeRunner.image.pullPolicy }}
+          {{- with .Values.codeRunner.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          env:
+            - name: CODE_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "justai.secretRefName" (dict "root" . "ref" "codeRunnerToken") | quote }}
+                  key: {{ include "justai.secretRefKey" (dict "root" . "ref" "codeRunnerToken") | quote }}
+            - name: CODE_RUNNER_MAX_CONCURRENT
+              value: {{ .Values.codeRunner.maxConcurrent | quote }}
+            - name: CODE_RUNNER_MEMORY_MB
+              value: {{ .Values.codeRunner.memoryMb | quote }}
+            - name: CODE_RUNNER_MAX_PROCESSES
+              value: {{ .Values.codeRunner.maxProcesses | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.codeRunner.readinessProbe | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.codeRunner.livenessProbe | nindent 12 }}
+          {{- with .Values.codeRunner.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: work
+          emptyDir:
+            {{- with .Values.codeRunner.workVolume.medium }}
+            medium: {{ . | quote }}
+            {{- end }}
+            sizeLimit: {{ .Values.codeRunner.workVolume.sizeLimit | quote }}
+      {{- with .Values.codeRunner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.codeRunner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.codeRunner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

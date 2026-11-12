@@ -28,6 +28,13 @@ dev_seed: true
 # Maximum text files retained in one repository snapshot (default: 200).
 repository_max_files: 200
 
+# Optional isolated service that runs Python for the run_code chat tool. Leave
+# the url empty to keep the tool off. Environment variables JUSTAI_CODE_RUNNER_URL
+# and JUSTAI_CODE_RUNNER_TOKEN take precedence. See services/code-runner/README.md.
+code_runner:
+  url: ""
+  token: ""
+
 transcription:
   # Choose one: local or s3. Audio recording is opt-in per session.
   storage_driver: "local"

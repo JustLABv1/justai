@@ -1,18 +1,22 @@
 "use client"
 
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { Play, RotateCcw, Square } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { useCodeActions } from "@/components/assistant-ui/code-actions"
+import {
+  buildFixPrompt,
+  useCodeActions,
+} from "@/components/assistant-ui/code-actions"
+import {
+  CodeShell,
+  CollapsibleCode,
+  ShellButton,
+  TerminalPanel,
+} from "@/components/assistant-ui/code-shell"
 import { DelimitedTable } from "@/components/assistant-ui/data-previews"
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
-import type { RunnerLanguage } from "@/lib/code-preview"
+import { type RunnerLanguage, runCommand } from "@/lib/code-preview"
 import {
   buildRunnerDocument,
   parseRunnerMessage,
@@ -33,6 +37,8 @@ type RunState = {
   items: OutputItem[]
   truncated: boolean
   error: string
+  startedAt: number
+  durationMs: number
 }
 
 const idleState: RunState = {
@@ -41,6 +47,8 @@ const idleState: RunState = {
   items: [],
   truncated: false,
   error: "",
+  startedAt: 0,
+  durationMs: 0,
 }
 
 const lineClass = {
@@ -52,22 +60,18 @@ const lineClass = {
 const keepsSession = (language: RunnerLanguage) =>
   language === "python" || language === "sql"
 
-const buttonClass =
-  "rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring"
-
 /**
- * Shows a code block with a Run button. The code executes in the isolated
- * runner iframe from `lib/code-runner.ts`, never in the app's own context.
- * Python and SQL keep their session between runs; the iframe stays mounted.
+ * A runnable code block: terminal-style card with a Run button in the title
+ * bar and the output underneath. The code executes in the isolated runner
+ * iframe from `lib/code-runner.ts`, never in the app's own context. Python and
+ * SQL keep their session between runs; the iframe stays mounted.
  */
 export function CodeRunBlock({
   code,
   language,
-  codeView,
 }: {
   code: string
   language: RunnerLanguage
-  codeView: ReactNode
 }) {
   const { t } = useTranslations()
   const { sendMessage } = useCodeActions()
@@ -90,6 +94,7 @@ export function CodeRunBlock({
       if (!message) return
       setState((current) => {
         if (current.runId !== state.runId) return current
+        const elapsed = Date.now() - current.startedAt
         const add = (item: OutputItem, limit?: number) =>
           limit !== undefined &&
           current.items.filter((entry) => entry.kind === item.kind).length >= limit
@@ -127,7 +132,7 @@ export function CodeRunBlock({
               runnerLimits.maxFiles
             )
           case "done":
-            return { ...current, status: "done" }
+            return { ...current, status: "done", durationMs: elapsed }
           case "error": {
             const text =
               message.text === "timeout"
@@ -139,6 +144,7 @@ export function CodeRunBlock({
               ...current,
               status: "error",
               error: text,
+              durationMs: elapsed,
               items: [...current.items, { kind: "line", level: "error", text }],
             }
           }
@@ -162,6 +168,7 @@ export function CodeRunBlock({
       ...idleState,
       runId: current.runId + 1,
       status: "loading",
+      startedAt: Date.now(),
     }))
     if (loadedRef.current) postRun()
     else setMounted(true) // the iframe's onLoad sends the run request
@@ -169,7 +176,11 @@ export function CodeRunBlock({
 
   const stop = useCallback(() => {
     frameRef.current?.contentWindow?.postMessage({ type: "stop" }, "*")
-    setState((current) => ({ ...current, status: "done" }))
+    setState((current) => ({
+      ...current,
+      status: "done",
+      durationMs: Date.now() - current.startedAt,
+    }))
   }, [])
 
   const reset = useCallback(() => {
@@ -178,35 +189,130 @@ export function CodeRunBlock({
   }, [])
 
   const askForFix = () => {
-    sendMessage?.(
-      [
-        t(
-          "The following {value0} code failed with an error when run. Please fix it and show the corrected code.",
-          { value0: language }
-        ),
-        "",
-        "```" + language,
-        code,
-        "```",
-        "",
-        t("Error:"),
-        "```",
-        state.error,
-        "```",
-      ].join("\n")
-    )
+    sendMessage?.(buildFixPrompt(t, language, code, state.error))
   }
 
-  const hasOutput = state.items.length > 0
+  const seconds = (state.durationMs / 1000).toFixed(
+    state.durationMs < 10_000 ? 1 : 0
+  )
+
+  const actions = (
+    <>
+      {state.status === "error" && sendMessage && (
+        <ShellButton onClick={askForFix} variant="danger">
+          {t("Fix error")}
+        </ShellButton>
+      )}
+      {sessionKept && state.runId > 0 && !active && (
+        <ShellButton
+          aria-label={t("Reset session")}
+          onClick={reset}
+          title={t("Reset session")}
+        >
+          <RotateCcw aria-hidden="true" className="size-3.5" />
+        </ShellButton>
+      )}
+      <ShellButton
+        onClick={active ? stop : run}
+        title={t("Runs in an isolated sandbox in your browser.")}
+        variant="primary"
+      >
+        {active ? (
+          <Square aria-hidden="true" className="size-3 fill-current" />
+        ) : (
+          <Play aria-hidden="true" className="size-3 fill-current" />
+        )}
+        {active ? t("Stop") : t("Run")}
+      </ShellButton>
+    </>
+  )
+
+  const footer =
+    state.status === "idle" ? null : (
+      <TerminalPanel command={runCommand(language)} label={t("Output")}>
+        {state.items.map((item, index) => {
+          switch (item.kind) {
+            case "line":
+              return (
+                <pre
+                  className={cn(
+                    "m-0! rounded-none! border-0! bg-transparent! p-0! text-xs! whitespace-pre-wrap break-words",
+                    lineClass[item.level]
+                  )}
+                  key={index}
+                >
+                  {item.text}
+                </pre>
+              )
+            case "table":
+              return (
+                <DelimitedTable
+                  code={item.csv}
+                  delimiter=","
+                  key={index}
+                  language="csv"
+                />
+              )
+            case "image":
+              return (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  alt={`${t("Output")} ${index + 1}`}
+                  className="max-w-full rounded-lg bg-white"
+                  key={index}
+                  src={item.src}
+                />
+              )
+            case "file":
+              return (
+                <a
+                  className="inline-block rounded-md bg-primary px-2 py-1 font-sans text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                  download={item.name}
+                  href={`data:${item.mime};base64,${item.data}`}
+                  key={index}
+                >
+                  {t("Download {value0}", { value0: item.name })}
+                </a>
+              )
+          }
+        })}
+        {state.truncated && <p className="text-muted-foreground">…</p>}
+        {state.status === "done" && state.items.length === 0 && (
+          <p className="text-muted-foreground">{t("No output")}</p>
+        )}
+        <p
+          className={cn(
+            "flex items-center gap-1.5 text-muted-foreground select-none",
+            state.status === "error" && "text-destructive",
+            state.status === "done" && "text-emerald-600 dark:text-emerald-400"
+          )}
+        >
+          {active ? (
+            <>
+              <Spinner aria-hidden="true" className="size-3" />
+              {state.status === "loading" && language === "python"
+                ? t("Loading Python…")
+                : state.status === "loading"
+                  ? t("Loading…")
+                  : t("Running…")}
+            </>
+          ) : state.status === "error" ? (
+            <>✗ {t("Failed")}</>
+          ) : (
+            <>✓ {t("Finished in {value0} s", { value0: seconds })}</>
+          )}
+        </p>
+      </TerminalPanel>
+    )
 
   return (
-    <div className="my-3">
-      {codeView}
+    <CodeShell actions={actions} code={code} footer={footer} language={language}>
+      <CollapsibleCode code={code} />
       {needsInput && (
-        <label className="mt-1 block text-xs text-muted-foreground">
+        <label className="block px-3 pb-2 text-xs text-muted-foreground">
           {t("Inputs for input() (one line per call)")}
           <textarea
-            className="mt-1 block min-h-16 w-full resize-y rounded-lg bg-muted/50 p-2 font-mono text-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            className="mt-1 block min-h-16 w-full resize-y rounded-lg bg-background/60 p-2 font-mono text-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring"
             disabled={active}
             onChange={(event) => setStdin(event.target.value)}
             placeholder={t("e.g. 1\n-3\n2")}
@@ -215,47 +321,6 @@ export function CodeRunBlock({
           />
         </label>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-2">
-        <button
-          className={cn(
-            buttonClass,
-            "bg-primary text-primary-foreground hover:bg-primary/90"
-          )}
-          onClick={active ? stop : run}
-          type="button"
-        >
-          {active ? t("Stop") : t("Run")}
-        </button>
-        {sessionKept && state.runId > 0 && !active && (
-          <button
-            className={cn(buttonClass, "text-muted-foreground hover:text-foreground")}
-            onClick={reset}
-            type="button"
-          >
-            {t("Reset session")}
-          </button>
-        )}
-        {state.status === "error" && sendMessage && (
-          <button
-            className={cn(buttonClass, "bg-destructive/10 text-destructive hover:bg-destructive/20")}
-            onClick={askForFix}
-            type="button"
-          >
-            {t("Fix error")}
-          </button>
-        )}
-        <span className="text-xs text-muted-foreground">
-          {state.status === "loading"
-            ? language === "python"
-              ? t("Loading Python…")
-              : t("Loading…")
-            : state.status === "idle"
-              ? t("Runs in an isolated sandbox in your browser.")
-              : state.status === "running"
-                ? t("Running…")
-                : null}
-        </span>
-      </div>
       {mounted && (
         // No allow-same-origin: the frame gets an opaque origin without access
         // to cookies, storage or the JustAI API.
@@ -272,61 +337,6 @@ export function CodeRunBlock({
           title={t("Output")}
         />
       )}
-      {(hasOutput || state.status === "done") && (
-        <div
-          aria-label={t("Output")}
-          className="mt-2 space-y-2 rounded-xl bg-muted/50 p-3 font-mono text-xs leading-5"
-          role="log"
-        >
-          {state.items.map((item, index) => {
-            switch (item.kind) {
-              case "line":
-                return (
-                  <pre
-                    className={cn("whitespace-pre-wrap break-words", lineClass[item.level])}
-                    key={index}
-                  >
-                    {item.text}
-                  </pre>
-                )
-              case "table":
-                return (
-                  <DelimitedTable
-                    code={item.csv}
-                    delimiter=","
-                    key={index}
-                    language="csv"
-                  />
-                )
-              case "image":
-                return (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    alt={`${t("Output")} ${index + 1}`}
-                    className="max-w-full rounded-lg bg-white"
-                    key={index}
-                    src={item.src}
-                  />
-                )
-              case "file":
-                return (
-                  <a
-                    className="inline-block rounded-md bg-primary px-2 py-1 font-sans text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                    download={item.name}
-                    href={`data:${item.mime};base64,${item.data}`}
-                    key={index}
-                  >
-                    {t("Download {value0}", { value0: item.name })}
-                  </a>
-                )
-            }
-          })}
-          {state.truncated && <p className="text-muted-foreground">…</p>}
-          {!hasOutput && (
-            <p className="text-muted-foreground">{t("No output")}</p>
-          )}
-        </div>
-      )}
-    </div>
+    </CodeShell>
   )
 }

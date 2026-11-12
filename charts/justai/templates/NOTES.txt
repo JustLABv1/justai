@@ -27,5 +27,12 @@ S3 Secret keys:
   {{ include "justai.secretRefKey" (dict "root" . "ref" "s3SecretKey") }}
 {{- end }}
 
+{{- if .Values.codeRunner.enabled }}
+
+The code runner executes model-written Python. It needs a namespace that
+enforces at most the "baseline" Pod Security standard and a CNI that enforces
+NetworkPolicy; see the "Optional code runner" section of the chart README.
+{{- end }}
+
 Check rollout status with:
   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
