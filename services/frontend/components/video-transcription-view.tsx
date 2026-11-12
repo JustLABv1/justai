@@ -1,4 +1,8 @@
 "use client"
+import { Menu } from "@/components/panelui/menu"
+import { MoreHorizontal, Trash2 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { TranscriptionDeleteButton } from "@/components/transcription-delete-button"
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
@@ -205,6 +209,9 @@ export function VideoTranscriptionView({
   >(null)
   const [error, setError] = useState("")
   const [chatStarting, setChatStarting] = useState(false)
+  const router = useRouter()
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [skipPolishBusy, setSkipPolishBusy] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [, setCreateStep] = useState(0)
   const [title, setTitle] = useState("Video transcript")
@@ -1314,36 +1321,60 @@ export function VideoTranscriptionView({
                     session={snapshot.session}
                   />
                 ) : null}
-                {snapshot && !showProcessingView ? (
-                  <Button
-                    className="flex-1 sm:flex-none"
-                    disabled={chatStarting || !snapshot.segments.length}
-                    onClick={() => void startChatFromHeader()}
-                    size="sm"
-                    variant="outline"
+                <Menu>
+                  <Menu.Trigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={t("More actions")}
+                      />
+                    }
                   >
-                    {chatStarting ? (
-                      <Spinner data-icon="inline-start" />
-                    ) : (
-                      <MessageSquarePlus data-icon="inline-start" />
-                    )}
-                    <span>
-                      {chatStarting ? t("Starting chat…") : t("Ask about this")}
-                    </span>
-                  </Button>
-                ) : null}
-                <Button
-                  className="flex-1 sm:flex-none"
-                  onClick={() => {
-                    setCreateStep(0)
-                    setCreateOpen(true)
+                    <MoreHorizontal />
+                  </Menu.Trigger>
+                  <Menu.Content align="end">
+                    {snapshot && !showProcessingView ? (
+                      <Menu.Item
+                        disabled={chatStarting || !snapshot.segments.length}
+                        onClick={() => void startChatFromHeader()}
+                      >
+                        <MessageSquarePlus />
+                        {chatStarting
+                          ? t("Starting chat…")
+                          : t("Ask about this")}
+                      </Menu.Item>
+                    ) : null}
+                    <Menu.Item
+                      onClick={() => {
+                        setCreateStep(0)
+                        setCreateOpen(true)
+                      }}
+                    >
+                      <Plus />
+                      {t("New transcription")}
+                    </Menu.Item>
+                    <Menu.Separator />
+                    <Menu.Item
+                      variant="destructive"
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      <Trash2 />
+                      {t("Delete")}
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu>
+                <TranscriptionDeleteButton
+                  hideTrigger
+                  open={deleteOpen}
+                  onOpenChange={setDeleteOpen}
+                  ids={[snapshot.session.id]}
+                  onDeleted={() => {
+                    setSnapshot(null)
+                    onSessionsChanged()
+                    router.push("/video-transcription")
                   }}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Plus data-icon="inline-start" />
-                  <span>{t("New transcription")}</span>
-                </Button>
+                />
               </>
             }
             eyebrow={
@@ -1387,6 +1418,34 @@ export function VideoTranscriptionView({
             }
           />
 
+          {snapshot.videoUpload?.status === "processing" &&
+          snapshot.videoUpload.stage === "polishing" ? (
+            <Button
+              className="self-start"
+              variant="secondary"
+              size="sm"
+              loading={skipPolishBusy}
+              onClick={async () => {
+                setSkipPolishBusy(true)
+                try {
+                  await api.post(
+                    `/api/v1/transcription/video-uploads/${snapshot.videoUpload!.id}/skip?step=grammar`
+                  )
+                  onSessionsChanged()
+                } catch (caught) {
+                  setError(
+                    caught instanceof Error
+                      ? caught.message
+                      : t("Grammar polish could not be skipped.")
+                  )
+                } finally {
+                  setSkipPolishBusy(false)
+                }
+              }}
+            >
+              {t("Skip grammar polish")}
+            </Button>
+          ) : null}
           {showProcessingDetails ? (
             <VideoPipeline
               prominent={showProcessingView}
@@ -2174,7 +2233,9 @@ export function VideoTranscriptionView({
                   </Frame.Row>
                   <Frame.Row render={<label />}>
                     <Frame.Content>
-                      <Frame.Title as="p">{t("Polish grammar")}</Frame.Title>
+                      <Frame.Title as="p">
+                        {t("Polish grammar (optional)")}
+                      </Frame.Title>
                       <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
                         {grammarEndpoints.length === 0
                           ? t("No chat endpoint is configured.")

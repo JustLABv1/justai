@@ -87,7 +87,7 @@ export function SpeakerVideoCaptions({
   onResolveSuggestion: (
     speaker: TranscriptionSpeaker,
     accept: boolean
-  ) => Promise<void>
+  ) => Promise<boolean>
   /** Where the quiet icon button goes when the full notice is not needed. */
   actionSlot?: HTMLElement | null
 }) {
@@ -712,20 +712,22 @@ export function SpeakerVideoCaptions({
               </p>
             )}
           </Dialog.Body>
-          <Dialog.Footer>
+          <Dialog.Footer className="flex-wrap [&>button]:h-auto [&>button]:min-h-11 [&>button]:min-w-0 [&>button]:basis-48 [&>button]:py-3 [&>button]:break-words [&>button]:whitespace-normal">
             {imageSpeaker?.suggestedName && imageSuggestion ? (
               <>
                 <Button
                   variant="ghost"
                   onClick={async () => {
-                    await onResolveSuggestion(imageSpeaker, false)
+                    if (await onResolveSuggestion(imageSpeaker, false))
+                      onSelectImage(null)
                   }}
                 >
                   {t("Dismiss suggestion")}
                 </Button>
                 <Button
                   onClick={async () => {
-                    await onResolveSuggestion(imageSpeaker, true)
+                    if (await onResolveSuggestion(imageSpeaker, true))
+                      onSelectImage(null)
                   }}
                 >
                   {t("Accept name {value0}", {

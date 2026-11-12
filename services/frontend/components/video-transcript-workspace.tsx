@@ -1675,12 +1675,14 @@ export function TranscriptWorkspace({
         ),
       }))
       onError("")
+      return true
     } catch (caught) {
       onError(
         caught instanceof Error
           ? caught.message
           : t("The suggestion could not be saved.")
       )
+      return false
     }
   }
 

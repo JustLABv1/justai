@@ -329,6 +329,14 @@ func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, upload
 
 	totalBatches := 0
 	for index := 0; index < len(segments); {
+		// The opt-out also reaches workers running in another process.
+		var enabled bool
+		if err := m.DB.QueryRowContext(ctx, `SELECT grammar_endpoint_id IS NOT NULL FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&enabled); err != nil {
+			return err
+		}
+		if !enabled {
+			return nil
+		}
 		batch := make([]models.TranscriptionSegment, 0, 20)
 		characters := 0
 		for index < len(segments) && len(batch) < 20 {

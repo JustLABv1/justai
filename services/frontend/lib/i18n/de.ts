@@ -1,5 +1,14 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Delete transcription?": "Transkription löschen?",
+  "The selected transcriptions and their recordings will be permanently deleted.":
+    "Die ausgewählten Transkriptionen und ihre Aufnahmen werden dauerhaft gelöscht.",
+  "The transcription could not be deleted.":
+    "Die Transkription konnte nicht gelöscht werden.",
+  "Polish grammar (optional)": "Grammatik korrigieren (optional)",
+  "Skip grammar polish": "Grammatikkorrektur überspringen",
+  "Grammar polish could not be skipped.":
+    "Die Grammatikkorrektur konnte nicht übersprungen werden.",
   "Not found": "Nicht gefunden",
   "This page wandered off": "Diese Seite ist abgewandert",
   "The address may be mistyped, or the page was moved or removed. Nothing here for you to fix.": "Die Adresse ist vielleicht falsch geschrieben, oder die Seite wurde verschoben oder entfernt. Du musst hier nichts beheben.",
