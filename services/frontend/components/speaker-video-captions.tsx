@@ -5,7 +5,12 @@ import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ImageIcon } from "lucide-react"
+import {
+  filterCaptionResults,
+  groupCaptionEvidence,
+  type CaptionReviewFilter,
+} from "@/lib/speaker-caption-review"
+import { ChevronDown, Search, ImageIcon } from "lucide-react"
 import Image from "next/image"
 import { api } from "@/lib/api"
 import type { Endpoint, TranscriptionSpeaker } from "@/lib/types"
@@ -30,12 +35,18 @@ import { Progress } from "@/components/ui/progress"
 export type CaptionRun = {
   id: string
   status: "queued" | "processing" | "completed" | "failed" | "cancelled"
-  frames: { speakerId: string; label: string; offsetMs: number }[]
+  frames: {
+    speakerId: string
+    label: string
+    offsetMs: number
+    view?: string
+  }[]
   observations: {
     frameIndex: number
     name: string
     caption: string
     error?: string
+    reason?: string
   }[]
   results: {
     speakerId: string
@@ -45,9 +56,29 @@ export type CaptionRun = {
     frameIndices: number[]
     applied: boolean
     conflict: boolean
+    reason?: string
   }[]
   errorMessage?: string
 }
+function captionMissLabel(reason?: string) {
+  switch (reason) {
+    case "uncertain_text":
+      return "Caption text was too uncertain to use. Try reading a clearer moment."
+    case "conflicting_names":
+      return "The image contains conflicting names. Choose a moment showing one speaker name."
+    case "analysis_error":
+      return "Images could not be read. Check the source video and vision endpoint."
+    case "no_clear_turn":
+      return "No clear speaker turn was available for sampling."
+    case "not_sampled":
+      return "The image budget was reached before this speaker was sampled. Increase the budget or read a specific moment."
+    case "speaker_changed":
+      return "Speaker assignments changed during analysis. Run the search again."
+    default:
+      return "No readable speaker name caption was found in the sampled images. Try reading a moment where the name is visible."
+  }
+}
+
 function timestamp(ms: number) {
   const seconds = Math.floor(ms / 1000)
   return [
@@ -75,8 +106,12 @@ export function SpeakerVideoCaptions({
   onSelectImage,
   onResolveSuggestion,
   actionSlot,
+  playerActionSlot,
+  captureVideoPosition,
+  currentTimeMs,
 }: {
   sessionId: string
+  currentTimeMs: number
   available: boolean
   speakers: TranscriptionSpeaker[]
   onSpeakersChange: (speakers: TranscriptionSpeaker[]) => void
@@ -90,15 +125,21 @@ export function SpeakerVideoCaptions({
   ) => Promise<boolean>
   /** Where the quiet icon button goes when the full notice is not needed. */
   actionSlot?: HTMLElement | null
+  playerActionSlot?: HTMLElement | null
+  captureVideoPosition?: () => number
 }) {
   const { t } = useTranslations()
 
   const [open, setOpen] = useState(false)
+  const [resultQuery, setResultQuery] = useState("")
+  const [resultFilter, setResultFilter] = useState<CaptionReviewFilter>("all")
+  const [resultPagination, setResultPagination] = useState({ key: "", page: 0 })
   const [run, setRun] = useState<CaptionRun | null>(null)
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [endpointId, setEndpointId] = useState("")
   const [model, setModel] = useState("")
   const [budget, setBudget] = useState("24")
+  const [manualAt, setManualAt] = useState<number | null>(null)
   const [autoApply, setAutoApply] = useState(false)
   const [busy, setBusy] = useState(false)
   const [loadingEndpoints, setLoadingEndpoints] = useState(false)
@@ -247,7 +288,13 @@ export function SpeakerVideoCaptions({
     try {
       const result = await api.post<{ run: CaptionRun }>(
         `${base}/speaker-captions`,
-        { endpointId, model, frameBudget: Number(budget), autoApply }
+        {
+          endpointId,
+          model,
+          frameBudget: Number(budget),
+          autoApply: manualAt === null && autoApply,
+          ...(manualAt === null ? {} : { offsetMs: manualAt }),
+        }
       )
       await acceptRun(result.run)
     } catch (error) {
@@ -273,6 +320,36 @@ export function SpeakerVideoCaptions({
     }
   }
   const endpoint = endpoints.find((item) => item.id === endpointId)
+  const speakerNames = new Map(
+    speakers.map((speaker) => [
+      speaker.id,
+      `${speaker.label} ${speaker.displayName ?? ""}`,
+    ])
+  )
+  const resultCounts = {
+    all: run?.results.length ?? 0,
+    review:
+      run?.results.filter((result) => result.name && !result.applied).length ??
+      0,
+    missing: run?.results.filter((result) => !result.name).length ?? 0,
+    applied: run?.results.filter((result) => result.applied).length ?? 0,
+  }
+  const matchingResults = filterCaptionResults(
+    run?.results ?? [],
+    resultFilter,
+    resultQuery,
+    speakerNames
+  )
+  const resultPageKey = JSON.stringify([run?.id, resultFilter, resultQuery])
+  const resultPageCount = Math.max(1, Math.ceil(matchingResults.length / 8))
+  const resultPage =
+    resultPagination.key === resultPageKey
+      ? Math.min(resultPagination.page, resultPageCount - 1)
+      : 0
+  const visibleResults = matchingResults.slice(
+    resultPage * 8,
+    (resultPage + 1) * 8
+  )
   const analyzed = run?.observations.length ?? 0
   const total = run?.frames.length ?? 0
   const image = imageIndex === null ? null : run?.frames[imageIndex]
@@ -304,7 +381,9 @@ export function SpeakerVideoCaptions({
     run?.status === "cancelled" ||
     Boolean(run?.errorMessage) ||
     failedImages > 0 ||
-    (run?.status === "completed" && !run.results.length) ||
+    (run?.status === "completed" &&
+      (!run.results.length ||
+        run.results.some((result) => !result.name || result.conflict))) ||
     (!run && unnamedSpeakers) ||
     (Boolean(error) && !open)
   const openLabel = run ? t("Review captions") : t("Read name captions")
@@ -399,12 +478,36 @@ export function SpeakerVideoCaptions({
         )
       ) : null}
 
+      {playerActionSlot
+        ? createPortal(
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!available || active || busy}
+              onClick={() => {
+                setManualAt(
+                  Math.max(
+                    0,
+                    captureVideoPosition?.() ?? Math.round(currentTimeMs)
+                  )
+                )
+                setLoadingEndpoints(true)
+                setOpen(true)
+              }}
+            >
+              <ImageIcon data-icon="inline-start" />
+              {t("Read name here")} · {timestamp(currentTimeMs)}
+            </Button>,
+            playerActionSlot
+          )
+        : null}
+
       <Dialog open={open} onOpenChange={setOpen}>
         <Dialog.Content className="sm:max-w-xl">
           <Dialog.Header
             title={t("Read speaker name captions")}
             description={t(
-              "Read visible text in the lower half of selected video frames and match it to audio speaker labels. Manually named speakers stay unchanged."
+              "Read printed speaker names across the video, with sharper crops and full-frame fallbacks. Manually named speakers stay unchanged."
             )}
           />
           <Dialog.Body className="flex flex-col gap-4">
@@ -414,7 +517,10 @@ export function SpeakerVideoCaptions({
               </Alert>
             ) : null}
             {run ? (
-              <Frame aria-live="polite">
+              <Frame
+                className="[&_[data-slot=frame-description]]:overflow-visible [&_[data-slot=frame-description]]:text-clip [&_[data-slot=frame-description]]:whitespace-normal"
+                aria-live="polite"
+              >
                 <Frame.Header>
                   <Frame.Title>{statusLabel}</Frame.Title>
                   <Frame.Description>
@@ -463,7 +569,8 @@ export function SpeakerVideoCaptions({
                       </Frame.Content>
                     </Frame.Row>
                   ) : null}
-                  {run.status === "completed" && !run.results.length ? (
+                  {run.status === "completed" &&
+                  !run.results.some((result) => result.name) ? (
                     <Frame.Row>
                       <Frame.Content>
                         <Frame.Description>
@@ -474,65 +581,303 @@ export function SpeakerVideoCaptions({
                       </Frame.Content>
                     </Frame.Row>
                   ) : null}
-                  {run.results.map((result) => (
-                    <Frame.Row key={result.speakerId}>
-                      <Frame.Content>
-                        <Frame.Title as="p">
-                          {speakers.find((item) => item.id === result.speakerId)
-                            ?.label ?? t("Speaker")}{" "}
-                          → {result.name}
-                        </Frame.Title>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          <Badge
-                            size="sm"
-                            variant={
-                              result.applied
-                                ? "success"
-                                : result.conflict
-                                  ? "warning"
-                                  : "info"
-                            }
-                          >
-                            {result.applied
-                              ? t("Automatically applied")
-                              : result.conflict
-                                ? t(
-                                    "Conflicting captions · review before accepting"
-                                  )
-                                : t(
-                                    "Suggestion · accept or dismiss in the speaker list"
-                                  )}
-                          </Badge>
-                          <Badge size="sm" variant="outline">
-                            {Math.round(result.confidence * 100)}%
-                          </Badge>
-                        </div>
-                        <Frame.Description className="mt-1.5">
-                          {result.evidence}
-                        </Frame.Description>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {result.frameIndices.map((index) => (
+                  {run.results.length > 0 ? (
+                    <Frame.Row>
+                      <Frame.Content className="min-w-0 space-y-3">
+                        <div
+                          className="flex flex-wrap gap-2"
+                          role="group"
+                          aria-label={t("Filter speaker results")}
+                        >
+                          {(
+                            [
+                              ["all", "All speakers"],
+                              ["review", "Review needed"],
+                              ["missing", "No name found"],
+                              ["applied", "Automatically applied"],
+                            ] as const
+                          ).map(([value, label]) => (
                             <Button
-                              key={index}
+                              key={value}
                               size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                onSelectImage({ runId: run.id, index })
-                              }}
+                              variant={
+                                resultFilter === value ? "default" : "secondary"
+                              }
+                              aria-pressed={resultFilter === value}
+                              onClick={() => setResultFilter(value)}
                             >
-                              <ImageIcon data-icon="inline-start" />
-                              {timestamp(run.frames[index].offsetMs)}
+                              {t(label)}{" "}
+                              <span className="tabular-nums">
+                                {resultCounts[value]}
+                              </span>
                             </Button>
                           ))}
                         </div>
+                        <Input.Group>
+                          <Input.Addon>
+                            <Search aria-hidden="true" />
+                          </Input.Addon>
+                          <Input
+                            aria-label={t("Search speakers or names")}
+                            placeholder={t("Search speakers or names")}
+                            value={resultQuery}
+                            onChange={(event) =>
+                              setResultQuery(event.target.value)
+                            }
+                          />
+                        </Input.Group>
+                        <p
+                          className="text-xs text-muted-foreground"
+                          role="status"
+                        >
+                          {t("{value0} matching speakers", {
+                            value0: matchingResults.length,
+                          })}
+                        </p>
                       </Frame.Content>
                     </Frame.Row>
-                  ))}
+                  ) : null}
+                  {visibleResults.map((result) => {
+                    const evidence = groupCaptionEvidence(
+                      result.frameIndices,
+                      run.frames
+                    )
+                    return (
+                      <Frame.Row key={`${run.id}:${result.speakerId}`}>
+                        <Frame.Content className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium break-words">
+                                {result.name ||
+                                  speakers.find(
+                                    (item) => item.id === result.speakerId
+                                  )?.displayName ||
+                                  speakers.find(
+                                    (item) => item.id === result.speakerId
+                                  )?.label ||
+                                  t("Speaker")}
+                              </p>
+                              {result.name ? (
+                                <p className="mt-0.5 text-xs break-words text-muted-foreground">
+                                  {speakers.find(
+                                    (item) => item.id === result.speakerId
+                                  )?.label ?? t("Speaker")}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="flex max-w-full flex-wrap gap-1.5">
+                              <Badge
+                                className="max-w-full whitespace-normal"
+                                size="sm"
+                                variant={
+                                  result.applied
+                                    ? "success"
+                                    : result.conflict
+                                      ? "warning"
+                                      : result.name
+                                        ? "info"
+                                        : "secondary"
+                                }
+                              >
+                                {t(
+                                  result.applied
+                                    ? "Automatically applied"
+                                    : result.conflict
+                                      ? "Review needed"
+                                      : result.name
+                                        ? "Suggestion"
+                                        : "No name found"
+                                )}
+                              </Badge>
+                              {result.name ? (
+                                <Badge
+                                  size="sm"
+                                  variant="outline"
+                                  title={t("Confidence")}
+                                >
+                                  {Math.round(result.confidence * 100)}%
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </div>
+                          {!result.name ? (
+                            <p className="mt-2 text-sm leading-relaxed break-words text-muted-foreground">
+                              {t(captionMissLabel(result.reason))}
+                            </p>
+                          ) : null}
+                          <details
+                            className="group/evidence mt-3"
+                            key={`${run.id}:${result.speakerId}`}
+                          >
+                            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                              <ChevronDown className="size-4 shrink-0 transition-transform group-open/evidence:rotate-180" />
+                              {t("Evidence and details")}{" "}
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {t("{value0} moments", {
+                                  value0: evidence.length,
+                                })}
+                              </span>
+                            </summary>
+                            <div className="mt-2 space-y-3">
+                              {result.name ? (
+                                <p className="text-sm leading-relaxed break-words text-muted-foreground">
+                                  {result.evidence}
+                                </p>
+                              ) : null}
+                              {result.conflict ? (
+                                <p className="text-sm text-muted-foreground">
+                                  {t(
+                                    "Conflicting captions · review before accepting"
+                                  )}
+                                </p>
+                              ) : result.name && !result.applied ? (
+                                <p className="text-sm text-muted-foreground">
+                                  {t(
+                                    "Suggestion · accept or dismiss in the speaker list"
+                                  )}
+                                </p>
+                              ) : null}
+                              {evidence.map((moment) => (
+                                <div
+                                  key={moment.offsetMs}
+                                  className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 p-2"
+                                >
+                                  <Button
+                                    className="tabular-nums"
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                      onSeek(moment.offsetMs)
+                                      setOpen(false)
+                                    }}
+                                  >
+                                    {timestamp(moment.offsetMs)}
+                                  </Button>
+                                  <div className="flex min-w-0 flex-wrap gap-1.5">
+                                    {moment.images.map(({ index, view }) => (
+                                      <Button
+                                        key={index}
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() =>
+                                          onSelectImage({
+                                            runId: run.id,
+                                            index,
+                                          })
+                                        }
+                                      >
+                                        <ImageIcon data-icon="inline-start" />
+                                        {t(
+                                          view === "full"
+                                            ? "Full frame"
+                                            : view === "sharp"
+                                              ? "Sharper crop"
+                                              : "Crop"
+                                        )}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        </Frame.Content>
+                      </Frame.Row>
+                    )
+                  })}
+                  {run.results.length > 0 && !visibleResults.length ? (
+                    <Frame.Row>
+                      <Frame.Content>
+                        <p className="py-4 text-sm text-muted-foreground">
+                          {t("No results")}
+                        </p>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ) : null}
+                  {resultPageCount > 1 ? (
+                    <Frame.Row>
+                      <Frame.Content>
+                        <nav
+                          className="flex flex-wrap items-center justify-between gap-2"
+                          aria-label={t("Speaker result pages")}
+                        >
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={resultPage === 0}
+                            onClick={() =>
+                              setResultPagination({
+                                key: resultPageKey,
+                                page: resultPage - 1,
+                              })
+                            }
+                          >
+                            {t("Previous")}
+                          </Button>
+                          <span className="text-sm text-muted-foreground tabular-nums">
+                            {resultPage + 1} / {resultPageCount}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={resultPage + 1 >= resultPageCount}
+                            onClick={() =>
+                              setResultPagination({
+                                key: resultPageKey,
+                                page: resultPage + 1,
+                              })
+                            }
+                          >
+                            {t("Next")}
+                          </Button>
+                        </nav>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ) : null}
+                  {run.results.some((result) => result.name) ? (
+                    <Frame.Row>
+                      <Frame.Content>
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          {t(
+                            "Confidence is an evidence score, not a calibrated probability. Repeated crops of one moment count as one observation."
+                          )}
+                        </p>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ) : null}
                 </Frame.Panel>
               </Frame>
             ) : null}
             {!active ? (
               <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant={manualAt === null ? "default" : "secondary"}
+                    aria-pressed={manualAt === null}
+                    onClick={() => setManualAt(null)}
+                  >
+                    {t("Search the video")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={manualAt !== null ? "default" : "secondary"}
+                    aria-pressed={manualAt !== null}
+                    onClick={() =>
+                      setManualAt(Math.max(0, Math.round(currentTimeMs)))
+                    }
+                  >
+                    {t("Read name here")} · {timestamp(currentTimeMs)}
+                  </Button>
+                </div>
+                {manualAt !== null ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t(
+                      "Read the caption at {value0}. The result is offered for review.",
+                      { value0: timestamp(manualAt) }
+                    )}
+                  </p>
+                ) : null}
                 <Field>
                   <FieldLabel>{t("Vision endpoint")}</FieldLabel>
                   <Select
@@ -611,7 +956,7 @@ export function SpeakerVideoCaptions({
                 </div>
                 <p className="-mt-2 text-xs text-muted-foreground">
                   {t(
-                    "Up to four images per unnamed speaker. The budget stays fixed for long videos; each image uses one model request."
+                    "The image budget includes nearby retries, sharper crops and full-frame fallbacks. Each analyzed image uses one model request."
                   )}
                 </p>
                 <Frame>
@@ -632,7 +977,8 @@ export function SpeakerVideoCaptions({
                           aria-label={t(
                             "Apply consistent matches automatically"
                           )}
-                          checked={autoApply}
+                          checked={manualAt === null && autoApply}
+                          disabled={manualAt !== null}
                           onCheckedChange={setAutoApply}
                         />
                       </Frame.Actions>
@@ -642,7 +988,7 @@ export function SpeakerVideoCaptions({
                 <Alert tone="info" variant="plain">
                   <Alert.Description>
                     {t(
-                      "Selected frame crops are sent to the chosen endpoint when you start. This reads printed names; it does not identify faces."
+                      "Selected crops and, when needed, full video frames are sent to the chosen endpoint. This reads printed names; it does not identify faces."
                     )}
                   </Alert.Description>
                 </Alert>
@@ -669,7 +1015,11 @@ export function SpeakerVideoCaptions({
                 onClick={start}
               >
                 {busy ? <Spinner data-icon="inline-start" /> : null}
-                {run ? t("Start new analysis") : t("Start caption analysis")}
+                {manualAt !== null
+                  ? t("Read name here")
+                  : run
+                    ? t("Start new analysis")
+                    : t("Start caption analysis")}
               </Button>
             </Dialog.Footer>
           ) : null}
@@ -686,7 +1036,14 @@ export function SpeakerVideoCaptions({
           <Dialog.Header
             title={`${t("Caption evidence ·")} ${timestamp(image?.offsetMs ?? 0)}`}
             description={
-              observation?.caption || "Selected lower-third video crop"
+              observation?.caption ||
+              t(
+                image?.view === "full"
+                  ? "Full video frame"
+                  : image?.view === "sharp"
+                    ? "Sharper speaker caption crop"
+                    : "Speaker caption crop"
+              )
             }
           />
           <Dialog.Body>

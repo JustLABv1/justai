@@ -22,17 +22,22 @@ Read name captions**. Select an enabled vision endpoint, optionally override its
 vision model, choose a maximum of 12, 24, or 48 images, and start the analysis.
 The default is 24 images and manual confirmation of suggestions.
 
-The backend reads printed names in the lower half of sampled video frames and
-matches their timestamps to existing audio speaker labels. It does not identify
-faces. Each image crop is sent to the selected endpoint as one vision request.
+The backend reads printed names in sampled video frames and matches their
+timestamps to existing audio speaker labels. It starts with a lower-half crop
+and can retry with a sharper crop or a full frame. It does not identify
+faces. Each analyzed image is sent to the selected endpoint as one vision request.
 No new OCR service, Python dependency, or Helm workload is required. The backend
 uses the existing FFmpeg binary and S3 video storage/processing origin.
 
 ## Sampling and decisions
 
-- At most four images per speaker, across their two longest clear turns of at
-  least eight seconds. Samples are taken around six and twelve seconds into a
-  turn, away from its end. Speakers are sampled in rounds to share the budget.
+- Sample the first appearance, later turns, and points spread through long
+  speeches. Clear turns of at least two seconds are eligible. Samples are
+  distributed across speakers before revisiting them.
+- Reserve part of the fixed image budget for adaptive retries. Missing or
+  uncertain text can trigger a sharper lower-half crop, a full frame, and
+  nearby timestamps inside the same clear speaker turn. All attempts count
+  against the selected 12/24/48-image budget; requests never exceed that cap.
 - Frames with overlapping or unassigned audio around the sampled timestamp are
   excluded. Manually named speakers are excluded and remain protected at write
   time, including concurrent renames and merges.
@@ -47,27 +52,46 @@ uses the existing FFmpeg binary and S3 video storage/processing origin.
   Review results to see image evidence and seek to its video timestamp.
   Conflicting captions expose both matching and conflicting images.
 
-Sampling is intentionally limited: a short-lived caption outside the selected
-frames can be missed. Increasing the budget covers more speakers, but does not
-increase the four-image maximum per speaker. A person speaking only once will
-receive a suggestion rather than automatic naming. Correct audio diarization is
-still required; a caption cannot reliably repair a merged audio speaker label.
+To scan a known caption, seek the video to the visible name and click **Read name
+here** directly below the video player on the **Speakers** tab. The video pauses and the dialog opens
+with the exact playback timestamp selected. The same mode is available in
+**Read name captions**. This captures the current timestamp;
+the scan must fall inside an unambiguous, unprotected speaker turn. Manual scans
+always produce reviewable suggestions, even if automatic application is enabled.
+Evidence previews use the same crop or full-frame view that was analyzed.
+
+The results dialog offers name/label search, status filters, and eight speakers
+per page. Evidence is collapsed by default and groups alternate image views by
+timestamp. Explanations and evidence text wrap instead of truncating.
+
+Results explain missing captions, uncertain text, conflicting names, image/model
+failures, missing clear turns, changed speaker assignments, and speakers not
+covered by the budget. Failed readings do not clear existing names or suggestions.
+Confidence is an evidence score rather than a calibrated probability. Alternate
+views of the same moment and samples less than two seconds apart do not count as
+independent matching observations.
+
+Sampling remains bounded, so a short-lived caption can still be missed. Increasing
+the budget expands coverage and retries; the old four-image-per-speaker cap no
+longer applies. A person speaking only once receives a suggestion rather than
+automatic naming. Correct audio diarization is still required; a caption cannot
+reliably repair a merged audio speaker label.
 
 ## Background execution and deployment
 
 Migration `059_speaker_video_captions.sql` creates durable analysis runs. Deploy
 backend and frontend together; the normal backend migration runner applies migrations 059 and 060.
 The worker starts with the transcription manager. Jobs continue after navigation
-and resume saved observations after a pod restart. A database advisory lock and
+and resume saved observations and retry queues after a pod restart. A database advisory lock and
 90-second renewable lease limit active analysis to one job across replicas;
 lease tokens fence progress and final writes. An expired job is retried at most
 three times before being marked failed. One active run per session is enforced
 by a partial unique index. Jobs can be cancelled from the analysis dialog.
 
-FFmpeg extracts one bounded JPEG crop at a time (at most 960×540 and 512 KiB),
+FFmpeg extracts one bounded JPEG crop at a time (at most 1440×810 and 512 KiB),
 with a 20-second extraction timeout. Vision requests have a 45-second timeout,
 512 output tokens, and a 16 KiB response cap. Three consecutive failures stop a
-run. The whole run has a deadline sized to its bounded frame count. Original
+run. The whole run has a deadline sized to its maximum image budget. Original
 videos are never decoded into memory in their entirety.
 
 Only observations, timestamps, and decisions are retained in PostgreSQL. Signed

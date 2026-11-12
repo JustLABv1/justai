@@ -552,6 +552,8 @@ export function TranscriptWorkspace({
   const [mediaPlaying, setMediaPlaying] = useState(false)
   const [captionActionSlot, setCaptionActionSlot] =
     useState<HTMLElement | null>(null)
+  const [captionPlayerActionSlot, setCaptionPlayerActionSlot] =
+    useState<HTMLElement | null>(null)
   // The video is hidden by default on the Summary page, where people read, and
   // shown elsewhere. Each choice is remembered separately in this browser.
   const readVideoHidden = (key: string, fallback: boolean) => {
@@ -3278,6 +3280,14 @@ export function TranscriptWorkspace({
                               )}
                             </div>
 
+                            {inspectorPage === "speakers" &&
+                            !videoHidden &&
+                            snapshot.videoUpload?.playbackUrl ? (
+                              <div
+                                className="flex flex-wrap justify-end gap-2"
+                                ref={setCaptionPlayerActionSlot}
+                              />
+                            ) : null}
                             {videoPlaybackError ? (
                               <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                                 <p className="font-medium">
@@ -3574,7 +3584,16 @@ export function TranscriptWorkspace({
                       <CardContent className="flex flex-col gap-2 px-4 pb-4">
                         {mediaKind === "video" ? (
                           <SpeakerVideoCaptions
+                            currentTimeMs={currentTimeMs}
                             actionSlot={captionActionSlot}
+                            playerActionSlot={captionPlayerActionSlot}
+                            captureVideoPosition={() => {
+                              const video = videoRef.current
+                              video?.pause()
+                              return video
+                                ? Math.round(video.currentTime * 1000)
+                                : currentTimeMs
+                            }}
                             key={snapshot.session.id}
                             sessionId={snapshot.session.id}
                             available={

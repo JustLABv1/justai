@@ -85,7 +85,7 @@ func (m *TranscriptionManager) processVideoCaptionStep(ctx context.Context, uplo
 		if err != nil {
 			return err
 		}
-		frames := planSpeakerCaptionFrames(segments, speakers, options.FrameBudget)
+		frames := planInitialSpeakerCaptionFrames(segments, speakers, options.FrameBudget)
 		if len(frames) == 0 {
 			return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
 				skipVideoPipelineStep(&steps[videoPipelineIndex("speaker_names")])

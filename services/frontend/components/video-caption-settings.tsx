@@ -200,7 +200,7 @@ export function VideoCaptionSettings({
             </Select>
             <FieldDescription>
               {t(
-                "A fixed budget, including for long videos. Selected lower-third images are sent to this endpoint."
+                "A fixed budget including retries. Selected crops and full-frame fallbacks are sent to this endpoint."
               )}
             </FieldDescription>
           </Field>
