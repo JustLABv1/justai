@@ -1,5 +1,5 @@
 boto3>=1.43.127,<2
-fastapi>=0.162.3,<1
+fastapi>=0.162.4,<1
 huggingface_hub>=2.4.0,<3
 httpx>=0.28.1,<1
 pyannote.audio>=4.0.7,<5
