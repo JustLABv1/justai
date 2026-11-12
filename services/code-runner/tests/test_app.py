@@ -16,7 +16,11 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-WORK = tempfile.mkdtemp(prefix="code-runner-test-")
+# In the production container the root file system is read-only and only /work is
+# writable (Docker, unlike Podman, does not add a /tmp tmpfs), so use /work there.
+WORK = tempfile.mkdtemp(
+    prefix="code-runner-test-", dir="/work" if os.access("/work", os.W_OK) else None
+)
 os.chmod(WORK, 0o755)  # per-run users must be able to reach their own directory
 os.environ.update(
     CODE_RUNNER_TOKEN="test-token-0123456789",
