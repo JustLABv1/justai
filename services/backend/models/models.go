@@ -772,6 +772,7 @@ type MCPServer struct {
 	CredentialConfigured bool            `json:"credentialConfigured"`
 	Enabled              bool            `json:"enabled"`
 	AllowedTools         json.RawMessage `json:"allowedTools"`
+	DeniedTools          json.RawMessage `json:"deniedTools"`
 	TrustedReadOnly      bool            `json:"trustedReadOnly"`
 	AutoDiscover         bool            `json:"autoDiscover"`
 	OAuthExpiresAt       *time.Time      `json:"oauthExpiresAt,omitempty"`

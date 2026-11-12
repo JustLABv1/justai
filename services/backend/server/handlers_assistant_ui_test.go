@@ -53,8 +53,8 @@ func TestStreamAssistantUIWithToolsRestoresHistoricalAutomaticBinding(t *testing
 			AddRow("user", "Do that again", []byte(`{}`)))
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE ms.id = $1 AND mst.name = $2")).
 		WithArgs(serverID, "List Watchlists", userID, organizationID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
-			AddRow(serverID, "MCP", "", []byte(`[]`), "List Watchlists", "List saved watchlists", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "denied_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
+			AddRow(serverID, "MCP", "", []byte(`[]`), []byte(`[]`), "List Watchlists", "List saved watchlists", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)))
 	mock.ExpectExec("INSERT INTO messages").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE messages").WillReturnResult(sqlmock.NewResult(0, 1))
 

@@ -36,8 +36,8 @@ func TestListPlatformMCPServersIncludesOAuthExpiry(t *testing.T) {
 			}
 			mock.ExpectQuery(regexp.QuoteMeta("trusted_read_only, auto_discover, oauth_expires_at, last_tested_at")).
 				WithArgs("global", "").
-				WillReturnRows(sqlmock.NewRows(strings.Fields("id scope_type scope_id name icon_url endpoint_url auth_type credential_configured enabled allowed_tools trusted_read_only auto_discover oauth_expires_at last_tested_at last_error protocol_version tool_count created_at updated_at")).
-					AddRow(serverID, "global", nil, "Global MCP", "", "https://mcp.example.test", "oauth", true, true, []byte(`[]`), false, true, expiry, nil, "", "2025-06-18", 3, now, now))
+				WillReturnRows(sqlmock.NewRows(strings.Fields("id scope_type scope_id name icon_url endpoint_url auth_type credential_configured enabled allowed_tools denied_tools trusted_read_only auto_discover oauth_expires_at last_tested_at last_error protocol_version tool_count created_at updated_at")).
+					AddRow(serverID, "global", nil, "Global MCP", "", "https://mcp.example.test", "oauth", true, true, []byte(`[]`), []byte(`[]`), false, true, expiry, nil, "", "2025-06-18", 3, now, now))
 			response := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(response)
 			c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/mcp/servers?scope=global", nil)

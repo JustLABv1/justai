@@ -112,7 +112,7 @@ func TestLoadMCPServerAllowsUnsetOAuthTokenURL(t *testing.T) {
 	defer db.Close()
 
 	serverID := uuid.New()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, endpoint_url, auth_type, encrypted_credential, oauth_refresh_credential, COALESCE(oauth_token_url, ''), COALESCE(oauth_client_id, ''), oauth_expires_at, allowed_tools, trusted_read_only, COALESCE(protocol_version, '') FROM mcp_servers WHERE id = $1 AND enabled = TRUE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, endpoint_url, auth_type, encrypted_credential, oauth_refresh_credential, COALESCE(oauth_token_url, ''), COALESCE(oauth_client_id, ''), oauth_expires_at, allowed_tools, denied_tools, trusted_read_only, COALESCE(protocol_version, '') FROM mcp_servers WHERE id = $1 AND enabled = TRUE")).
 		WithArgs(serverID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id",
@@ -124,6 +124,7 @@ func TestLoadMCPServerAllowsUnsetOAuthTokenURL(t *testing.T) {
 			"oauth_client_id",
 			"oauth_expires_at",
 			"allowed_tools",
+			"denied_tools",
 			"trusted_read_only",
 			"protocol_version",
 		}).AddRow(
@@ -135,6 +136,7 @@ func TestLoadMCPServerAllowsUnsetOAuthTokenURL(t *testing.T) {
 			"",
 			"",
 			nil,
+			[]byte("[]"),
 			[]byte("[]"),
 			false,
 			"",

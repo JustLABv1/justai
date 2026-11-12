@@ -477,6 +477,7 @@ export type MCPServer = {
   credentialConfigured: boolean
   enabled: boolean
   allowedTools: string[]
+  deniedTools?: string[]
   trustedReadOnly?: boolean
   autoDiscover?: boolean
   oauthExpiresAt?: string | null

@@ -38,6 +38,7 @@ type automaticMCPToolCandidate struct {
 	ServerName string
 	IconURL    string
 	Allowed    map[string]bool
+	Denied     map[string]bool
 	Tool       mcp.Tool
 	Score      int
 }
@@ -55,7 +56,7 @@ func (a *App) discoverAutomaticMCPTools(ctx context.Context, userID, organizatio
 		       CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id)
 		            THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon'
 		            ELSE COALESCE(ms.icon_url, '') END,
-		       ms.allowed_tools, mst.name, COALESCE(mst.description, ''),
+		       ms.allowed_tools, ms.denied_tools, mst.name, COALESCE(mst.description, ''),
 		       mst.input_schema, mst.annotations, COALESCE(mst.metadata, '{}'::jsonb)
 		FROM mcp_servers ms
 		JOIN mcp_server_tools mst ON mst.server_id = ms.id
@@ -73,13 +74,14 @@ func (a *App) discoverAutomaticMCPTools(ctx context.Context, userID, organizatio
 	candidates := make([]automaticMCPToolCandidate, 0)
 	for rows.Next() {
 		var candidate automaticMCPToolCandidate
-		var allowed, inputSchema, annotations, metadata []byte
-		if err := rows.Scan(&candidate.ServerID, &candidate.ServerName, &candidate.IconURL, &allowed, &candidate.Tool.Name, &candidate.Tool.Description, &inputSchema, &annotations, &metadata); err != nil {
+		var allowed, denied, inputSchema, annotations, metadata []byte
+		if err := rows.Scan(&candidate.ServerID, &candidate.ServerName, &candidate.IconURL, &allowed, &denied, &candidate.Tool.Name, &candidate.Tool.Description, &inputSchema, &annotations, &metadata); err != nil {
 			result.Errors = append(result.Errors, "automatic MCP catalog row could not be read: "+err.Error())
 			continue
 		}
 		candidate.Allowed = parseMCPAllowedTools(allowed)
-		if !mcpToolAllowed(candidate.Allowed, candidate.Tool.Name) || automaticMCPBindingExists(existing, candidate.ServerID, candidate.Tool.Name) {
+		candidate.Denied = parseMCPAllowedTools(denied)
+		if candidate.Denied[candidate.Tool.Name] || !mcpToolAllowed(candidate.Allowed, candidate.Tool.Name) || automaticMCPBindingExists(existing, candidate.ServerID, candidate.Tool.Name) {
 			continue
 		}
 		candidate.Tool.InputSchema = json.RawMessage(inputSchema)
@@ -120,13 +122,13 @@ func (a *App) discoverAutomaticMCPTool(ctx context.Context, userID, organization
 		return "", voiceToolBinding{}, false
 	}
 	var candidate automaticMCPToolCandidate
-	var allowed, inputSchema, annotations, metadata []byte
+	var allowed, denied, inputSchema, annotations, metadata []byte
 	err := a.DB.QueryRowContext(ctx, `
 		SELECT ms.id, ms.name,
 		       CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id)
 		            THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon'
 		            ELSE COALESCE(ms.icon_url, '') END,
-		       ms.allowed_tools, mst.name, COALESCE(mst.description, ''),
+		       ms.allowed_tools, ms.denied_tools, mst.name, COALESCE(mst.description, ''),
 		       mst.input_schema, mst.annotations, COALESCE(mst.metadata, '{}'::jsonb)
 		FROM mcp_servers ms
 		JOIN mcp_server_tools mst ON mst.server_id = ms.id
@@ -136,14 +138,15 @@ func (a *App) discoverAutomaticMCPTool(ctx context.Context, userID, organization
 		       OR (ms.scope_type = 'organization' AND ms.scope_id = $4)
 		       OR (ms.scope_type = 'user' AND ms.scope_id = $3))
 		LIMIT 1`, serverID, toolName, userID, organizationID).Scan(
-		&candidate.ServerID, &candidate.ServerName, &candidate.IconURL, &allowed,
+		&candidate.ServerID, &candidate.ServerName, &candidate.IconURL, &allowed, &denied,
 		&candidate.Tool.Name, &candidate.Tool.Description, &inputSchema, &annotations, &metadata,
 	)
 	if err != nil {
 		return "", voiceToolBinding{}, false
 	}
 	candidate.Allowed = parseMCPAllowedTools(allowed)
-	if !mcpToolAllowed(candidate.Allowed, candidate.Tool.Name) || len(inputSchema) > 64*1024 {
+	candidate.Denied = parseMCPAllowedTools(denied)
+	if candidate.Denied[candidate.Tool.Name] || !mcpToolAllowed(candidate.Allowed, candidate.Tool.Name) || len(inputSchema) > 64*1024 {
 		return "", voiceToolBinding{}, false
 	}
 	candidate.Tool.InputSchema = json.RawMessage(inputSchema)

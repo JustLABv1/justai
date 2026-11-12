@@ -86,6 +86,7 @@ type MCPForm = {
   scopeType: string
   scopeId: string
   allowedTools: string
+  deniedTools: string
   trustedReadOnly: boolean
   autoDiscover: boolean
 }
@@ -102,6 +103,7 @@ const emptyForm: MCPForm = {
   scopeType: "organization",
   scopeId: "",
   allowedTools: "",
+  deniedTools: "",
   trustedReadOnly: false,
   autoDiscover: true,
 }
@@ -300,6 +302,10 @@ export function MCPView({
       .split(",")
       .map((tool) => tool.trim())
       .filter(Boolean)
+    const deniedTools = form.deniedTools
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean)
     try {
       let server = editingServer
         ? await api.patch<MCPServer>(`${apiBasePath}/${editingServer.id}`, {
@@ -310,6 +316,7 @@ export function MCPView({
                 : form.scopeId.trim()
               : undefined,
             allowedTools,
+            deniedTools,
           })
         : await api.post<MCPServer>(apiBasePath, {
             ...form,
@@ -319,6 +326,7 @@ export function MCPView({
                 : form.scopeId.trim()
               : undefined,
             allowedTools,
+            deniedTools,
           })
       if (iconFile) {
         const body = new FormData()
@@ -416,6 +424,7 @@ export function MCPView({
       scopeType: server.scopeType,
       scopeId: server.scopeId ?? "",
       allowedTools: server.allowedTools.join(", "),
+      deniedTools: (server.deniedTools ?? []).join(", "),
       trustedReadOnly: Boolean(server.trustedReadOnly),
       autoDiscover: Boolean(server.autoDiscover),
     })
@@ -1450,6 +1459,22 @@ export function MCPView({
                         <Field.Description>
                           {t(
                             "Enter tool names separated by commas. Leave empty to allow all tools under the approval policy."
+                          )}
+                        </Field.Description>
+                      </Field>
+                      <Field>
+                        <Field.Label>{t("Denied tools (optional)")}</Field.Label>
+                        <Input
+                          id="mcp-denied-tools"
+                          value={form.deniedTools}
+                          onChange={(event) =>
+                            update("deniedTools", event.target.value)
+                          }
+                          placeholder="delete_issue, drop_table"
+                        />
+                        <Field.Description>
+                          {t(
+                            "Enter tool names separated by commas. These tools are hidden and blocked for everyone, even if they are listed under allowed tools."
                           )}
                         </Field.Description>
                       </Field>

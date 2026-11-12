@@ -109,3 +109,32 @@ func TestLiteLLMAuthAndRedirects(t *testing.T) {
 		foreign.Close()
 	}
 }
+
+func TestServerToolAllowedHonoursDenylist(t *testing.T) {
+	tools := []Tool{{Name: "search"}, {Name: "create"}, {Name: "delete"}}
+	cases := []struct {
+		name    string
+		server  Server
+		visible []string
+	}{
+		{"no policy", Server{}, []string{"search", "create", "delete"}},
+		{"deny only", Server{Denied: map[string]bool{"delete": true}}, []string{"search", "create"}},
+		{"allow only", Server{Allowed: map[string]bool{"search": true}}, []string{"search"}},
+		{"deny wins over allow", Server{Allowed: map[string]bool{"search": true, "delete": true}, Denied: map[string]bool{"delete": true}}, []string{"search"}},
+	}
+	for _, tc := range cases {
+		got := tc.server.filterTools(tools)
+		if len(got) != len(tc.visible) {
+			t.Fatalf("%s: got %d tools, want %d", tc.name, len(got), len(tc.visible))
+		}
+		for i, tool := range got {
+			if tool.Name != tc.visible[i] {
+				t.Fatalf("%s: got %s, want %s", tc.name, tool.Name, tc.visible[i])
+			}
+		}
+	}
+	denied := Server{Denied: map[string]bool{"delete": true}}
+	if _, err := denied.CallTool(t.Context(), "delete", nil); err == nil {
+		t.Fatal("expected denied tool call to be rejected")
+	}
+}

@@ -128,7 +128,7 @@ func (a *App) mcpAppCallTool(c *gin.Context, serverID uuid.UUID, server mcp.Serv
 			return
 		}
 	}
-	if !mcpToolAllowed(server.Allowed, name) {
+	if !server.ToolAllowed(name) {
 		writeError(c, http.StatusForbidden, fmt.Errorf("MCP tool is not allowlisted"))
 		return
 	}
