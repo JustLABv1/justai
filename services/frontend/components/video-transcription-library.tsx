@@ -1,5 +1,6 @@
 "use client"
 
+import { TranscriptionDeleteButton } from "@/components/transcription-delete-button"
 import { Spinner } from "@/components/panelui/spinner"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -359,7 +360,15 @@ export function VideoTranscriptionLibrary({
               ? t("{value0} selected", { value0: selectedIds.length })
               : t("Select all on this page")}
           </span>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <TranscriptionDeleteButton
+              ids={selectedIds}
+              disabled={bulkSaving}
+              onDeleted={() => {
+                stopSelecting()
+                setRetry((value) => value + 1)
+              }}
+            />
             <Button
               disabled={!selectedIds.length || bulkSaving}
               onClick={() => void markSelected(false)}
@@ -420,22 +429,7 @@ export function VideoTranscriptionLibrary({
         <>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-5">
             {data.items.map((item) => (
-              <Link
-                key={item.id}
-                href={workspacePath(
-                  kind === "live" ? "transcription" : "video-transcription",
-                  null,
-                  item.id
-                )}
-                prefetch={false}
-                aria-pressed={selecting ? selectedIds.includes(item.id) : undefined}
-                onClick={(event) => {
-                  if (!selecting) return
-                  event.preventDefault()
-                  toggleSelected(item.id)
-                }}
-                className="group relative w-full rounded-[22px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
+              <div key={item.id} className="group relative min-w-0">
                 {selecting ? (
                   <span className="absolute top-3 left-3 z-10 flex size-5 items-center justify-center drop-shadow-sm">
                     <Checkbox
@@ -468,14 +462,53 @@ export function VideoTranscriptionLibrary({
                     />
                   )}
                   <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
-                    <h2
-                      className="line-clamp-2 text-base leading-6 font-medium group-hover:underline"
-                      title={item.fileName}
-                    >
-                      {item.title.trim() ||
-                        item.fileName ||
-                        t("Live transcription")}
-                    </h2>
+                    <div className="flex min-w-0 items-start gap-2">
+                      <h2
+                        className="min-w-0 flex-1 text-base leading-6 font-medium group-hover:underline"
+                        title={item.fileName}
+                      >
+                        <Link
+                          href={workspacePath(
+                            kind === "live"
+                              ? "transcription"
+                              : "video-transcription",
+                            null,
+                            item.id
+                          )}
+                          prefetch={false}
+                          aria-label={t(
+                            selecting ? "Select {value0}" : "Open {value0}",
+                            {
+                              value0:
+                                item.title.trim() ||
+                                item.fileName ||
+                                t("Live transcription"),
+                            }
+                          )}
+                          onClick={(event) => {
+                            if (!selecting) return
+                            event.preventDefault()
+                            toggleSelected(item.id)
+                          }}
+                          className="outline-none after:absolute after:inset-0 after:rounded-[22px] focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                        >
+                          <span className="line-clamp-2 break-words">
+                            {item.title.trim() ||
+                              item.fileName ||
+                              t("Live transcription")}
+                          </span>
+                        </Link>
+                      </h2>
+                      {!selecting ? (
+                        <div className="relative z-20 -mt-1 -mr-2 shrink-0">
+                          <TranscriptionDeleteButton
+                            iconOnly
+                            ids={[item.id]}
+                            onDeleted={() => setRetry((value) => value + 1)}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                       <time dateTime={item.createdAt}>
                         {dateFormatter.format(new Date(item.createdAt))}
@@ -489,9 +522,9 @@ export function VideoTranscriptionLibrary({
                         </>
                       ) : null}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <Badge
-                        className="min-w-0 whitespace-normal"
+                        className="max-w-full min-w-0 break-words whitespace-normal"
                         dot={
                           !(
                             videoLibraryPending(item.status) &&
@@ -513,7 +546,11 @@ export function VideoTranscriptionLibrary({
                         </Badge>
                       ) : null}
                       {item.hasSummary ? (
-                        <Badge size="sm" variant="outline">
+                        <Badge
+                          className="max-w-full break-words whitespace-normal"
+                          size="sm"
+                          variant="outline"
+                        >
                           <FileText aria-hidden="true" className="size-3" />
                           {t("With summary")}
                         </Badge>
@@ -521,7 +558,7 @@ export function VideoTranscriptionLibrary({
                     </div>
                   </div>
                 </Card>
-              </Link>
+              </div>
             ))}
           </div>
           {pageCount > 1 ? (

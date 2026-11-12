@@ -1,5 +1,7 @@
 "use client"
 import { ToastFeedback } from "@/components/toast-feedback"
+import { useRouter } from "next/navigation"
+import { TranscriptionDeleteButton } from "@/components/transcription-delete-button"
 import { TranscriptionDoneButton } from "@/components/transcription-done-button"
 
 import { Spinner } from "@/components/panelui/spinner"
@@ -451,6 +453,7 @@ export function LiveTranscriptionView({
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
+  const router = useRouter()
   const liveSessionSourceOptions = useTranslatedConfig(
     liveSessionSourceOptionsMessages
   )
@@ -2237,19 +2240,29 @@ export function LiveTranscriptionView({
             >
               {t("All live sessions")}
             </Link>
-            <TranscriptionDoneButton
-              onChange={(doneAt) =>
-                setSnapshot((current) =>
-                  current
-                    ? {
-                        ...current,
-                        session: { ...current.session, doneAt },
-                      }
-                    : current
-                )
-              }
-              session={snapshot.session}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <TranscriptionDeleteButton
+                ids={[snapshot.session.id]}
+                onDeleted={() => {
+                  setSnapshot(null)
+                  onSessionsChanged()
+                  router.push("/transcription")
+                }}
+              />
+              <TranscriptionDoneButton
+                onChange={(doneAt) =>
+                  setSnapshot((current) =>
+                    current
+                      ? {
+                          ...current,
+                          session: { ...current.session, doneAt },
+                        }
+                      : current
+                  )
+                }
+                session={snapshot.session}
+              />
+            </div>
           </div>
           {snapshot.liveProcessing ? (
             <LiveTranscriptProcessingPanel

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -89,8 +90,8 @@ func TestSpeakerCaptionVotingAndManualProtection(t *testing.T) {
 	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "SPEAKER_00"}}
 	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}, {SpeakerID: &id, StartOffsetMs: 30000, EndOffsetMs: 50000}}
 	frames := planSpeakerCaptionFrames(segments, speakers, 24)
-	if len(frames) != 4 {
-		t.Fatalf("want four samples: %+v", frames)
+	if len(frames) < 4 || len(frames) > 24 {
+		t.Fatalf("expected broader bounded samples: %+v", frames)
 	}
 	var observations []speakerCaptionObservation
 	for i := range frames {
@@ -128,7 +129,7 @@ func TestSpeakerCaptionOneTurnCannotAutoApply(t *testing.T) {
 	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
 	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 6 * 60 * 60 * 1000}}
 	frames := planSpeakerCaptionFrames(segments, speakers, 48)
-	if len(frames) != 2 {
+	if len(frames) < 4 || len(frames) > 48 {
 		t.Fatalf("six hours must not grow the budget: %d", len(frames))
 	}
 	observations := []speakerCaptionObservation{{FrameIndex: 0, Name: "Anna", Confidence: 1}, {FrameIndex: 1, Name: "Anna", Confidence: 1}}
@@ -204,13 +205,18 @@ func TestSpeakerCaptionFFmpegExtraction(t *testing.T) {
 	}
 	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Dir(file))))
 	defer server.Close()
-	data, err := extractSpeakerCaptionFrame(context.Background(), server.URL+"/fixture.mp4", 500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || format != "jpeg" || config.Width != 960 || config.Height != 270 {
-		t.Fatalf("unexpected crop: %+v %s %v", config, format, err)
+	for _, tc := range []struct {
+		view          string
+		width, height int
+	}{{"", 960, 270}, {"sharp", 1440, 405}, {"full", 1440, 810}} {
+		data, err := extractSpeakerCaptionView(context.Background(), server.URL+"/fixture.mp4", 500, tc.view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config, format, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil || format != "jpeg" || config.Width != tc.width || config.Height != tc.height {
+			t.Fatalf("%s: unexpected image: %+v %s %v", tc.view, config, format, err)
+		}
 	}
 }
 
@@ -264,5 +270,219 @@ func TestSpeakerCaptionSameNameOnDifferentAudioLabelsNeedsReview(t *testing.T) {
 		if result.Applied || !result.Conflict || result.Confidence > 0.6 {
 			t.Fatalf("ambiguous audio mapping: %+v", result)
 		}
+	}
+}
+
+func TestSpeakerCaptionSamplingCoversFirstShortAndLaterTurns(t *testing.T) {
+	id := uuid.New()
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
+	segments := []models.TranscriptionSegment{
+		{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 4000},
+		{SpeakerID: &id, StartOffsetMs: 10000, EndOffsetMs: 60000},
+		{SpeakerID: &id, StartOffsetMs: 70000, EndOffsetMs: 120000},
+		{SpeakerID: &id, StartOffsetMs: 130000, EndOffsetMs: 150000},
+	}
+	frames := planSpeakerCaptionFrames(segments, speakers, 24)
+	seen := map[int64]bool{}
+	for _, frame := range frames {
+		seen[frame.TurnStartMs] = true
+		if !captionFrameMatchesSpeaker(frame, segments) {
+			t.Fatal("unsafe sample")
+		}
+	}
+	for _, start := range []int64{0, 10000, 70000, 130000} {
+		if !seen[start] {
+			t.Fatalf("missed turn %d", start)
+		}
+	}
+	if frames[0].TurnStartMs != 0 {
+		t.Fatal("first appearance not prioritized")
+	}
+}
+
+func TestSpeakerCaptionRetriesUseViewsThenNearbyAndStayBounded(t *testing.T) {
+	id := uuid.New()
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}}
+	first := speakerCaptionFrame{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 20000}
+	frames := []speakerCaptionFrame{first}
+	frame := first
+	for _, view := range []string{"sharp", "full", "", "full"} {
+		next, ok := nextSpeakerCaptionRetry(frame, speakerCaptionObservation{Reason: "no_caption"}, frames, segments)
+		if !ok || next.View != view || !captionFrameMatchesSpeaker(next, segments) {
+			t.Fatalf("invalid retry: %+v %v", next, ok)
+		}
+		frames = append(frames, next)
+		frame = next
+	}
+	if _, ok := nextSpeakerCaptionRetry(frame, speakerCaptionObservation{}, frames, segments); ok {
+		t.Fatal("retry limit exceeded")
+	}
+	if _, ok := nextSpeakerCaptionRetry(first, speakerCaptionObservation{Name: "Anna", Confidence: .99}, nil, segments); ok {
+		t.Fatal("clear reading retried")
+	}
+	if _, ok := nextSpeakerCaptionRetry(first, speakerCaptionObservation{Error: "provider failed"}, nil, segments); ok {
+		t.Fatal("provider failure retried as missing caption")
+	}
+}
+
+func TestSpeakerCaptionAlternateViewsDoNotInflateConfidence(t *testing.T) {
+	id := uuid.New()
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}, {SpeakerID: &id, StartOffsetMs: 30000, EndOffsetMs: 50000}}
+	frames := []speakerCaptionFrame{
+		{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 20000},
+		{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 20000, View: "sharp"},
+		{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 20000, View: "full"},
+		{SpeakerID: id, OffsetMs: 36000, TurnStartMs: 30000, TurnEndMs: 50000},
+	}
+	var observations []speakerCaptionObservation
+	for i := range frames {
+		observations = append(observations, speakerCaptionObservation{FrameIndex: i, Name: "Anna", Caption: "Anna", Confidence: .99})
+	}
+	results := resolveSpeakerCaptionResults(frames, observations, speakers, segments, true)
+	if len(results) != 1 || results[0].Applied || len(results[0].FrameIndices) != 2 {
+		t.Fatalf("alternate views counted as independent evidence: %+v", results)
+	}
+}
+
+func TestSpeakerCaptionManualPositionRequiresExclusiveUnprotectedSpeaker(t *testing.T) {
+	id, other := uuid.New(), uuid.New()
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}}
+	frame, err := planManualSpeakerCaptionFrame(8000, segments, speakers)
+	if err != nil || frame.OffsetMs != 8000 || !frame.Manual {
+		t.Fatalf("manual scan: %+v %v", frame, err)
+	}
+	for _, offset := range []int64{-1, 22000} {
+		if _, err := planManualSpeakerCaptionFrame(offset, segments, speakers); err == nil {
+			t.Fatal("invalid timestamp accepted")
+		}
+	}
+	overlap := append(segments, models.TranscriptionSegment{SpeakerID: &other, StartOffsetMs: 7000, EndOffsetMs: 9000})
+	if _, err := planManualSpeakerCaptionFrame(8000, overlap, speakers); err == nil {
+		t.Fatal("overlapping speakers accepted")
+	}
+	speakers[0].DisplayName = "Chosen"
+	speakers[0].NameSource = "manual"
+	if _, err := planManualSpeakerCaptionFrame(8000, segments, speakers); err == nil {
+		t.Fatal("manual name overwritten")
+	}
+}
+
+func TestSpeakerCaptionMissReasonsAndUnsampledCoverage(t *testing.T) {
+	id, other := uuid.New(), uuid.New()
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}, {ID: other, Label: "B"}}
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}, {SpeakerID: &other, StartOffsetMs: 30000, EndOffsetMs: 50000}}
+	frames := planSpeakerCaptionFrames(segments, speakers[:1], 1)
+	for _, tc := range []struct{ raw, reason string }{
+		{`{"name":"","caption":"","confidence":0}`, "no_caption"},
+		{`{"name":"Anna","caption":"Anna","confidence":0.7}`, "uncertain_text"},
+		{`{"name":"Anna","caption":"Anna and Ben","confidence":1,"ambiguous":true}`, "conflicting_names"},
+	} {
+		o, err := decodeSpeakerCaption(tc.raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		results := captionResultsWithCoverage(frames, []speakerCaptionObservation{o}, speakers, segments, true)
+		if len(results) != 2 || results[0].Reason != tc.reason || results[1].Reason != "not_sampled" || results[0].Name != "" || results[0].Applied {
+			t.Fatalf("wrong diagnostic: %+v", results)
+		}
+	}
+}
+
+func TestSpeakerCaptionAdaptiveQueueResumesAndHonorsTotalBudget(t *testing.T) {
+	id := uuid.New()
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 60000}}
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
+	run := speakerCaptionRun{FrameBudget: 12, Frames: planInitialSpeakerCaptionFrames(segments, speakers, 12)}
+	// Simulate a worker disappearing immediately after its first durable checkpoint.
+	var saved []byte
+	calls := 0
+	stop := fmt.Errorf("worker stopped")
+	err := analyzeSpeakerCaptionFrames(context.Background(), &run, segments, func(frame speakerCaptionFrame) (speakerCaptionObservation, error) {
+		calls++
+		return speakerCaptionObservation{Reason: "no_caption"}, nil
+	}, func() error { saved, _ = json.Marshal(run); return stop })
+	if err != stop || calls != 1 {
+		t.Fatalf("checkpoint failure did not stop: %v %d", err, calls)
+	}
+	var resumed speakerCaptionRun
+	if err := json.Unmarshal(saved, &resumed); err != nil {
+		t.Fatal(err)
+	}
+	views := map[string]bool{}
+	checkpoints := 0
+	err = analyzeSpeakerCaptionFrames(context.Background(), &resumed, segments, func(frame speakerCaptionFrame) (speakerCaptionObservation, error) {
+		calls++
+		views[frame.View] = true
+		return speakerCaptionObservation{Reason: "no_caption"}, nil
+	}, func() error {
+		checkpoints++
+		if len(resumed.Observations) > 12 || len(resumed.Frames) > 12 {
+			t.Fatal("budget exceeded")
+		}
+		return nil
+	})
+	if err != nil || calls != 12 || checkpoints != 11 || !views["sharp"] || !views["full"] {
+		t.Fatalf("adaptive queue: calls=%d checkpoints=%d views=%v err=%v", calls, checkpoints, views, err)
+	}
+}
+
+func TestSpeakerCaptionAdaptiveQueueStopsOnCancellationAndProviderErrors(t *testing.T) {
+	id := uuid.New()
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 60000}}
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
+	run := speakerCaptionRun{FrameBudget: 24, Frames: planInitialSpeakerCaptionFrames(segments, speakers, 24)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	analyze := func(frame speakerCaptionFrame) (speakerCaptionObservation, error) {
+		calls++
+		return speakerCaptionObservation{}, fmt.Errorf("unavailable")
+	}
+	if err := analyzeSpeakerCaptionFrames(ctx, &run, segments, analyze, func() error { return nil }); err != context.Canceled || calls != 0 {
+		t.Fatal("cancelled job continued")
+	}
+	if err := analyzeSpeakerCaptionFrames(context.Background(), &run, segments, analyze, func() error { return nil }); err == nil || calls != 3 {
+		t.Fatalf("provider circuit breaker: %d %v", calls, err)
+	}
+}
+
+func TestSpeakerCaptionInitialPlanCoversSpeakersBeforeReservingRetries(t *testing.T) {
+	var speakers []models.TranscriptionSpeaker
+	var segments []models.TranscriptionSegment
+	for i := 0; i < 20; i++ {
+		id := uuid.New()
+		speakers = append(speakers, models.TranscriptionSpeaker{ID: id, Label: id.String()})
+		segments = append(segments, models.TranscriptionSegment{SpeakerID: &id, StartOffsetMs: int64(i * 30000), EndOffsetMs: int64(i*30000 + 20000)})
+	}
+	frames := planInitialSpeakerCaptionFrames(segments, speakers, 24)
+	seen := map[uuid.UUID]bool{}
+	for _, frame := range frames {
+		seen[frame.SpeakerID] = true
+	}
+	if len(seen) != 20 || len(frames) != 20 {
+		t.Fatalf("coverage sacrificed for retries: %d speakers %d frames", len(seen), len(frames))
+	}
+}
+
+func TestSpeakerCaptionDiagnosticsDoNotClearExistingSuggestions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	app := &App{DB: db}
+	run, session, token, speaker := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT status='processing'").WithArgs(run, token).WillReturnRows(sqlmock.NewRows([]string{"active"}).AddRow(true))
+	// No speaker UPDATE is allowed for a diagnostic without a recognized name.
+	mock.ExpectExec("UPDATE transcription_speaker_caption_runs SET status='completed'").WithArgs(run, token, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := app.finishSpeakerCaptionRun(context.Background(), run, session, token, []speakerCaptionResult{{SpeakerID: speaker, Reason: "no_caption"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

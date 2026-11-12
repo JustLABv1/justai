@@ -293,7 +293,7 @@ export function SummaryTemplateEditor({
                       <Button
                         key={key}
                         size="sm"
-                        variant={draft[key] ? "secondary" : "ghost"}
+                        variant={draft[key] ? "default" : "ghost"}
                         aria-pressed={draft[key]}
                         onClick={() =>
                           onChange({ ...draft, [key]: !draft[key] })
@@ -323,6 +323,7 @@ export function SummaryTemplateEditor({
         <DialogFooter>
           {draft?.id ? (
             <Button
+              className="text-destructive hover:not-disabled:text-destructive"
               variant="ghost"
               disabled={saving}
               onClick={() => {

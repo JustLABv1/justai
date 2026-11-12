@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"justai-backend/middleware"
+	"justai-backend/models"
 	"justai-backend/provider"
 )
 
@@ -147,7 +148,7 @@ func (a *App) speakerCaptionImage(c *gin.Context) {
 		writeError(c, 410, err)
 		return
 	}
-	data, err := extractSpeakerCaptionFrame(c, url, r.Frames[index].OffsetMs)
+	data, err := extractSpeakerCaptionView(c, url, r.Frames[index].OffsetMs, r.Frames[index].View)
 	if err != nil {
 		writeError(c, 502, err)
 		return
@@ -166,6 +167,7 @@ func (a *App) createSpeakerCaptionRun(c *gin.Context) {
 		Model       string    `json:"model"`
 		FrameBudget int       `json:"frameBudget"`
 		AutoApply   bool      `json:"autoApply"`
+		OffsetMs    *int64    `json:"offsetMs,omitempty"`
 	}
 	if !decodeJSON(c, &request) {
 		return
@@ -217,9 +219,18 @@ func (a *App) createSpeakerCaptionRun(c *gin.Context) {
 		writeError(c, 500, err)
 		return
 	}
-	frames := planSpeakerCaptionFrames(segments, speakers, request.FrameBudget)
+	frames := planInitialSpeakerCaptionFrames(segments, speakers, request.FrameBudget)
+	if request.OffsetMs != nil {
+		frame, err := planManualSpeakerCaptionFrame(*request.OffsetMs, segments, speakers)
+		if err != nil {
+			writeError(c, 400, err)
+			return
+		}
+		frames = []speakerCaptionFrame{frame}
+		request.AutoApply = false
+	}
 	if len(frames) == 0 {
-		writeError(c, 400, fmt.Errorf("no unnamed speakers with a clear speech turn of at least eight seconds are available"))
+		writeError(c, 400, fmt.Errorf("no unnamed speakers with a clear speech turn of at least two seconds are available"))
 		return
 	}
 	encoded, _ := json.Marshal(frames)
@@ -298,7 +309,7 @@ func (a *App) startSpeakerCaptionWorker(ctx context.Context) {
 	}()
 }
 func (a *App) processSpeakerCaptionRun(root context.Context, r speakerCaptionRun, token uuid.UUID) {
-	ctx, cancel := context.WithTimeout(root, time.Duration(len(r.Frames))*65*time.Second+time.Minute)
+	ctx, cancel := context.WithTimeout(root, time.Duration(r.FrameBudget)*65*time.Second+time.Minute)
 	defer cancel()
 	done := make(chan struct{})
 	defer close(done)
@@ -364,26 +375,21 @@ func (a *App) runSpeakerCaptionAnalysis(ctx context.Context, r *speakerCaptionRu
 	if err != nil {
 		return err
 	}
-	failures := 0
-	for index := len(r.Observations); index < len(r.Frames); index++ {
-		if err := ctx.Err(); err != nil {
-			return err
+	segments, err := loadTranscriptionSegments(ctx, a.DB, r.SessionID)
+	if err != nil {
+		return fmt.Errorf("could not load speech turns")
+	}
+	if err := analyzeSpeakerCaptionFrames(ctx, r, segments, func(frame speakerCaptionFrame) (speakerCaptionObservation, error) {
+		image, err := extractSpeakerCaptionView(ctx, url, frame.OffsetMs, frame.View)
+		if err != nil {
+			return speakerCaptionObservation{}, err
 		}
-		image, readErr := extractSpeakerCaptionFrame(ctx, url, r.Frames[index].OffsetMs)
-		var observation speakerCaptionObservation
-		if readErr == nil {
-			observation, readErr = readSpeakerCaption(ctx, endpoint, image)
-		}
-		observation.FrameIndex = index
-		if readErr != nil {
-			observation.Error = readErr.Error()
-			failures++
-		} else {
-			failures = 0
-		}
-		r.Observations = append(r.Observations, observation)
+		return readSpeakerCaption(ctx, endpoint, image)
+	}, func() error {
 		encoded, _ := json.Marshal(r.Observations)
-		result, err := a.DB.ExecContext(ctx, `UPDATE transcription_speaker_caption_runs SET observations=$3,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='processing'`, r.ID, token, encoded)
+		encodedFrames, _ := json.Marshal(r.Frames)
+		// Checkpoint the retry queue and observation together under the lease.
+		result, err := a.DB.ExecContext(ctx, `UPDATE transcription_speaker_caption_runs SET observations=$3,frames=$4,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='processing'`, r.ID, token, encoded, encodedFrames)
 		if err != nil {
 			return fmt.Errorf("could not save analysis progress")
 		}
@@ -391,28 +397,20 @@ func (a *App) runSpeakerCaptionAnalysis(ctx context.Context, r *speakerCaptionRu
 		if n != 1 {
 			return fmt.Errorf("analysis was cancelled")
 		}
-		if failures >= 3 {
-			return fmt.Errorf("three consecutive images could not be analyzed; check source video and vision endpoint")
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	successful := false
-	for _, o := range r.Observations {
-		if o.Error == "" {
-			successful = true
-		}
-	}
-	if !successful {
-		return fmt.Errorf("no images could be analyzed; check source video and vision endpoint")
-	}
+
 	speakers, err := loadTranscriptionSpeakers(ctx, a.DB, r.SessionID)
 	if err != nil {
 		return fmt.Errorf("could not load speakers")
 	}
-	segments, err := loadTranscriptionSegments(ctx, a.DB, r.SessionID)
+	segments, err = loadTranscriptionSegments(ctx, a.DB, r.SessionID)
 	if err != nil {
 		return fmt.Errorf("could not load speech turns")
 	}
-	return a.finishSpeakerCaptionRun(ctx, r.ID, r.SessionID, token, resolveSpeakerCaptionResults(r.Frames, r.Observations, speakers, segments, r.AutoApply))
+	return a.finishSpeakerCaptionRun(ctx, r.ID, r.SessionID, token, captionResultsWithCoverage(r.Frames, r.Observations, speakers, segments, r.AutoApply))
 }
 func (a *App) finishSpeakerCaptionRun(ctx context.Context, id, sessionID, token uuid.UUID, results []speakerCaptionResult) error {
 	tx, err := a.DB.BeginTx(ctx, nil)
@@ -427,6 +425,9 @@ func (a *App) finishSpeakerCaptionRun(ctx context.Context, id, sessionID, token 
 	}
 	for i := range results {
 		r := &results[i]
+		if r.Name == "" {
+			continue
+		}
 		query := `UPDATE transcription_speakers SET suggested_name=$3,suggestion_confidence=$4,suggestion_evidence=$5,updated_at=now() WHERE id=$1 AND session_id=$2 AND merged_into IS NULL AND (display_name='' OR name_source='ai')`
 		if r.Applied {
 			query = `UPDATE transcription_speakers SET display_name=$3,name_source='ai',suggested_name='',suggestion_confidence=$4,suggestion_evidence=$5,updated_at=now() WHERE id=$1 AND session_id=$2 AND merged_into IS NULL AND (display_name='' OR name_source='ai')`
@@ -459,4 +460,40 @@ func (a *App) finishSpeakerCaptionRun(ctx context.Context, id, sessionID, token 
 		}
 	}
 	return nil
+}
+
+// Checkpoint after every model request so retries survive worker replacement.
+func analyzeSpeakerCaptionFrames(ctx context.Context, r *speakerCaptionRun, segments []models.TranscriptionSegment, analyze func(speakerCaptionFrame) (speakerCaptionObservation, error), checkpoint func() error) error {
+	failures := 0
+	for index := len(r.Observations); index < len(r.Frames); index++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		observation, err := analyze(r.Frames[index])
+		observation.FrameIndex = index
+		if err != nil {
+			observation.Error = err.Error()
+			failures++
+		} else {
+			failures = 0
+		}
+		r.Observations = append(r.Observations, observation)
+		if len(r.Frames) < min(r.FrameBudget, captionMaxFrames) {
+			if retry, ok := nextSpeakerCaptionRetry(r.Frames[index], observation, r.Frames, segments); ok {
+				r.Frames = append(r.Frames, retry)
+			}
+		}
+		if err := checkpoint(); err != nil {
+			return err
+		}
+		if failures >= 3 {
+			return fmt.Errorf("three consecutive images could not be analyzed; check source video and vision endpoint")
+		}
+	}
+	for _, observation := range r.Observations {
+		if observation.Error == "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("no images could be analyzed; check source video and vision endpoint")
 }

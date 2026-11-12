@@ -552,6 +552,8 @@ export function TranscriptWorkspace({
   const [mediaPlaying, setMediaPlaying] = useState(false)
   const [captionActionSlot, setCaptionActionSlot] =
     useState<HTMLElement | null>(null)
+  const [captionPlayerActionSlot, setCaptionPlayerActionSlot] =
+    useState<HTMLElement | null>(null)
   // The video is hidden by default on the Summary page, where people read, and
   // shown elsewhere. Each choice is remembered separately in this browser.
   const readVideoHidden = (key: string, fallback: boolean) => {
@@ -1675,12 +1677,14 @@ export function TranscriptWorkspace({
         ),
       }))
       onError("")
+      return true
     } catch (caught) {
       onError(
         caught instanceof Error
           ? caught.message
           : t("The suggestion could not be saved.")
       )
+      return false
     }
   }
 
@@ -2153,17 +2157,17 @@ export function TranscriptWorkspace({
                   <p className="text-xs text-muted-foreground">
                     {t("Use the checked passages")}
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       onClick={() => setExcludedSourceIds([])}
                     >
                       {t("Include all")}
                     </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       onClick={() =>
                         setExcludedSourceIds(
                           snapshot.segments.map((segment) => segment.id)
@@ -3276,6 +3280,14 @@ export function TranscriptWorkspace({
                               )}
                             </div>
 
+                            {inspectorPage === "speakers" &&
+                            !videoHidden &&
+                            snapshot.videoUpload?.playbackUrl ? (
+                              <div
+                                className="flex flex-wrap justify-end gap-2"
+                                ref={setCaptionPlayerActionSlot}
+                              />
+                            ) : null}
                             {videoPlaybackError ? (
                               <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                                 <p className="font-medium">
@@ -3572,7 +3584,16 @@ export function TranscriptWorkspace({
                       <CardContent className="flex flex-col gap-2 px-4 pb-4">
                         {mediaKind === "video" ? (
                           <SpeakerVideoCaptions
+                            currentTimeMs={currentTimeMs}
                             actionSlot={captionActionSlot}
+                            playerActionSlot={captionPlayerActionSlot}
+                            captureVideoPosition={() => {
+                              const video = videoRef.current
+                              video?.pause()
+                              return video
+                                ? Math.round(video.currentTime * 1000)
+                                : currentTimeMs
+                            }}
                             key={snapshot.session.id}
                             sessionId={snapshot.session.id}
                             available={
@@ -3681,10 +3702,22 @@ export function TranscriptWorkspace({
                                 {summary.speaker.suggestedName ? (
                                   <div className="mt-2 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
                                     <div className="min-w-0 text-xs">
-                                      <p className="text-sm font-medium">
-                                        {t("Maybe")}{" "}
-                                        {summary.speaker.suggestedName}{" "}
-                                      </p>
+                                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                        <p className="min-w-0 text-sm font-medium break-words">
+                                          {t("Maybe")}{" "}
+                                          {summary.speaker.suggestedName}
+                                        </p>
+                                        <Badge size="sm" variant="info">
+                                          {typeof summary.speaker
+                                            .suggestionConfidence ===
+                                            "number" &&
+                                          Number.isFinite(
+                                            summary.speaker.suggestionConfidence
+                                          )
+                                            ? `${t("Confidence")} · ${Math.round(Math.min(1, Math.max(0, summary.speaker.suggestionConfidence)) * 100)}%`
+                                            : t("Confidence unavailable")}
+                                        </Badge>
+                                      </div>
                                       {summary.speaker.suggestionEvidence ? (
                                         <p className="mt-1 line-clamp-3 text-muted-foreground">
                                           {summary.speaker.suggestionEvidence}
@@ -4260,11 +4293,9 @@ export function TranscriptWorkspace({
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <p className="mb-1 text-xs font-medium">
-                  {t("Merge this speaker")}
-                </p>
+            <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
+              <div className="row-span-2 grid min-w-0 grid-rows-subgrid">
+                <p className="text-xs font-medium">{t("Merge this speaker")}</p>
                 <Select
                   items={snapshot.speakers
                     .filter((speaker) => speaker.id !== mergeTargetId)
@@ -4289,10 +4320,8 @@ export function TranscriptWorkspace({
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <p className="mb-1 text-xs font-medium">
-                  {t("Keep this speaker")}
-                </p>
+              <div className="row-span-2 grid min-w-0 grid-rows-subgrid">
+                <p className="text-xs font-medium">{t("Keep this speaker")}</p>
                 <Select
                   items={snapshot.speakers
                     .filter((speaker) => speaker.id !== mergeSourceId)
@@ -4319,7 +4348,7 @@ export function TranscriptWorkspace({
               </div>
             </div>
           </DialogBody>
-          <DialogFooter>
+          <DialogFooter className="grid grid-cols-[auto_minmax(0,1fr)] items-stretch *:h-auto *:min-h-11 *:py-3 *:whitespace-normal">
             <Button
               disabled={mergeSaving}
               onClick={() => setMergeOpen(false)}
@@ -4341,7 +4370,7 @@ export function TranscriptWorkspace({
               ) : (
                 <GitMerge data-icon="inline-start" />
               )}{" "}
-              {t("Merge speakers")}
+              <span className="min-w-0 break-words">{t("Merge speakers")}</span>
             </Button>
           </DialogFooter>
         </DialogContent>

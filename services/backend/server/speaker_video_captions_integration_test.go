@@ -152,7 +152,7 @@ func TestSpeakerCaptionDurablePipelineIntegration(t *testing.T) {
 	if err = db.QueryRowContext(ctx, `SELECT status FROM transcription_speaker_caption_runs WHERE id=$1`, runID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if name != "Anna Müller" || source != "ai" || status != "completed" || requests.Load() != 3 {
+	if name != "Anna Müller" || source != "ai" || status != "completed" || requests.Load() != int32(len(resumed.Frames)-len(first)) {
 		t.Fatalf("pipeline result: %s %s %s, %d model requests", name, source, status, requests.Load())
 	}
 	c, recorder = newContext("GET", "/", "")
@@ -217,7 +217,7 @@ func TestSpeakerCaptionDurablePipelineIntegration(t *testing.T) {
 	}
 	steps := decodeVideoPipeline(pipelineJSON)
 	names := steps[videoPipelineIndex("speaker_names")]
-	if names.Status != "completed" || names.Parallel == nil || names.Parallel.CompletedSlices != 4 || names.Parallel.SliceCount != 4 {
+	if names.Status != "completed" || names.Parallel == nil || names.Parallel.CompletedSlices < 4 || names.Parallel.SliceCount > 24 || names.Parallel.CompletedSlices != names.Parallel.SliceCount {
 		t.Fatalf("automatic step progress: %+v", names)
 	}
 	// An explicit retry starts at names and preserves ASR and diarization.

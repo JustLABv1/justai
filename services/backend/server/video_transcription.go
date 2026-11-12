@@ -651,6 +651,48 @@ func videoSpeakerSeparationCanSkip(status, stage string, steps []models.Transcri
 	return false
 }
 
+// Persist the opt-out before interrupting the provider, including across worker restarts.
+func (m *TranscriptionManager) skipVideoPolish(ctx context.Context, uploadID uuid.UUID) (models.TranscriptionVideoUpload, error) {
+	tx, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	defer tx.Rollback()
+	var sessionID uuid.UUID
+	var status, stage string
+	var pipelineRaw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT session_id, status, stage, pipeline_steps FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage, &pipelineRaw); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if status != "processing" || stage != "polishing" {
+		return models.TranscriptionVideoUpload{}, fmt.Errorf("grammar polish is not currently running")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE transcription_sessions SET grammar_endpoint_id = NULL, polish_status = 'not_requested', updated_at = now() WHERE id = $1`, sessionID); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	steps := decodeVideoPipeline(pipelineRaw)
+	if len(steps) == 0 {
+		steps = initialVideoPipeline(time.Now().UTC())
+	}
+	markVideoPipelineStep(steps, "grammar", "skipped", "", time.Now().UTC())
+	pipelineRaw, err = json.Marshal(steps)
+	if err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE transcription_video_uploads SET pipeline_steps = $2, updated_at = now() WHERE id = $1`, uploadID, pipelineRaw); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	m.cancelVideoDiarization(uploadID) // Only one optional provider stage runs per upload.
+	m.broadcast(sessionID, "transcription.polish", ginData{"status": "not_requested"})
+	return loadVideoUpload(ctx, m.DB, uploadID)
+}
+
 func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadID uuid.UUID) (models.TranscriptionVideoUpload, error) {
 	transaction, err := m.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -928,7 +970,36 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				return err
 			}
 		}
-		if err := m.polishVideoTranscript(jobCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID, grammarModel); err != nil {
+		polishCtx, cancelPolish := context.WithCancel(jobCtx)
+		unregisterPolish := m.registerVideoDiarizationCancel(uploadID, cancelPolish)
+		var polishEnabled bool
+		if err := m.DB.QueryRowContext(jobCtx, `SELECT grammar_endpoint_id IS NOT NULL FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&polishEnabled); err != nil {
+			unregisterPolish()
+			cancelPolish()
+			return err
+		}
+		var polishErr error
+		if polishEnabled {
+			polishErr = m.polishVideoTranscript(polishCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID, grammarModel)
+		}
+		unregisterPolish()
+		cancelPolish()
+		if err := m.DB.QueryRowContext(jobCtx, `SELECT grammar_endpoint_id IS NOT NULL FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&polishEnabled); err != nil {
+			return err
+		}
+		if !polishEnabled {
+			if _, err := m.DB.ExecContext(jobCtx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, record.model.SessionID); err != nil {
+				return err
+			}
+			if _, err := m.DB.ExecContext(jobCtx, `UPDATE transcription_sessions SET polish_status = 'not_requested', updated_at = now() WHERE id = $1`, record.model.SessionID); err != nil {
+				return err
+			}
+			if err := m.finishVideoPipelineStep(jobCtx, uploadID, "grammar", "skipped", ""); err != nil {
+				return err
+			}
+			polishErr = nil
+		}
+		if err := polishErr; err != nil {
 			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
 				return err
 			}

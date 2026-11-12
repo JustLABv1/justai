@@ -465,6 +465,8 @@ func markVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, key, s
 	}
 	step := &steps[index]
 	switch status {
+	case "skipped":
+		skipVideoPipelineStep(step)
 	case "completed":
 		completeVideoPipelineStep(step, now)
 	case "failed":

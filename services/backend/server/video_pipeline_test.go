@@ -496,3 +496,15 @@ func TestVideoSpeakerNameStepOrderAndResume(t *testing.T) {
 		t.Fatal("disabled optional name step must be skipped")
 	}
 }
+
+func TestVideoPipelinePreservesSkippedPolishThroughCompletion(t *testing.T) {
+	now := time.Now().UTC()
+	steps := initialVideoPipeline(now)
+	steps = applyVideoPipelineStage(steps, "polishing", "", now)
+	markVideoPipelineStep(steps, "grammar", "skipped", "", now)
+	steps = applyVideoPipelineStage(steps, "finalizing", "", now.Add(time.Second))
+	completeVideoPipeline(steps, now.Add(2*time.Second))
+	if got := steps[videoPipelineIndex("grammar")].Status; got != "skipped" {
+		t.Fatalf("grammar status = %q, want skipped", got)
+	}
+}

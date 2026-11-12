@@ -396,15 +396,20 @@ func (a *App) skipVideoTranscription(c *gin.Context) {
 	}
 	rawStep := strings.TrimSpace(c.Query("step"))
 	step := normalizeVideoRetryStep(rawStep)
-	if rawStep != "" && step != videoRetryStepDiarization {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("only speaker separation can currently be skipped"))
+	if rawStep != "" && step != videoRetryStepDiarization && step != videoRetryStepGrammar {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("only speaker separation or grammar polish can be skipped"))
 		return
 	}
 	if _, err := a.authorizedVideoUpload(c, uploadID); err != nil {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
-	upload, err := a.Live.skipVideoDiarization(c, uploadID)
+	var upload models.TranscriptionVideoUpload
+	if step == videoRetryStepGrammar {
+		upload, err = a.Live.skipVideoPolish(c, uploadID)
+	} else {
+		upload, err = a.Live.skipVideoDiarization(c, uploadID)
+	}
 	if err != nil {
 		writeError(c, http.StatusConflict, err)
 		return
