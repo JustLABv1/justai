@@ -6,7 +6,7 @@ JustAI follows the JustScan/JustCD multi-stage pattern:
   Next.js standalone output enter a clean Alpine 3.24 runtime. No npm, Yarn or
   Node headers are inherited.
 - Backend: official Go 1.27.3 builder, CGO disabled, trimmed and stripped binary.
-  Stable Alpine carries the required PDF/Python runtime. pypdf 6.21.2 includes
+  Stable Alpine carries the required PDF/Python runtime. pypdf 6.21.4 includes
   the fixes missing from the previous 6.19.0 pin.
 - Combined: the same Alpine/musl runtime for Node, Python and Poppler; no mixed
   Debian/glibc Poppler libraries. Tini manages child processes.
