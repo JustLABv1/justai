@@ -618,6 +618,14 @@ export const de = {
     "Der Code lief zu lange und wurde gestoppt.",
   "This is not valid JSON.": "Das ist kein gültiges JSON.",
   "No rows to show.": "Keine Zeilen vorhanden.",
+  Fullscreen: "Vollbild",
+  "Reset session": "Sitzung zurücksetzen",
+  "Fix error": "Fehler beheben",
+  "Error:": "Fehler:",
+  "The following {value0} code failed with an error when run. Please fix it and show the corrected code.":
+    "Der folgende {value0}-Code hat beim Ausführen einen Fehler verursacht. Bitte korrigiere ihn und zeige den korrigierten Code.",
+  "This chart definition is not valid.":
+    "Diese Diagramm-Definition ist ungültig.",
   "Inputs for input() (one line per call)":
     "Eingaben für input() (eine Zeile pro Aufruf)",
   "e.g. 1\n-3\n2": "z. B. 1\n-3\n2",

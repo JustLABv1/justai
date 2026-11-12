@@ -106,14 +106,17 @@ export function JsonTree({ code }: { code: string }) {
 export function DelimitedTable({
   code,
   language,
+  delimiter,
 }: {
   code: string
   language: string
+  /** Fixed delimiter; detected from the content when omitted. */
+  delimiter?: string
 }) {
   const { t } = useTranslations()
   const rows = useMemo(
-    () => parseDelimited(code, detectDelimiter(language, code)),
-    [code, language]
+    () => parseDelimited(code, delimiter ?? detectDelimiter(language, code)),
+    [code, language, delimiter]
   )
 
   if (rows.length === 0) {

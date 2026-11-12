@@ -30,6 +30,7 @@
     "@shadcn/react": "^0.3.1",
     "@tabler/icons-react": "^3.51.0",
     "@tanstack/charts": "^1.5.0",
+    "@viz-js/viz": "^3.31.0",
     "@xyflow/react": "^12.12.1",
     "ai": "^7.0.168",
     "class-variance-authority": "^0.7.1",

@@ -19,6 +19,7 @@ import type {
 } from "@assistant-ui/react"
 
 import { DelimitedTable, JsonTree } from "@/components/assistant-ui/data-previews"
+import { HtmlPreviewFrame } from "@/components/assistant-ui/html-preview-frame"
 import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
@@ -428,12 +429,8 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
       {showPreview && previewLanguage && textSource.source === fileURL && (
         <div className="border-t">
           {previewLanguage === "html" ? (
-            <iframe
-              className="h-96 w-full bg-white"
-              referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-modals"
+            <HtmlPreviewFrame
               srcDoc={buildPreviewDocument(textSource.text, "html")}
-              title={t("Preview")}
             />
           ) : (
             <div className="p-3">

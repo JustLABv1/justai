@@ -8,28 +8,46 @@ import {
   type ReactNode,
   isValidElement,
   useEffect,
+  useMemo,
   useState,
 } from "react"
+import { useAui } from "@assistant-ui/react"
 import {
   MarkdownTextPrimitive,
   type SyntaxHighlighterProps,
 } from "@assistant-ui/react-markdown"
+import { useTheme } from "next-themes"
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import "katex/dist/katex.min.css"
 
+import {
+  type CodeActions,
+  CodeActionsProvider,
+} from "@/components/assistant-ui/code-actions"
 import { CodeRunBlock } from "@/components/assistant-ui/code-run-block"
+import { CodeToolbar } from "@/components/assistant-ui/code-toolbar"
 import {
   DelimitedTable,
   JsonTree,
 } from "@/components/assistant-ui/data-previews"
+import { HtmlPreviewFrame } from "@/components/assistant-ui/html-preview-frame"
+import {
+  ChartPreview,
+  DiffPreview,
+  GraphvizPreview,
+} from "@/components/assistant-ui/visual-previews"
 import { api } from "@/lib/api"
 import {
   buildPreviewDocument,
+  fenceLanguage,
+  looksLikeHTML,
+  opensAsPreview,
   previewKind,
   previewLanguage,
+  resolvePreviewLanguage,
   runnerLanguage,
 } from "@/lib/code-preview"
 import { isGeneratedPDFURL } from "@/lib/file-result-logic"
@@ -134,11 +152,14 @@ function urlTransform(url: string) {
 /** Renders mermaid source to an <img>, so the SVG can never run scripts. */
 function MermaidPreview({ code }: { code: string }) {
   const { t } = useTranslations()
+  const { resolvedTheme } = useTheme()
+  const dark = resolvedTheme === "dark"
   const [result, setResult] = useState<{
-    code: string
+    key: string
     src?: string
     error?: string
-  }>({ code: "" })
+  }>({ key: "" })
+  const key = `${dark ? "dark" : "light"}:${code}`
 
   useEffect(() => {
     let active = true
@@ -149,13 +170,13 @@ function MermaidPreview({ code }: { code: string }) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: "neutral",
+          theme: dark ? "dark" : "neutral",
           flowchart: { htmlLabels: false },
         })
         const { svg } = await mermaid.render(id, code)
         if (active) {
           setResult({
-            code,
+            key,
             src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
           })
         }
@@ -164,7 +185,7 @@ function MermaidPreview({ code }: { code: string }) {
         document.getElementById(`d${id}`)?.remove()
         if (active) {
           setResult({
-            code,
+            key,
             error: caught instanceof Error ? caught.message : String(caught),
           })
         }
@@ -173,9 +194,9 @@ function MermaidPreview({ code }: { code: string }) {
     return () => {
       active = false
     }
-  }, [code])
+  }, [code, dark, key])
 
-  if (result.code !== code) {
+  if (result.key !== key) {
     return (
       <p className="rounded-xl bg-muted/50 p-3 text-muted-foreground" role="status">
         {t("Loading…")}
@@ -193,13 +214,16 @@ function MermaidPreview({ code }: { code: string }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img
       alt={t("Diagram")}
-      className="max-h-[32rem] w-full rounded-xl bg-white p-3"
+      className={cn(
+        "max-h-[32rem] w-full rounded-xl p-3",
+        dark ? "bg-muted/30" : "bg-white"
+      )}
       src={result.src}
     />
   )
 }
 
-/** Code/Preview switch for HTML, SVG, Mermaid and Markdown code blocks. */
+/** Code/Preview switch for every block type that has a rendered form. */
 function CodePreviewBlock({
   code,
   language,
@@ -211,7 +235,7 @@ function CodePreviewBlock({
 }) {
   const { t } = useTranslations()
   const kind = previewKind(language)
-  const [showPreview, setShowPreview] = useState(kind === "mermaid")
+  const [showPreview, setShowPreview] = useState(opensAsPreview(kind))
   const tabClass = (active: boolean) =>
     cn(
       "rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
@@ -225,6 +249,12 @@ function CodePreviewBlock({
       {showPreview ? (
         kind === "mermaid" ? (
           <MermaidPreview code={code} />
+        ) : kind === "graphviz" ? (
+          <GraphvizPreview code={code} />
+        ) : kind === "chart" ? (
+          <ChartPreview code={code} />
+        ) : kind === "diff" ? (
+          <DiffPreview code={code} />
         ) : kind === "json" ? (
           <JsonTree code={code} />
         ) : kind === "table" ? (
@@ -234,13 +264,7 @@ function CodePreviewBlock({
             <StaticAssistantMarkdown content={code} />
           </div>
         ) : (
-          <iframe
-            className="h-96 w-full rounded-xl bg-white"
-            referrerPolicy="no-referrer"
-            sandbox="allow-scripts allow-modals"
-            srcDoc={buildPreviewDocument(code, language)}
-            title={t("Preview")}
-          />
+          <HtmlPreviewFrame srcDoc={buildPreviewDocument(code, language)} />
         )
       ) : (
         codeView
@@ -288,28 +312,25 @@ function MarkdownPre({ node: _node, children, ...props }: MarkdownPreProps) {
   )
     ? children
     : null
-  const className = codeElement?.props.className
-  const language = previewLanguage(className)
+  if (!codeElement) return <pre {...props}>{children}</pre>
+
+  const className = codeElement.props.className
+  const code = textOf(codeElement.props.children)
+  const language = resolvePreviewLanguage(className, code)
   const runLanguage = runnerLanguage(className)
-  if (!codeElement || (!language && !runLanguage)) {
-    return <pre {...props}>{children}</pre>
-  }
-  if (runLanguage) {
-    return (
-      <CodeRunBlock
-        code={textOf(codeElement.props.children)}
-        codeView={<pre {...props}>{children}</pre>}
-        language={runLanguage}
-      />
-    )
-  }
-  if (!language) return <pre {...props}>{children}</pre>
+  const codeView = <pre {...props}>{children}</pre>
+
   return (
-    <CodePreviewBlock
-      code={textOf(codeElement.props.children)}
-      codeView={<pre {...props}>{children}</pre>}
-      language={language}
-    />
+    <>
+      <CodeToolbar code={code} language={fenceLanguage(className)} />
+      {runLanguage ? (
+        <CodeRunBlock code={code} codeView={codeView} language={runLanguage} />
+      ) : language ? (
+        <CodePreviewBlock code={code} codeView={codeView} language={language} />
+      ) : (
+        codeView
+      )}
+    </>
   )
 }
 
@@ -355,22 +376,66 @@ function RunnableSyntaxHighlighter({
   )
 }
 
+/** Blocks without a language tag: only full HTML documents get a preview. */
+function UntaggedSyntaxHighlighter({
+  code,
+  components: { Pre, Code },
+}: SyntaxHighlighterProps) {
+  const codeView = (
+    <Pre>
+      <Code>{code}</Code>
+    </Pre>
+  )
+  return looksLikeHTML(code) ? (
+    <CodePreviewBlock code={code} codeView={codeView} language="html" />
+  ) : (
+    codeView
+  )
+}
+
+/** Language label plus Copy/Save, shown above every fenced code block. */
+function CodeToolbarHeader({
+  language,
+  code,
+}: {
+  language?: string | undefined
+  code: string
+}) {
+  return <CodeToolbar code={code} language={language} />
+}
+
+const preview = { SyntaxHighlighter: PreviewSyntaxHighlighter }
+const runnable = { SyntaxHighlighter: RunnableSyntaxHighlighter }
+
 const componentsByLanguage = {
-  html: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  htm: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  svg: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  mermaid: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  markdown: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  md: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  json: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  csv: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  tsv: { SyntaxHighlighter: PreviewSyntaxHighlighter },
-  javascript: { SyntaxHighlighter: RunnableSyntaxHighlighter },
-  js: { SyntaxHighlighter: RunnableSyntaxHighlighter },
-  mjs: { SyntaxHighlighter: RunnableSyntaxHighlighter },
-  python: { SyntaxHighlighter: RunnableSyntaxHighlighter },
-  python3: { SyntaxHighlighter: RunnableSyntaxHighlighter },
-  py: { SyntaxHighlighter: RunnableSyntaxHighlighter },
+  "": { SyntaxHighlighter: UntaggedSyntaxHighlighter },
+  html: preview,
+  htm: preview,
+  svg: preview,
+  jsx: preview,
+  tsx: preview,
+  mermaid: preview,
+  dot: preview,
+  graphviz: preview,
+  gv: preview,
+  markdown: preview,
+  md: preview,
+  json: preview,
+  csv: preview,
+  tsv: preview,
+  diff: preview,
+  patch: preview,
+  chart: preview,
+  javascript: runnable,
+  js: runnable,
+  mjs: runnable,
+  typescript: runnable,
+  ts: runnable,
+  python: runnable,
+  python3: runnable,
+  py: runnable,
+  sql: runnable,
+  sqlite: runnable,
 }
 
 type MarkdownPlugins = Pick<
@@ -390,20 +455,37 @@ const prepareMarkdown = (text: string) =>
   normalizeMath(replaceInlineMathSymbols(text))
 
 const markdownComponents = { a: MarkdownLink, img: MarkdownImage }
+const assistantComponents = {
+  ...markdownComponents,
+  CodeHeader: CodeToolbarHeader,
+}
 // Only the static renderer needs the `pre` override; assistant-ui uses its own
 // per-language SyntaxHighlighter slot and would otherwise wrap the block twice.
 const staticMarkdownComponents = { ...markdownComponents, pre: MarkdownPre }
 
 export function AssistantMarkdown({ className }: AssistantMarkdownProps = {}) {
+  const aui = useAui()
+  const actions = useMemo<CodeActions>(
+    () => ({
+      sendMessage: (text) => {
+        const composer = aui.thread.composer()
+        composer.setText(text)
+        composer.send()
+      },
+    }),
+    [aui]
+  )
   return (
-    <MarkdownTextPrimitive
-      components={markdownComponents}
-      componentsByLanguage={componentsByLanguage}
-      preprocess={prepareMarkdown}
-      urlTransform={urlTransform}
-      {...markdownPlugins}
-      className={cn(markdownClassName, className)}
-    />
+    <CodeActionsProvider value={actions}>
+      <MarkdownTextPrimitive
+        components={assistantComponents}
+        componentsByLanguage={componentsByLanguage}
+        preprocess={prepareMarkdown}
+        urlTransform={urlTransform}
+        {...markdownPlugins}
+        className={cn(markdownClassName, className)}
+      />
+    </CodeActionsProvider>
   )
 }
 
