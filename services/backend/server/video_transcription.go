@@ -670,6 +670,9 @@ func (m *TranscriptionManager) skipVideoPolish(ctx context.Context, uploadID uui
 	if _, err := tx.ExecContext(ctx, `UPDATE transcription_sessions SET grammar_endpoint_id = NULL, polish_status = 'not_requested', updated_at = now() WHERE id = $1`, sessionID); err != nil {
 		return models.TranscriptionVideoUpload{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
 	steps := decodeVideoPipeline(pipelineRaw)
 	if len(steps) == 0 {
 		steps = initialVideoPipeline(time.Now().UTC())

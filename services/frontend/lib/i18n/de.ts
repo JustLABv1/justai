@@ -1,5 +1,6 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Confidence unavailable": "Konfidenz nicht verfügbar",
   "Delete transcription?": "Transkription löschen?",
   "The selected transcriptions and their recordings will be permanently deleted.":
     "Die ausgewählten Transkriptionen und ihre Aufnahmen werden dauerhaft gelöscht.",

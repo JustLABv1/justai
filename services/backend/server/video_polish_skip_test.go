@@ -45,6 +45,7 @@ func TestSkipVideoPolishDoesNotCancelBeforeCommit(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT session_id, status, stage, pipeline_steps").WithArgs(uploadID).WillReturnRows(sqlmock.NewRows([]string{"session_id", "status", "stage", "pipeline_steps"}).AddRow(sessionID, "processing", "polishing", []byte(`[]`)))
 	mock.ExpectExec("UPDATE transcription_sessions SET grammar_endpoint_id = NULL").WithArgs(sessionID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE transcription_segments SET polished_text = NULL").WithArgs(sessionID).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE transcription_video_uploads SET pipeline_steps").WithArgs(uploadID, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit().WillReturnError(context.DeadlineExceeded)
 	if _, err := manager.skipVideoPolish(context.Background(), uploadID); err == nil {
@@ -72,6 +73,7 @@ func TestSkipVideoPolishCommitsBeforeCancellingProvider(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT session_id, status, stage, pipeline_steps").WithArgs(uploadID).WillReturnRows(sqlmock.NewRows([]string{"session_id", "status", "stage", "pipeline_steps"}).AddRow(sessionID, "processing", "polishing", []byte(`[]`)))
 	mock.ExpectExec("UPDATE transcription_sessions SET grammar_endpoint_id = NULL").WithArgs(sessionID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE transcription_segments SET polished_text = NULL").WithArgs(sessionID).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE transcription_video_uploads SET pipeline_steps").WithArgs(uploadID, videoPipelineStatusMatcher{"grammar": "skipped"}).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	now := time.Now().UTC()
