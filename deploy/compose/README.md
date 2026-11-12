@@ -102,6 +102,30 @@ podman machine set --memory 8192
 podman machine start
 ```
 
+## Code execution for chats (`run_code`)
+
+With the code runner enabled, the assistant can run Python itself: it writes a
+program, runs it, reads the output (and any chart or file) and continues from the
+real result. The chat shows the code, its output, charts and downloadable files.
+
+The runner executes code that a language model wrote, so it is optional and
+**off by default**. It runs as its own service under the `code-runner` profile
+with no database access, no network (internal-only Compose network), a
+read-only root file system, dropped capabilities and hard CPU, memory, process,
+file and time limits. Read `services/code-runner/README.md` for the isolation
+model and its limits before enabling it.
+
+```sh
+# In .env:
+#   JUSTAI_CODE_RUNNER_URL=http://code-runner:8090
+#   CODE_RUNNER_TOKEN=<random string of 16 or more characters>
+docker compose --profile code-runner up -d --build code-runner backend
+```
+
+The backend only offers the `run_code` tool when `JUSTAI_CODE_RUNNER_URL` is set.
+Python 3.13 with pandas, numpy and matplotlib is included; each program runs for
+at most 60 seconds. Removing the variable turns the tool off again.
+
 ## Metrics
 
 - `/metrics` exposes worker health and realtime-stream counters (no usage data).

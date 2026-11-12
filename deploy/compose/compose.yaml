@@ -22,6 +22,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - default
+      - code-runner
     ports:
       - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8080}:8080"
     environment:
@@ -51,6 +54,9 @@ services:
       JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES: ${JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES:-}
       JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS: ${JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS:-}
       JUSTAI_TRANSCRIPTION_LIVE_STREAM_RECONNECT_SECONDS: ${JUSTAI_TRANSCRIPTION_LIVE_STREAM_RECONNECT_SECONDS:-}
+      # Leave empty to keep the run_code chat tool off (see the code-runner service).
+      JUSTAI_CODE_RUNNER_URL: ${JUSTAI_CODE_RUNNER_URL:-}
+      JUSTAI_CODE_RUNNER_TOKEN: ${CODE_RUNNER_TOKEN:-}
     volumes:
       - ./backend.config.yaml:/etc/justai/config.yaml:ro
       - uploads-data:/app/data
@@ -72,6 +78,51 @@ services:
       HF_HOME: /tmp/huggingface
     volumes:
       - pyannote-hf-cache:/tmp
+
+  # Runs Python that the model writes for the run_code chat tool. It executes
+  # untrusted code, so keep every setting below: no network (internal network
+  # only), read-only root, dropped capabilities and hard resource limits.
+  # Enable with --profile code-runner and set JUSTAI_CODE_RUNNER_URL and
+  # CODE_RUNNER_TOKEN in .env. See services/code-runner/README.md.
+  code-runner:
+    profiles: ["code-runner"]
+    build:
+      context: ../../services/code-runner
+    restart: unless-stopped
+    networks:
+      - code-runner
+    environment:
+      CODE_RUNNER_TOKEN: ${CODE_RUNNER_TOKEN:-}
+      CODE_RUNNER_MAX_CONCURRENT: ${CODE_RUNNER_MAX_CONCURRENT:-2}
+    read_only: true
+    tmpfs:
+      - /work:size=512m,mode=0755
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - KILL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 3g
+    cpus: 2
+    # Optional stronger isolation when gVisor is installed on the host:
+    # runtime: runsc
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -I
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=2).status == 200 else 1)"
+      interval: 15s
+      timeout: 3s
+      retries: 3
 
   frontend:
     image: ${JUSTAI_IMAGE_REPOSITORY:-ghcr.io/justlabv1/justai}:frontend-${JUSTAI_VERSION:-latest}
@@ -98,6 +149,12 @@ services:
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
     volumes:
       - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+networks:
+  default: {}
+  # No route to the outside: the code-runner can only be reached by the backend.
+  code-runner:
+    internal: true
 
 volumes:
   postgres-data:

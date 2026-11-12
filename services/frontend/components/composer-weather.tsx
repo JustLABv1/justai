@@ -2,7 +2,12 @@
 
 import { createPortal } from "react-dom"
 import { ComposerFrost } from "@/components/composer-frost"
-import { advanceSeasonalFrost, seasonalWindImpulse } from "@/lib/season-play"
+import {
+  advanceSeasonalFrost,
+  pointerAboveRim,
+  rimIntentReached,
+  seasonalWindImpulse,
+} from "@/lib/season-play"
 import {
   useCallback,
   useEffect,
@@ -117,6 +122,7 @@ export function ComposerWeather() {
     let frostPublished = 0
     let thawUntil = 0
     let lastWriting = performance.now()
+    let rimSince = 0
     const writing = (event: Event) => {
       const target = event.target
       if (
@@ -374,11 +380,19 @@ export function ComposerWeather() {
       const left = bounds.left - origin.left + 24
       const right = bounds.right - origin.left - 24
       const pointer = interaction.current
-      const nearRim =
+      // The blower is a deliberate gesture: resting just above the rim, never
+      // moving into the field or typing in it.
+      const typing = composer.contains(document.activeElement)
+      if (
         pointer.pointerInside &&
-        pointer.pointerX >= left - 40 &&
-        pointer.pointerX <= right + 40 &&
-        Math.abs(pointer.pointerY - edge) < 95
+        !typing &&
+        pointerAboveRim(pointer.pointerX, pointer.pointerY, left, right, edge)
+      ) {
+        if (rimSince === 0) rimSince = now
+      } else {
+        rimSince = 0
+      }
+      const nearRim = rimIntentReached(now, rimSince)
       const deposits = particles.some((particle) => particle.landedAt > 0)
       if (season === "autumn" && nearRim && deposits)
         pointer.gustUntil = now + 1200

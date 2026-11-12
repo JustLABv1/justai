@@ -35,3 +35,30 @@ export function advanceSeasonalFrost(
     Math.min(1, progress + Math.max(-step, Math.min(step, target - progress)))
   )
 }
+
+/** How long the pointer must rest above the rim before the blower comes out. */
+export const rimDwellMs = 350
+
+/**
+ * The strip just above the composer's top edge, where the pointer lingers when
+ * it means to play with the leaves. It stops at the edge: moving into the
+ * input to type must never summon the blower.
+ */
+export function pointerAboveRim(
+  x: number,
+  y: number,
+  left: number,
+  right: number,
+  edge: number
+) {
+  return x >= left - 40 && x <= right + 40 && y > edge - 80 && y < edge + 6
+}
+
+/** True once the pointer has rested above the rim for the dwell time. */
+export function rimIntentReached(
+  now: number,
+  restingSince: number,
+  dwell = rimDwellMs
+) {
+  return restingSince > 0 && now - restingSince >= dwell
+}

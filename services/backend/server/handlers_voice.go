@@ -34,6 +34,27 @@ type voiceSessionStartData struct {
 	EndpointID              string `json:"endpointId"`
 	TranscriptionEndpointID string `json:"transcriptionEndpointId"`
 	Language                string `json:"language"`
+	// Dictation only transcribes: every finished phrase is sent back to the
+	// client, which puts it into the message field. No chat turn is started and
+	// nothing is spoken, so the user decides when to send.
+	Dictation bool `json:"dictation"`
+}
+
+const (
+	// A spoken turn ends after this much silence. People pause to think in the
+	// middle of a sentence, so a conversation waits a little longer than a
+	// dictation, where a phrase that ends early is harmless (it is appended).
+	voiceConversationPause = 1500 * time.Millisecond
+	voiceDictationPause    = 1000 * time.Millisecond
+)
+
+// voiceEndOfTurnPause is how long the microphone must stay quiet before the
+// current phrase is committed for transcription.
+func voiceEndOfTurnPause(dictation bool) time.Duration {
+	if dictation {
+		return voiceDictationPause
+	}
+	return voiceConversationPause
 }
 
 type voiceApprovalData struct {
@@ -87,6 +108,7 @@ type voiceState struct {
 	transcriptionDone       chan struct{}
 	voiceActive             bool
 	lastVoiceAt             time.Time
+	dictation               bool
 }
 
 func (a *App) voiceSSE(c *gin.Context) {
@@ -182,7 +204,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection realtimeConnection,
 				state.voiceActive = true
 				state.lastVoiceAt = time.Now()
 			} else {
-				if state.voiceActive && time.Since(state.lastVoiceAt) > 650*time.Millisecond {
+				if state.voiceActive && time.Since(state.lastVoiceAt) > voiceEndOfTurnPause(state.dictation) {
 					state.voiceActive = false
 					if committer, ok := state.transcription.(provider.TurnCommitter); ok {
 						if err := committer.CommitTurn(); err != nil && ctx.Err() == nil {
@@ -305,6 +327,7 @@ func (a *App) startVoiceSession(ctx context.Context, connection realtimeConnecti
 	state.endpointID = endpointID
 	state.transcriptionEndpointID = transcriptionEndpointID
 	state.language = language
+	state.dictation = data.Dictation
 	state.transcription = stream
 	state.transcriptionDone = make(chan struct{})
 	go a.readVoiceTranscription(ctx, connection, state, userID, organizationID, stream)
@@ -313,6 +336,7 @@ func (a *App) startVoiceSession(ctx context.Context, connection realtimeConnecti
 		"endpointId":              endpointID,
 		"transcriptionEndpointId": transcriptionEndpointID,
 		"mode":                    mode,
+		"dictation":               data.Dictation,
 		"toolCalling":             provider.SupportsToolCalling(chatEndpoint),
 		"tts":                     endpointSupports(chatEndpoint, "tts"),
 	}})
@@ -337,7 +361,11 @@ func (a *App) readVoiceTranscription(ctx context.Context, connection realtimeCon
 			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "input.transcript.partial", Data: gin.H{"text": text}})
 		case "final":
 			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "input.transcript.final", Data: gin.H{"text": text}})
-			a.queueVoiceTurn(ctx, connection, state, userID, organizationID, text)
+			// Dictation hands the text to the message field instead of asking
+			// the assistant to answer it.
+			if !state.dictation {
+				a.queueVoiceTurn(ctx, connection, state, userID, organizationID, text)
+			}
 		}
 	}
 }

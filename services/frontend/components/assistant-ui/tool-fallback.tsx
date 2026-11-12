@@ -18,8 +18,12 @@ import type {
   ToolCallMessagePartProps,
 } from "@assistant-ui/react"
 
+import { DelimitedTable, JsonTree } from "@/components/assistant-ui/data-previews"
+import { HtmlPreviewFrame } from "@/components/assistant-ui/html-preview-frame"
+import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
+import { buildPreviewDocument, filePreviewLanguage } from "@/lib/code-preview"
 import {
   formatFileSize,
   hasFileResultShape,
@@ -61,6 +65,8 @@ function toolLabel(toolName: string) {
       return "Read attachment"
     case "create_file":
       return "Create file"
+    case "run_code":
+      return "Run code"
     default:
       return toolName
   }
@@ -294,6 +300,11 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
   const [preview, setPreview] = useState({ source: "", url: "" })
   const [loadError, setLoadError] = useState({ source: "", message: "" })
   const previewRef = useRef("")
+  const [textSource, setTextSource] = useState({ source: "", text: "" })
+  const [showPreview, setShowPreview] = useState(false)
+  const previewLanguage = file
+    ? filePreviewLanguage(file.mimeType, file.filename)
+    : null
 
   useEffect(() => {
     let active = true
@@ -314,6 +325,11 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         }
         previewRef.current = nextURL
         setPreview({ source: fileURL, url: nextURL })
+        if (previewLanguage && blob.size <= 2 * 1024 * 1024) {
+          void blob.text().then((text) => {
+            if (active) setTextSource({ source: fileURL, text })
+          })
+        }
       })
       .catch((caught) => {
         if (active) {
@@ -331,7 +347,7 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
       active = false
       controller.abort()
     }
-  }, [fileURL])
+  }, [fileURL, previewLanguage])
 
   useEffect(() => {
     return () => {
@@ -412,9 +428,41 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
           </p>
         </div>
       </div>
+      {showPreview && previewLanguage && textSource.source === fileURL && (
+        <div className="border-t">
+          {previewLanguage === "html" ? (
+            <HtmlPreviewFrame
+              srcDoc={buildPreviewDocument(textSource.text, "html")}
+            />
+          ) : (
+            <div className="p-3">
+              {previewLanguage === "json" ? (
+                <JsonTree code={textSource.text} />
+              ) : previewLanguage === "md" ? (
+                <StaticAssistantMarkdown content={textSource.text} />
+              ) : (
+                <DelimitedTable
+                  code={textSource.text}
+                  language={previewLanguage}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
         <span className="text-muted-foreground">{t("Generated file")}</span>
         <div className="flex flex-wrap items-center gap-1.5">
+          {previewLanguage && textSource.source === fileURL && (
+            <button
+              aria-pressed={showPreview}
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+              onClick={() => setShowPreview((value) => !value)}
+              type="button"
+            >
+              {showPreview ? t("Hide preview") : t("Preview")}
+            </button>
+          )}
           {canOpen && (
             <a
               aria-label={t("Open {value0} in a new tab", {

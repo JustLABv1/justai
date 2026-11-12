@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/binary"
 	"regexp"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"justai-backend/mcp"
+	"justai-backend/models"
 	"justai-backend/provider"
 )
 
@@ -171,5 +175,67 @@ func TestMCPToolsAfterRefreshKeepsStaleSnapshotOnEmptySuccess(t *testing.T) {
 	tools, usingStale = mcpToolsAfterRefresh(stale, fresh)
 	if usingStale || len(tools) != 1 || tools[0].Name != "List Scans" {
 		t.Fatalf("expected a non-empty refresh to replace the snapshot, got %+v (usingStale=%v)", tools, usingStale)
+	}
+}
+
+func TestVoiceEndOfTurnPauseIsLongerForConversationsThanForTheOldCutoff(t *testing.T) {
+	// 650 ms cut people off while they were still thinking mid-sentence.
+	if voiceEndOfTurnPause(false) < 1200*time.Millisecond {
+		t.Fatalf("conversation pause %v is short enough to split sentences", voiceEndOfTurnPause(false))
+	}
+	if voiceEndOfTurnPause(true) >= voiceEndOfTurnPause(false) {
+		t.Fatal("dictation can commit phrases sooner because they are appended, not sent")
+	}
+}
+
+type recordingVoiceConnection struct {
+	realtimeConnection
+	mu     sync.Mutex
+	events []models.SocketEnvelope
+}
+
+func (c *recordingVoiceConnection) WriteJSON(value any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if envelope, ok := value.(models.SocketEnvelope); ok {
+		c.events = append(c.events, envelope)
+	}
+	return nil
+}
+
+type scriptedTranscription struct{ events chan provider.RealtimeEvent }
+
+func (s *scriptedTranscription) SendPCM(context.Context, []byte, int) error { return nil }
+func (s *scriptedTranscription) Commit() error                              { return nil }
+func (s *scriptedTranscription) Events() <-chan provider.RealtimeEvent      { return s.events }
+func (s *scriptedTranscription) Close()                                     {}
+
+func TestDictationReturnsTranscriptsWithoutStartingAChatTurn(t *testing.T) {
+	stream := &scriptedTranscription{events: make(chan provider.RealtimeEvent, 3)}
+	stream.events <- provider.RealtimeEvent{Kind: "partial", Text: "stelle mir mal"}
+	stream.events <- provider.RealtimeEvent{Kind: "final", Text: "Stelle mir mal bitte eine Basic HTML Seite"}
+	close(stream.events)
+
+	connection := &recordingVoiceConnection{}
+	// A nil database would panic if a chat turn were started.
+	state := &voiceState{dictation: true, transcriptionDone: make(chan struct{})}
+	(&App{}).readVoiceTranscription(t.Context(), connection, state, uuid.New(), uuid.New(), stream)
+
+	var kinds []string
+	var final string
+	for _, event := range connection.events {
+		kinds = append(kinds, event.Type)
+		if event.Type == "input.transcript.final" {
+			final = event.Data.(gin.H)["text"].(string)
+		}
+	}
+	if len(kinds) != 2 || kinds[0] != "input.transcript.partial" || kinds[1] != "input.transcript.final" {
+		t.Fatalf("expected partial and final transcript only, got %v", kinds)
+	}
+	if final != "Stelle mir mal bitte eine Basic HTML Seite" {
+		t.Fatalf("unexpected final transcript %q", final)
+	}
+	if state.cancelTurn != nil {
+		t.Fatal("dictation must not start an assistant turn")
 	}
 }

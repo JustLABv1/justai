@@ -250,6 +250,85 @@ pyannote:
     timeoutSeconds: 5
     failureThreshold: 3
 
+# Runs Python that the model writes for the run_code chat tool and hands the
+# output back so the assistant can continue from real results. It executes
+# untrusted code, so it is disabled by default and isolated hard: its own
+# Deployment without Kubernetes API credentials, a NetworkPolicy that allows
+# only the JustAI backend in and nothing out, a read-only root file system, a
+# size-limited scratch volume and fixed resource limits. Each run additionally
+# gets its own unprivileged user inside the container.
+#
+# The runner has to start as root to switch users per run, with every capability
+# dropped except those below. That is allowed by the Pod Security "baseline"
+# standard but not by "restricted": run it in a namespace that enforces
+# baseline or lower. Read services/code-runner/README.md before enabling it.
+codeRunner:
+  enabled: false
+  image:
+    repository: ghcr.io/justlabv1/justai
+    pullPolicy: IfNotPresent
+    # Release workflows publish code-runner images with this tag convention.
+    # Empty follows code-runner-<chart appVersion>.
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8090
+  replicaCount: 1
+  # Programs that run in parallel per replica. Size resources accordingly.
+  maxConcurrent: 2
+  # Address-space and process limits per run.
+  memoryMb: 2048
+  maxProcesses: 64
+  # Optional extra sandbox such as gVisor ("gvisor") when the cluster provides
+  # a RuntimeClass for it. Strongly recommended for multi-tenant clusters.
+  runtimeClassName: ""
+  # Only the backend may connect and the runner may not connect anywhere. This
+  # needs a CNI that enforces NetworkPolicy; keep it enabled.
+  networkPolicy:
+    enabled: true
+  # Scratch space for runs; cleaned after every run. Memory-backed volumes count
+  # against the memory limit below.
+  workVolume:
+    medium: Memory
+    sizeLimit: 512Mi
+  podAnnotations: {}
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETUID
+        - SETGID
+        - KILL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  resources:
+    limits:
+      cpu: 2
+      memory: 3Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  livenessProbe:
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
 ingress:
   enabled: true
   className: ""
@@ -346,6 +425,7 @@ secrets:
     pyannoteHfToken: ""
     pyannoteServiceToken: ""
     streamRelayToken: ""
+    codeRunnerToken: ""
     metricsToken: ""
     backendHttpProxy: ""
     backendHttpsProxy: ""
@@ -392,6 +472,9 @@ secrets:
     streamRelayToken:
       name: ""
       key: stream-relay-token
+    codeRunnerToken:
+      name: ""
+      key: code-runner-token
     backendHttpProxy:
       name: ""
       key: backend-http-proxy

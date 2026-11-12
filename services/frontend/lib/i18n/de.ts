@@ -608,6 +608,42 @@ export const de = {
   "Previous branch": "Vorherige Variante",
   "Next branch": "Nächste Variante",
   Copied: "Kopiert",
+  Preview: "Vorschau",
+  "Hide preview": "Vorschau ausblenden",
+  "No output": "Keine Ausgabe",
+  "Loading Python…": "Python wird geladen…",
+  "Runs in an isolated sandbox in your browser.":
+    "Läuft in einer isolierten Sandbox in deinem Browser.",
+  "The code ran for too long and was stopped.":
+    "Der Code lief zu lange und wurde gestoppt.",
+  "This is not valid JSON.": "Das ist kein gültiges JSON.",
+  "No rows to show.": "Keine Zeilen vorhanden.",
+  Fullscreen: "Vollbild",
+  "Reset session": "Sitzung zurücksetzen",
+  "Fix error": "Fehler beheben",
+  Dictate: "Diktieren",
+  "Stop dictation": "Diktieren beenden",
+  "Show all {value0} lines": "Alle {value0} Zeilen anzeigen",
+  "Show less": "Weniger anzeigen",
+  "Run code": "Code ausführen",
+  "Running code": "Code wird ausgeführt",
+  "Finished in {value0} s": "Fertig in {value0} s",
+  "Exit code {value0}": "Exit-Code {value0}",
+  "The output was shortened.": "Die Ausgabe wurde gekürzt.",
+  "Error:": "Fehler:",
+  "The following {value0} code failed with an error when run. Please fix it and show the corrected code.":
+    "Der folgende {value0}-Code hat beim Ausführen einen Fehler verursacht. Bitte korrigiere ihn und zeige den korrigierten Code.",
+  "This chart definition is not valid.":
+    "Diese Diagramm-Definition ist ungültig.",
+  "Inputs for input() (one line per call)":
+    "Eingaben für input() (eine Zeile pro Aufruf)",
+  "e.g. 1\n-3\n2": "z. B. 1\n-3\n2",
+  "The program asked for more input than provided. Add one line per input() call above.":
+    "Das Programm hat mehr Eingaben verlangt als angegeben. Trage oben pro input()-Aufruf eine Zeile ein.",
+  Diagram: "Diagramm",
+  "The diagram could not be rendered.":
+    "Das Diagramm konnte nicht dargestellt werden.",
+  Code: "Code",
   "Copy message": "Nachricht kopieren",
   "Edit message": "Nachricht bearbeiten",
   "Regenerate response": "Antwort neu generieren",
