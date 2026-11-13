@@ -14,7 +14,7 @@ importers:
   .:
     dependencies:
       '@ai-sdk/react':
-        specifier: ^4.0.172
+        specifier: ^4.0.173
         version: 4.0.174(react@19.3.1)(zod@4.6.7)
       '@assistant-ui/react':
         specifier: ^0.15.34
@@ -65,7 +65,7 @@ importers:
         specifier: ^12.12.1
         version: 12.12.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       ai:
-        specifier: ^7.0.168
+        specifier: ^7.0.169
         version: 7.0.170(zod@4.6.7)
       class-variance-authority:
         specifier: ^0.7.1
@@ -89,7 +89,7 @@ importers:
         specifier: ^0.53.0
         version: 0.53.0(typescript@6.0.3)
       lucide-react:
-        specifier: ^1.71.0
+        specifier: ^1.72.0
         version: 1.72.0(@types/react@19.3.0)(react@19.3.1)
       mermaid:
         specifier: ^12.3.0
