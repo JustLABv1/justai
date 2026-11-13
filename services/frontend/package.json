@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/react": "^4.0.172",
+    "@ai-sdk/react": "^4.0.173",
     "@assistant-ui/react": "^0.15.34",
     "@assistant-ui/react-ai-sdk": "^1.4.23",
     "@assistant-ui/react-lexical": "^0.2.21",
@@ -32,7 +32,7 @@
     "@tanstack/charts": "^1.5.0",
     "@viz-js/viz": "^3.31.0",
     "@xyflow/react": "^12.12.1",
-    "ai": "^7.0.168",
+    "ai": "^7.0.169",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.5.2",
@@ -40,7 +40,7 @@
     "img-fx": "^0.5.1",
     "katex": "^0.19.1",
     "lexical": "^0.53.0",
-    "lucide-react": "^1.71.0",
+    "lucide-react": "^1.72.0",
     "mermaid": "^12.3.0",
     "motion": "^14.12.0",
     "next": "16.4.6",
