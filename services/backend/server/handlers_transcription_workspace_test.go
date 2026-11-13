@@ -263,7 +263,7 @@ func TestTranscriptInsightExportFormatting(t *testing.T) {
 		t.Fatalf("markdown export does not contain insights: %s", markdown)
 	}
 	pdf := buildTranscriptPDF("Sitzung 02", rows, insights)
-	if !bytes.Contains(pdf, []byte("AI insights")) {
+	if !bytes.Contains(pdf, []byte("AI INSIGHTS")) {
 		t.Fatal("PDF export does not contain the insights section")
 	}
 	if path := os.Getenv("JUSTAI_TRANSCRIPT_PDF_INSIGHTS_VERIFY_PATH"); path != "" {
@@ -458,7 +458,7 @@ func TestTranscriptPDFCompactInsightsHeader(t *testing.T) {
 			var heading, language, content transcriptPDFTextLine
 			for _, line := range pages[0].Lines {
 				switch line.Text {
-				case "KI-Erkenntnisse":
+				case "KI-ERKENNTNISSE":
 					heading = line
 				case "Sprache: Deutsch":
 					language = line
