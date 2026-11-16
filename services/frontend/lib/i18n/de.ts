@@ -1,7 +1,8 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
   "Esc to thaw": "Esc zum Auftauen",
-  "Crack the ice · {value0} taps left": "Eis aufbrechen · noch {value0} Mal tippen",
+  "Crack the ice · {value0} taps left":
+    "Eis aufbrechen · noch {value0} Mal tippen",
   "Tap to crack the ice": "Tippe, um das Eis aufzubrechen",
   "{value0} taps left": "Noch {value0} Mal tippen",
   Suggestion: "Vorschlag",
@@ -14,28 +15,44 @@ export const de = {
   "Speaker result pages": "Seiten der Sprecherergebnisse",
   "Full frame": "Vollbild",
   "Sharper crop": "Schärferer Ausschnitt",
-  "Crop": "Ausschnitt",
+  Crop: "Ausschnitt",
   "Search the video": "Video durchsuchen",
   "Read name here": "Namen hier lesen",
-  "Read the caption at {value0}. The result is offered for review.": "Einblendung bei {value0} lesen. Das Ergebnis wird zur Prüfung vorgeschlagen.",
-  "Read printed speaker names across the video, with sharper crops and full-frame fallbacks. Manually named speakers stay unchanged.": "Eingeblendete Sprechernamen im Video lesen, bei Bedarf mit schärferen Ausschnitten und vollständigen Bildern. Manuell vergebene Namen bleiben unverändert.",
-  "The image budget includes nearby retries, sharper crops and full-frame fallbacks. Each analyzed image uses one model request.": "Das Bildbudget umfasst auch benachbarte Zeitpunkte, schärfere Ausschnitte und vollständige Bilder. Jedes analysierte Bild benötigt eine Modellanfrage.",
-  "A fixed budget including retries. Selected crops and full-frame fallbacks are sent to this endpoint.": "Ein festes Budget einschließlich weiterer Versuche. Ausgewählte Ausschnitte und bei Bedarf vollständige Bilder werden an diesen Endpunkt gesendet.",
-  "Selected crops and, when needed, full video frames are sent to the chosen endpoint. This reads printed names; it does not identify faces.": "Ausgewählte Ausschnitte und bei Bedarf vollständige Videobilder werden an den gewählten Endpunkt gesendet. Dabei werden eingeblendete Namen gelesen, keine Gesichter erkannt.",
-  "Confidence is an evidence score, not a calibrated probability. Repeated crops of one moment count as one observation.": "Die Konfidenz bewertet die Belege und ist keine kalibrierte Wahrscheinlichkeit. Mehrere Ausschnitte desselben Zeitpunkts zählen als eine Beobachtung.",
-  "Caption text was too uncertain to use. Try reading a clearer moment.": "Der eingeblendete Text war nicht sicher lesbar. Versuche einen deutlicheren Zeitpunkt.",
-  "The image contains conflicting names. Choose a moment showing one speaker name.": "Das Bild enthält widersprüchliche Namen. Wähle einen Zeitpunkt mit einem einzelnen Sprechernamen.",
-  "Images could not be read. Check the source video and vision endpoint.": "Die Bilder konnten nicht gelesen werden. Prüfe das Quellvideo und den Vision-Endpunkt.",
-  "No clear speaker turn was available for sampling.": "Es war kein eindeutig zugeordneter Redebeitrag für die Bildauswahl verfügbar.",
-  "The image budget was reached before this speaker was sampled. Increase the budget or read a specific moment.": "Das Bildbudget wurde erreicht, bevor dieser Sprecher geprüft werden konnte. Erhöhe das Budget oder lies einen bestimmten Zeitpunkt.",
-  "Speaker assignments changed during analysis. Run the search again.": "Die Sprecherzuordnung hat sich während der Analyse geändert. Starte die Suche erneut.",
-  "No readable speaker name caption was found in the sampled images. Try reading a moment where the name is visible.": "In den geprüften Bildern wurde kein lesbarer Sprechername gefunden. Versuche einen Zeitpunkt, an dem der Name sichtbar ist.",
+  "Read the caption at {value0}. The result is offered for review.":
+    "Einblendung bei {value0} lesen. Das Ergebnis wird zur Prüfung vorgeschlagen.",
+  "Read printed speaker names across the video, with sharper crops and full-frame fallbacks. Manually named speakers stay unchanged.":
+    "Eingeblendete Sprechernamen im Video lesen, bei Bedarf mit schärferen Ausschnitten und vollständigen Bildern. Manuell vergebene Namen bleiben unverändert.",
+  "The image budget includes nearby retries, sharper crops and full-frame fallbacks. Each analyzed image uses one model request.":
+    "Das Bildbudget umfasst auch benachbarte Zeitpunkte, schärfere Ausschnitte und vollständige Bilder. Jedes analysierte Bild benötigt eine Modellanfrage.",
+  "A fixed budget including retries. Selected crops and full-frame fallbacks are sent to this endpoint.":
+    "Ein festes Budget einschließlich weiterer Versuche. Ausgewählte Ausschnitte und bei Bedarf vollständige Bilder werden an diesen Endpunkt gesendet.",
+  "Selected crops and, when needed, full video frames are sent to the chosen endpoint. This reads printed names; it does not identify faces.":
+    "Ausgewählte Ausschnitte und bei Bedarf vollständige Videobilder werden an den gewählten Endpunkt gesendet. Dabei werden eingeblendete Namen gelesen, keine Gesichter erkannt.",
+  "Confidence is an evidence score, not a calibrated probability. Repeated crops of one moment count as one observation.":
+    "Die Konfidenz bewertet die Belege und ist keine kalibrierte Wahrscheinlichkeit. Mehrere Ausschnitte desselben Zeitpunkts zählen als eine Beobachtung.",
+  "Caption text was too uncertain to use. Try reading a clearer moment.":
+    "Der eingeblendete Text war nicht sicher lesbar. Versuche einen deutlicheren Zeitpunkt.",
+  "The image contains conflicting names. Choose a moment showing one speaker name.":
+    "Das Bild enthält widersprüchliche Namen. Wähle einen Zeitpunkt mit einem einzelnen Sprechernamen.",
+  "Images could not be read. Check the source video and vision endpoint.":
+    "Die Bilder konnten nicht gelesen werden. Prüfe das Quellvideo und den Vision-Endpunkt.",
+  "No clear speaker turn was available for sampling.":
+    "Es war kein eindeutig zugeordneter Redebeitrag für die Bildauswahl verfügbar.",
+  "The image budget was reached before this speaker was sampled. Increase the budget or read a specific moment.":
+    "Das Bildbudget wurde erreicht, bevor dieser Sprecher geprüft werden konnte. Erhöhe das Budget oder lies einen bestimmten Zeitpunkt.",
+  "Speaker assignments changed during analysis. Run the search again.":
+    "Die Sprecherzuordnung hat sich während der Analyse geändert. Starte die Suche erneut.",
+  "No readable speaker name caption was found in the sampled images. Try reading a moment where the name is visible.":
+    "In den geprüften Bildern wurde kein lesbarer Sprechername gefunden. Versuche einen Zeitpunkt, an dem der Name sichtbar ist.",
   "Full video frame": "Vollständiges Videobild",
   "Sharper speaker caption crop": "Schärferer Ausschnitt der Namenseinblendung",
   "Speaker caption crop": "Ausschnitt der Namenseinblendung",
-  "choose a position within a clear unnamed speaker turn": "Wähle einen Zeitpunkt innerhalb eines eindeutig zugeordneten Redebeitrags ohne manuell vergebenen Namen.",
-  "choose a position within a clear speaker turn": "Wähle einen Zeitpunkt innerhalb eines eindeutig zugeordneten Redebeitrags.",
-  "no unnamed speakers with a clear speech turn of at least two seconds are available": "Es gibt keine unbenannten Sprecher mit einem eindeutig zugeordneten Redebeitrag von mindestens zwei Sekunden.",
+  "choose a position within a clear unnamed speaker turn":
+    "Wähle einen Zeitpunkt innerhalb eines eindeutig zugeordneten Redebeitrags ohne manuell vergebenen Namen.",
+  "choose a position within a clear speaker turn":
+    "Wähle einen Zeitpunkt innerhalb eines eindeutig zugeordneten Redebeitrags.",
+  "no unnamed speakers with a clear speech turn of at least two seconds are available":
+    "Es gibt keine unbenannten Sprecher mit einem eindeutig zugeordneten Redebeitrag von mindestens zwei Sekunden.",
   "Confidence unavailable": "Konfidenz nicht verfügbar",
   "Delete transcription?": "Transkription löschen?",
   "The selected transcriptions and their recordings will be permanently deleted.":
@@ -48,29 +65,38 @@ export const de = {
     "Die Grammatikkorrektur konnte nicht übersprungen werden.",
   "Not found": "Nicht gefunden",
   "This page wandered off": "Diese Seite ist abgewandert",
-  "The address may be mistyped, or the page was moved or removed. Nothing here for you to fix.": "Die Adresse ist vielleicht falsch geschrieben, oder die Seite wurde verschoben oder entfernt. Du musst hier nichts beheben.",
+  "The address may be mistyped, or the page was moved or removed. Nothing here for you to fix.":
+    "Die Adresse ist vielleicht falsch geschrieben, oder die Seite wurde verschoben oder entfernt. Du musst hier nichts beheben.",
   "Backend unreachable": "Backend nicht erreichbar",
   "We can't reach JustAI right now": "JustAI ist gerade nicht erreichbar",
-  "The server isn't answering. It may be restarting or your connection dropped. Your work is safe, and we'll reconnect on our own.": "Der Server antwortet nicht. Möglicherweise startet er neu oder deine Verbindung ist abgebrochen. Deine Arbeit ist sicher, wir verbinden uns automatisch neu.",
+  "The server isn't answering. It may be restarting or your connection dropped. Your work is safe, and we'll reconnect on our own.":
+    "Der Server antwortet nicht. Möglicherweise startet er neu oder deine Verbindung ist abgebrochen. Deine Arbeit ist sicher, wir verbinden uns automatisch neu.",
   "Server error": "Serverfehler",
   "Something broke on our side": "Auf unserer Seite ist etwas schiefgelaufen",
-  "The server hit an unexpected problem while handling this. It isn't you. Try again in a moment.": "Der Server ist dabei auf ein unerwartetes Problem gestoßen. Das liegt nicht an dir. Versuche es gleich noch einmal.",
+  "The server hit an unexpected problem while handling this. It isn't you. Try again in a moment.":
+    "Der Server ist dabei auf ein unerwartetes Problem gestoßen. Das liegt nicht an dir. Versuche es gleich noch einmal.",
   "Signed out": "Abgemeldet",
   "Your session has ended": "Deine Sitzung ist abgelaufen",
-  "Sign in again to pick up where you left off.": "Melde dich erneut an, um dort weiterzumachen, wo du aufgehört hast.",
+  "Sign in again to pick up where you left off.":
+    "Melde dich erneut an, um dort weiterzumachen, wo du aufgehört hast.",
   "No access": "Kein Zugriff",
   "You don't have access to this": "Du hast darauf keinen Zugriff",
-  "Your account isn't allowed to open this page. Ask a workspace admin if you think it should be.": "Dein Konto darf diese Seite nicht öffnen. Frage eine Workspace-Administration, falls das nicht stimmt.",
+  "Your account isn't allowed to open this page. Ask a workspace admin if you think it should be.":
+    "Dein Konto darf diese Seite nicht öffnen. Frage eine Workspace-Administration, falls das nicht stimmt.",
   "Timed out": "Zeitüberschreitung",
   "That took too long": "Das hat zu lange gedauert",
-  "The request timed out before it finished. Please try again.": "Die Anfrage wurde nicht rechtzeitig abgeschlossen. Bitte versuche es erneut.",
+  "The request timed out before it finished. Please try again.":
+    "Die Anfrage wurde nicht rechtzeitig abgeschlossen. Bitte versuche es erneut.",
   "Slow down": "Etwas langsamer",
   "Too many requests": "Zu viele Anfragen",
-  "You're going faster than we can keep up. Wait a moment, then retry.": "Du bist schneller, als wir mitkommen. Warte einen Moment und versuche es dann erneut.",
+  "You're going faster than we can keep up. Wait a moment, then retry.":
+    "Du bist schneller, als wir mitkommen. Warte einen Moment und versuche es dann erneut.",
   "Request problem": "Problem mit der Anfrage",
-  "We couldn't complete that request": "Wir konnten die Anfrage nicht abschließen",
-  "Something about the request wasn't accepted. Go back and try again, or head home.": "Die Anfrage wurde nicht akzeptiert. Geh zurück und versuche es erneut oder zur Startseite.",
-  "Reconnected": "Wieder verbunden",
+  "We couldn't complete that request":
+    "Wir konnten die Anfrage nicht abschließen",
+  "Something about the request wasn't accepted. Go back and try again, or head home.":
+    "Die Anfrage wurde nicht akzeptiert. Geh zurück und versuche es erneut oder zur Startseite.",
+  Reconnected: "Wieder verbunden",
   "Checking connection…": "Verbindung wird geprüft …",
   "Retrying in {seconds}s": "Neuer Versuch in {seconds} s",
   "Back to workspace": "Zurück zum Workspace",
@@ -4390,9 +4416,10 @@ export const de = {
   "Bulk actions": "Sammelaktionen",
   "Not done": "Nicht erledigt",
   "Mark as done": "Als erledigt markieren",
-  "Reopen": "Wieder öffnen",
-  "The status could not be saved.": "Der Status konnte nicht gespeichert werden.",
-  "Reopened": "Wieder geöffnet",
+  Reopen: "Wieder öffnen",
+  "The status could not be saved.":
+    "Der Status konnte nicht gespeichert werden.",
+  Reopened: "Wieder geöffnet",
   "Uploaded by {value0}": "Hochgeladen von {value0}",
   "Text version": "Textfassung",
   "As spoken": "Wie gesprochen",
@@ -4792,4 +4819,65 @@ export const de = {
   "Your account": "Dein Konto",
   " and have {role} access to this workspace":
     " und hast als {role} Zugriff auf diesen Workspace",
+  "JustAI connects automatically at the selected local time, or when the broadcast goes live.":
+    "JustAI verbindet sich automatisch zur gewählten Ortszeit oder sobald die Sendung live geht.",
+  "Bundestag session": "Bundestagssitzung",
+  "Choose a session": "Sitzung wählen",
+  "No session – choose times manually": "Keine Sitzung – Zeiten manuell wählen",
+  "The session plan is published by the Bundestag. JustAI watches from shortly before the announced start until well after the announced end.":
+    "Der Sitzungsplan wird vom Bundestag veröffentlicht. JustAI beobachtet den Stream von kurz vor dem angekündigten Beginn bis deutlich nach dem angekündigten Ende.",
+  Start: "Start",
+  "At the exact time": "Zur genauen Uhrzeit",
+  "When the stream goes live": "Sobald der Stream live geht",
+  "JustAI listens from the start of the window and begins capturing as soon as it hears speech, so a changed broadcast plan does not matter. Music and silence are ignored.":
+    "JustAI hört ab Beginn des Zeitfensters zu und startet die Aufnahme, sobald Sprache zu hören ist. Ein geänderter Sendeplan spielt so keine Rolle. Musik und Stille werden ignoriert.",
+  "Capture starts at exactly this time, even if the broadcaster changed its plan.":
+    "Die Aufnahme startet genau zu dieser Zeit, auch wenn der Sender seinen Plan geändert hat.",
+  "Watching since": "Beobachtet seit",
+  "Watch from": "Beobachten ab",
+  "Watch until": "Beobachten bis",
+  "Stop after silence": "Nach Stille beenden",
+  "Only at the end of the window": "Nur am Ende des Zeitfensters",
+  "After {value0} minutes without speech": "Nach {value0} Minuten ohne Sprache",
+  "Ends the capture when the programme returns to music or silence, for example after a session. Breaks shorter than this keep the capture running.":
+    "Beendet die Aufnahme, wenn das Programm zu Musik oder Stille zurückkehrt, zum Beispiel nach einer Sitzung. Kürzere Pausen lassen die Aufnahme weiterlaufen.",
+  "Follow schedule changes": "Terminänderungen folgen",
+  "JustAI re-checks the published plan and moves the window if the session is rescheduled. If the session disappears from the plan you get a warning.":
+    "JustAI prüft den veröffentlichten Plan regelmäßig erneut und verschiebt das Zeitfenster, wenn die Sitzung verlegt wird. Verschwindet die Sitzung aus dem Plan, erhältst du eine Warnung.",
+  "If nothing is heard before the window ends you get a warning on the session. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard.":
+    "Wird vor Ende des Zeitfensters nichts gehört, erhältst du eine Warnung an der Sitzung. Kurze Verbindungsabbrüche werden 15 Minuten lang erneut versucht; das Sitzungslimit von acht Stunden bleibt die letzte Absicherung.",
+  "Edit schedule": "Zeitplan bearbeiten",
+  "JustAI is already watching for the broadcast. You can still change when it stops looking.":
+    "JustAI wartet bereits auf die Sendung. Du kannst noch ändern, wann das Beobachten endet.",
+  "Use this when the broadcaster changed its plan. Nothing is lost; the capture simply follows the new times.":
+    "Nutze das, wenn der Sender seinen Plan geändert hat. Es geht nichts verloren; die Aufnahme folgt einfach den neuen Zeiten.",
+  "Save schedule": "Zeitplan speichern",
+  "The stream relay sources could not be loaded.":
+    "Die Quellen des Stream-Relays konnten nicht geladen werden.",
+  "Starts on demand": "Startet bei Bedarf",
+  "Stream relay sources": "Stream-Relay-Quellen",
+  "Pick a source offered by your stream relay, or paste a link below. Green: live, amber: starts when needed, grey: offline.":
+    "Wähle eine Quelle deines Stream-Relays oder füge unten einen Link ein. Grün: live, gelb: startet bei Bedarf, grau: offline.",
+  "Some relays could not be reached: {value0}":
+    "Einige Relays waren nicht erreichbar: {value0}",
+  "JustAI is waiting for the broadcast": "JustAI wartet auf die Sendung",
+  "Watching since ·": "Beobachtet seit ·",
+  "Watches from ·": "Beobachtet ab ·",
+  "Listening now. Capture begins as soon as speech is heard.":
+    "Hört jetzt zu. Die Aufnahme beginnt, sobald Sprache zu hören ist.",
+  "Capture begins when the stream goes live, not at a fixed time.":
+    "Die Aufnahme beginnt, wenn der Stream live geht, nicht zu einer festen Zeit.",
+  "Watching for the broadcast": "Wartet auf die Sendung",
+  "Capture started at the planned time because speech could not be confirmed. Check the transcript.":
+    "Die Aufnahme wurde zur geplanten Zeit gestartet, weil Sprache nicht bestätigt werden konnte. Prüfe das Transkript.",
+  "The livestream has been unreachable for a while; JustAI keeps trying until the watch window ends.":
+    "Der Livestream ist seit einiger Zeit nicht erreichbar; JustAI versucht es weiter, bis das Beobachtungsfenster endet.",
+  "No live speech was detected before the watch window ended, so nothing was captured. Check the broadcaster's schedule and create a new capture.":
+    "Vor Ende des Beobachtungsfensters wurde keine Live-Sprache erkannt, daher wurde nichts aufgenommen. Prüfe den Sendeplan und lege eine neue Aufnahme an.",
+  "This session is no longer listed in the Bundestag plan. It may have been cancelled or renamed; check the schedule.":
+    "Diese Sitzung steht nicht mehr im Bundestagsplan. Sie wurde möglicherweise abgesagt oder umbenannt; prüfe den Zeitplan.",
+  "Schedule updated from the Bundestag plan: {value0} starts {value1} (Berlin time).":
+    "Zeitplan aus dem Bundestagsplan aktualisiert: {value0} beginnt {value1} (Berliner Zeit).",
+  "Capture ended automatically: no speech was heard for {value0} minutes.":
+    "Die Aufnahme wurde automatisch beendet: {value0} Minuten lang war keine Sprache zu hören.",
 } as const

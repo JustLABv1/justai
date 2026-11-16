@@ -50,13 +50,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { groupTranscriptionSegments } from "@/lib/transcription"
+import {
+  groupTranscriptionSegments,
+  translateStreamAlert,
+} from "@/lib/transcription"
 
 type Props = LiveTranscriptionOrbitProps & {
   mode: "microphone" | LiveTranscriptionCaptureViewMode
   transportStatus: SSEConnectionState
   interruptionAt?: Date | null
   processingSettings?: ReactNode
+  /** Reschedule a capture that has not started yet. */
+  onEditSchedule?: (
+    source: LiveTranscriptionOrbitProps["snapshot"]["sources"][number]
+  ) => void
 }
 
 type SourcePresentation = {
@@ -100,6 +107,7 @@ const presentationMessages: Record<Props["mode"], SourcePresentation> = {
 
 export function LiveTranscriptionConversationView({
   processingSettings,
+  onEditSchedule,
   mode,
   snapshot,
   user,
@@ -160,8 +168,11 @@ export function LiveTranscriptionConversationView({
 
   const scheduledSources = snapshot.sources.filter(
     (source) =>
-      source.transportStatus === "scheduled" && source.scheduledStartAt
+      (source.transportStatus === "scheduled" ||
+        source.transportStatus === "watching") &&
+      source.scheduledStartAt
   )
+  const alerts = snapshot.sources.filter((source) => source.alert)
   const scheduled =
     snapshot.session.status === "waiting" &&
     scheduledSources.length > 0 &&
@@ -221,7 +232,11 @@ export function LiveTranscriptionConversationView({
           </div>
           <div className="flex flex-col gap-2">
             <h2 className="text-xl font-semibold">
-              {t("Your transcription is scheduled")}
+              {scheduledSources.some(
+                (source) => source.transportStatus === "watching"
+              )
+                ? t("JustAI is waiting for the broadcast")
+                : t("Your transcription is scheduled")}
             </h2>
             <p className="text-sm text-muted-foreground">
               {t(
@@ -235,10 +250,33 @@ export function LiveTranscriptionConversationView({
                 <dt className="font-medium">{source.name || "Livestream"}</dt>
                 <dd>
                   <span className="text-muted-foreground">
-                    {t("Starts ·")}{" "}
+                    {source.startMode === "when_live"
+                      ? source.transportStatus === "watching"
+                        ? t("Watching since ·")
+                        : t("Watches from ·")
+                      : t("Starts ·")}{" "}
                   </span>
                   {scheduleTime(source.scheduledStartAt!)}
                 </dd>
+                {source.startMode === "when_live" ? (
+                  <dd className="text-muted-foreground">
+                    {source.transportStatus === "watching"
+                      ? t(
+                          "Listening now. Capture begins as soon as speech is heard."
+                        )
+                      : t(
+                          "Capture begins when the stream goes live, not at a fixed time."
+                        )}
+                  </dd>
+                ) : null}
+                {source.alert ? (
+                  <dd
+                    className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-200"
+                    role="status"
+                  >
+                    {translateStreamAlert(t, source.alert ?? "")}
+                  </dd>
+                ) : null}
                 {source.scheduledEndAt ? (
                   <dd>
                     <span className="text-muted-foreground">
@@ -251,6 +289,17 @@ export function LiveTranscriptionConversationView({
                     {t("Stops when the stream ends.")}
                   </dd>
                 )}
+                {onEditSchedule ? (
+                  <dd>
+                    <Button
+                      onClick={() => onEditSchedule(source)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {t("Edit schedule")}
+                    </Button>
+                  </dd>
+                ) : null}
               </div>
             ))}
             <div className="text-xs text-muted-foreground">
@@ -268,6 +317,19 @@ export function LiveTranscriptionConversationView({
 
   return (
     <div className="mx-auto w-full max-w-7xl rounded-2xl border bg-card shadow-sm">
+      {alerts.length > 0 ? (
+        <div
+          className="flex flex-col gap-1 border-b bg-amber-500/10 px-5 py-3 text-sm text-amber-900 sm:px-6 dark:text-amber-200"
+          role="status"
+        >
+          {alerts.map((source) => (
+            <p key={source.id}>
+              <span className="font-medium">{source.name}:</span>{" "}
+              {translateStreamAlert(t, source.alert ?? "")}
+            </p>
+          ))}
+        </div>
+      ) : null}
       <header className="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">

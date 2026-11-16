@@ -34,6 +34,7 @@ func (m *TranscriptionManager) streamSourceSchedulerLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.startConfiguredStreamSources(ctx)
+			m.refreshFollowedPlans(ctx)
 		}
 	}
 }
@@ -43,11 +44,11 @@ func (m *TranscriptionManager) startConfiguredStreamSources(ctx context.Context)
 		return
 	}
 	rows, err := m.DB.QueryContext(ctx, `
-		SELECT source.session_id, source.id, stream.status
+		SELECT source.session_id, source.id, stream.status, stream.start_mode
 		FROM transcription_stream_sources stream
 		JOIN transcription_sources source ON source.id = stream.source_id
 		JOIN transcription_sessions session ON session.id = source.session_id
-		WHERE (stream.status IN ('pending', 'connecting', 'connected', 'reconnecting')
+		WHERE (stream.status IN ('watching', 'pending', 'connecting', 'connected', 'reconnecting')
 		       OR (stream.status = 'scheduled' AND stream.scheduled_start_at <= now()))
 		  AND source.status <> 'stopped'
 		  AND session.status IN ('waiting', 'live', 'paused')`)
@@ -57,10 +58,16 @@ func (m *TranscriptionManager) startConfiguredStreamSources(ctx context.Context)
 	defer rows.Close()
 	for rows.Next() {
 		var sessionID, sourceID uuid.UUID
-		var status string
-		if rows.Scan(&sessionID, &sourceID, &status) == nil {
+		var status, startMode string
+		if rows.Scan(&sessionID, &sourceID, &status, &startMode) == nil {
 			if status == "scheduled" {
-				result, updateErr := m.DB.ExecContext(ctx, `UPDATE transcription_stream_sources SET status = 'pending', updated_at = now() WHERE source_id = $1 AND status = 'scheduled' AND scheduled_start_at <= now()`, sourceID)
+				// A watch window starts listening for the broadcast; the session clock
+				// starts only once speech is heard.
+				next := "pending"
+				if startMode == "when_live" {
+					next = "watching"
+				}
+				result, updateErr := m.DB.ExecContext(ctx, `UPDATE transcription_stream_sources SET status = $2, updated_at = now() WHERE source_id = $1 AND status = 'scheduled' AND scheduled_start_at <= now()`, sourceID, next)
 				if updateErr != nil {
 					continue
 				}
@@ -68,7 +75,9 @@ func (m *TranscriptionManager) startConfiguredStreamSources(ctx context.Context)
 				if claimed == 0 {
 					continue
 				}
-				m.app.activateTranscriptionIngressSession(sessionID)
+				if next == "pending" {
+					m.app.activateTranscriptionIngressSession(sessionID)
+				}
 			}
 			m.startStreamSource(sessionID, sourceID)
 		}
@@ -132,31 +141,37 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	var protocol, language, sessionStatus string
 	var endpointID uuid.NullUUID
 	var scheduledStartAt, scheduledEndAt sql.NullTime
-	var reconnectGraceSeconds int
-	var model string
+	var reconnectGraceSeconds, silenceStopSeconds int
+	var model, startMode, streamStatus string
 	var recordAudio bool
 	if err := m.DB.QueryRowContext(ctx, `
 		SELECT stream.url_ciphertext, stream.protocol, session.transcription_endpoint_id,
 		       COALESCE(session.transcription_model, ''), session.language, session.status,
 		       session.record_audio, stream.scheduled_start_at, stream.scheduled_end_at,
-		       stream.reconnect_grace_seconds
+		       stream.reconnect_grace_seconds, stream.start_mode, stream.silence_stop_seconds, stream.status
 		FROM transcription_stream_sources stream
 		JOIN transcription_sources source ON source.id = stream.source_id
 		JOIN transcription_sessions session ON session.id = source.session_id
-		WHERE stream.source_id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&encryptedURL, &protocol, &endpointID, &model, &language, &sessionStatus, &recordAudio, &scheduledStartAt, &scheduledEndAt, &reconnectGraceSeconds); err != nil {
+		WHERE stream.source_id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&encryptedURL, &protocol, &endpointID, &model, &language, &sessionStatus, &recordAudio, &scheduledStartAt, &scheduledEndAt, &reconnectGraceSeconds, &startMode, &silenceStopSeconds, &streamStatus); err != nil {
 		return err
 	}
 	if sessionStatus == "completed" || sessionStatus == "processing" {
 		return errTranscriptionStreamStopped
 	}
 	if scheduledEndAt.Valid && !scheduledEndAt.Time.After(time.Now()) {
+		if streamStatus == "watching" {
+			m.watchMissed(sessionID, sourceID)
+			return errTranscriptionStreamStopped
+		}
 		m.finishLiveStream(sessionID, sourceID, "scheduled end reached")
 		return errTranscriptionStreamStopped
 	}
 	if reconnectGraceSeconds <= 0 {
 		reconnectGraceSeconds = defaultLiveStreamReconnectGraceSeconds
 	}
-	if scheduledEndAt.Valid {
+	// A watching source re-reads its end time from the database (a followed plan may move
+	// it), so its deadline is applied only once capture begins.
+	if scheduledEndAt.Valid && streamStatus != "watching" {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, scheduledEndAt.Time)
 		defer cancel()
@@ -191,6 +206,25 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 		message := fmt.Sprintf("provider %s does not support a compatible transcription transport", endpoint.ProviderType)
 		m.setStreamStatus(sessionID, sourceID, "failed", message, false)
 		return fmt.Errorf("%s", message)
+	}
+
+	if streamStatus == "watching" {
+		if err := m.watchForLiveSpeech(ctx, sessionID, sourceID, streamURL); err != nil {
+			return err
+		}
+		scheduledEndAt = sql.NullTime{}
+		if err := m.DB.QueryRowContext(ctx, `SELECT scheduled_end_at FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&scheduledEndAt); err != nil {
+			return err
+		}
+		if scheduledEndAt.Valid {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, scheduledEndAt.Time)
+			defer cancel()
+		}
+	}
+	var guard *silenceGuard
+	if silenceStopSeconds > 0 {
+		guard = newSilenceGuard(time.Duration(silenceStopSeconds) * time.Second)
 	}
 
 	m.setStreamStatus(sessionID, sourceID, "connecting", "", false)
@@ -268,9 +302,15 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 			continue
 		}
 		mediaURL, _ := url.Parse(resolved.URL)
-		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, resolved.URL, mediaURL.Scheme, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart)
+		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, resolved.URL, mediaURL.Scheme, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart, guard)
 		if connected {
 			reconnectDeadline = time.Now().Add(time.Duration(reconnectGraceSeconds) * time.Second)
+		}
+		if errors.Is(attemptErr, errLiveSilence) {
+			liveStreamEvents.inc("silence_stop")
+			m.setStreamAlert(sessionID, sourceID, "silence_stop_note", fmt.Sprintf("Capture ended automatically: no speech was heard for %d minutes.", silenceStopSeconds/60))
+			m.finishLiveStream(sessionID, sourceID, "no speech for the configured time")
+			return errTranscriptionStreamStopped
 		}
 		if errors.Is(attemptErr, errTranscriptionStreamEnded) {
 			m.finishLiveStream(sessionID, sourceID, "stream ended")
@@ -301,7 +341,7 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	}
 }
 
-func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream provider.TranscriptionStream, streamURL, protocol, mode string, sessionID, sourceID uuid.UUID, sourceOffset *atomic.Int64, recordingID uuid.UUID, recordingPart *int) (connected bool, resultErr error) {
+func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream provider.TranscriptionStream, streamURL, protocol, mode string, sessionID, sourceID uuid.UUID, sourceOffset *atomic.Int64, recordingID uuid.UUID, recordingPart *int, guard *silenceGuard) (connected bool, resultErr error) {
 	attemptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	baseOffset := sourceOffset.Load()
@@ -417,6 +457,10 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				chunkDuration := int64(len(pcm16)) * 1000 / (16000 * 2)
 				sourceOffset.Add(chunkDuration)
 				m.appendPCM(sessionID, sourceID, pcm16)
+				if guard != nil && guard.feed(pcm16) {
+					resultErr = errLiveSilence
+					break
+				}
 				if lastLevelAt.IsZero() || time.Since(lastLevelAt) >= time.Second {
 					m.updateSourceLevel(sessionID, sourceID, minFloat(1, provider.PCM16RMS(pcm16)*3.2))
 					lastLevelAt = time.Now()

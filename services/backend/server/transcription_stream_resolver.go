@@ -24,6 +24,8 @@ type resolvedLiveStream struct {
 	URL  string `json:"-"`
 	Name string `json:"name"`
 	Kind string `json:"kind"`
+	// Plan lists announced sessions when the broadcaster publishes a programme (Bundestag).
+	Plan []planSession `json:"plan,omitempty"`
 }
 
 // Keep the original page URL at rest: media URLs may expire before capture starts.
@@ -66,6 +68,10 @@ func resolveLiveStreamWithClient(ctx context.Context, raw string, allowPrivate b
 		}
 		result.Name = "Bundestag · Plenary audio"
 		result.Kind = "website"
+		// The published session plan lets users pick a session; failures are not fatal.
+		if plan, planErr := fetchBundestagPlan(ctx, client); planErr == nil {
+			result.Plan = plan
+		}
 		return result, nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)

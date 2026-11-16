@@ -262,6 +262,7 @@ func (a *App) metricsHandler(c *gin.Context) {
 	builder.WriteString("# HELP justai_http_stream_upload_requests_total Realtime audio and control upload requests.\n# TYPE justai_http_stream_upload_requests_total counter\n")
 	fmt.Fprintf(&builder, "justai_http_stream_upload_requests_total %d\n", a.httpStreamMetrics.uploadRequests.Load())
 	streamrelay.WriteClientMetrics(&builder)
+	liveStreamEvents.write(&builder)
 	c.Data(http.StatusOK, "text/plain; version=0.0.4", []byte(builder.String()))
 }
 

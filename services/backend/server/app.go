@@ -280,6 +280,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/stream-sources/resolve", a.platformFeature("transcription"), a.resolveTranscriptionStream)
 	org.POST("/transcription/sessions/:id/stream-sources", a.platformFeature("transcription"), a.createTranscriptionStreamSource)
 	org.POST("/transcription/sessions/:id/bot-sources", a.platformFeature("transcription"), a.createTranscriptionBotSource)
+	org.PATCH("/transcription/stream-sources/:id/schedule", a.platformFeature("transcription"), a.updateTranscriptionStreamSchedule)
 	org.POST("/transcription/stream-sources/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionStreamSource)
 	org.POST("/transcription/bot-sources/:id/rotate", a.platformFeature("transcription"), a.rotateTranscriptionBotSourceToken)
 	org.POST("/transcription/bot-sources/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionBotSource)

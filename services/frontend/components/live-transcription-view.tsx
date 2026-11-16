@@ -88,6 +88,7 @@ import {
 } from "@/lib/transcription"
 import type {
   Endpoint,
+  StreamPlanSession,
   TranscriptionJoinRequest,
   TranscriptionRecording,
   TranscriptionSegment,
@@ -322,6 +323,61 @@ function ScheduleDateTimePicker({
   )
 }
 
+type StartMode = "at_time" | "when_live"
+
+const silenceStopOptions = ["0", "10", "20", "30", "60", "120"]
+
+// A watch window ("when the stream goes live") needs both ends; a fixed start only a start.
+function streamScheduleInvalid(
+  scheduled: boolean,
+  mode: StartMode,
+  start: string,
+  end: string
+) {
+  if (!scheduled) return false
+  if (!start) return true
+  if (mode === "when_live" && !end) return true
+  return Boolean(end && new Date(end) <= new Date(start))
+}
+
+function formatPlanSession(session: StreamPlanSession) {
+  const start = new Date(session.startAt)
+  const end = new Date(session.endAt)
+  const day = new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  }).format(start)
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  return `${session.title} · ${day} ${time.format(start)}–${time.format(end)}`
+}
+
+type StreamScheduleFieldsProps = {
+  idPrefix: string
+  scheduled: boolean
+  start: string
+  end: string
+  onScheduledChange: (checked: boolean) => void
+  onStartChange: (value: string) => void
+  onEndChange: (value: string) => void
+  startMode?: StartMode
+  onStartModeChange?: (mode: StartMode) => void
+  silenceStop?: string
+  onSilenceStopChange?: (minutes: string) => void
+  plan?: StreamPlanSession[]
+  planKey?: string
+  onPlanKeyChange?: (key: string) => void
+  planFollow?: boolean
+  onPlanFollowChange?: (follow: boolean) => void
+  /** Editing an existing schedule: no on/off switch, no plan picker. */
+  editing?: boolean
+  /** The watch window is already open, so its start can no longer change. */
+  startLocked?: boolean
+}
+
 function StreamScheduleFields({
   idPrefix,
   scheduled,
@@ -330,62 +386,363 @@ function StreamScheduleFields({
   onScheduledChange,
   onStartChange,
   onEndChange,
-}: {
-  idPrefix: string
-  scheduled: boolean
-  start: string
-  end: string
-  onScheduledChange: (checked: boolean) => void
-  onStartChange: (value: string) => void
-  onEndChange: (value: string) => void
-}) {
+  startMode = "at_time",
+  onStartModeChange,
+  silenceStop = "0",
+  onSilenceStopChange,
+  plan = [],
+  planKey = "",
+  onPlanKeyChange,
+  planFollow = false,
+  onPlanFollowChange,
+  editing = false,
+  startLocked = false,
+}: StreamScheduleFieldsProps) {
   const { t } = useTranslations()
+  const whenLive = startMode === "when_live"
 
   return (
     <>
-      <Frame>
-        <Frame.Panel>
-          <Frame.Row>
-            <Frame.Content>
-              <Frame.Title as="p">{t("Schedule capture")}</Frame.Title>
-              <Frame.Description>
-                {t("JustAI connects automatically at the selected local time.")}
-              </Frame.Description>
-            </Frame.Content>
-            <Frame.Actions>
-              <Switch
-                aria-label={t("Schedule livestream capture")}
-                checked={scheduled}
-                onCheckedChange={onScheduledChange}
-              />
-            </Frame.Actions>
-          </Frame.Row>
-        </Frame.Panel>
-      </Frame>
+      {editing ? null : (
+        <Frame>
+          <Frame.Panel>
+            <Frame.Row>
+              <Frame.Content>
+                <Frame.Title as="p">{t("Schedule capture")}</Frame.Title>
+                <Frame.Description>
+                  {t(
+                    "JustAI connects automatically at the selected local time, or when the broadcast goes live."
+                  )}
+                </Frame.Description>
+              </Frame.Content>
+              <Frame.Actions>
+                <Switch
+                  aria-label={t("Schedule livestream capture")}
+                  checked={scheduled}
+                  onCheckedChange={onScheduledChange}
+                />
+              </Frame.Actions>
+            </Frame.Row>
+          </Frame.Panel>
+        </Frame>
+      )}
       {scheduled ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <ScheduleDateTimePicker
-            idPrefix={`${idPrefix}-scheduled-start`}
-            label={t("Start time")}
-            minimum={localDateTimeValue(new Date())}
-            onChange={onStartChange}
-            value={start}
-          />
-          <ScheduleDateTimePicker
-            idPrefix={`${idPrefix}-scheduled-end`}
-            label={t("End time")}
-            minimum={start || localDateTimeValue(new Date())}
-            onChange={onEndChange}
-            optional
-            value={end}
-          />
-          <p className="text-xs leading-4 text-muted-foreground sm:col-span-2">
-            {t(
-              "Without an end time, capture stops when the stream ends. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
+        <div className="flex flex-col gap-4">
+          {!editing && plan.length > 0 && onPlanKeyChange ? (
+            <Field>
+              <FieldLabel>{t("Bundestag session")}</FieldLabel>
+              <Select
+                onValueChange={(value) => onPlanKeyChange(value ?? "")}
+                value={planKey || "none"}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={t("Choose a session")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="none">
+                      {t("No session – choose times manually")}
+                    </SelectItem>
+                    {plan.map((session) => (
+                      <SelectItem key={session.key} value={session.key}>
+                        {formatPlanSession(session)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                {t(
+                  "The session plan is published by the Bundestag. JustAI watches from shortly before the announced start until well after the announced end."
+                )}
+              </FieldDescription>
+            </Field>
+          ) : null}
+          {onStartModeChange && !startLocked ? (
+            <Field>
+              <FieldLabel>{t("Start")}</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => onStartModeChange("at_time")}
+                  size="sm"
+                  type="button"
+                  variant={whenLive ? "outline" : "default"}
+                >
+                  {t("At the exact time")}
+                </Button>
+                <Button
+                  onClick={() => onStartModeChange("when_live")}
+                  size="sm"
+                  type="button"
+                  variant={whenLive ? "default" : "outline"}
+                >
+                  {t("When the stream goes live")}
+                </Button>
+              </div>
+              <FieldDescription>
+                {whenLive
+                  ? t(
+                      "JustAI listens from the start of the window and begins capturing as soon as it hears speech, so a changed broadcast plan does not matter. Music and silence are ignored."
+                    )
+                  : t(
+                      "Capture starts at exactly this time, even if the broadcaster changed its plan."
+                    )}
+              </FieldDescription>
+            </Field>
+          ) : null}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {startLocked ? (
+              <Field>
+                <FieldLabel>{t("Watching since")}</FieldLabel>
+                <p className="text-sm text-muted-foreground">
+                  {formatScheduleDateTime(start)}
+                </p>
+              </Field>
+            ) : (
+              <ScheduleDateTimePicker
+                idPrefix={`${idPrefix}-scheduled-start`}
+                label={whenLive ? t("Watch from") : t("Start time")}
+                minimum={localDateTimeValue(new Date())}
+                onChange={onStartChange}
+                value={start}
+              />
             )}
+            <ScheduleDateTimePicker
+              idPrefix={`${idPrefix}-scheduled-end`}
+              label={whenLive ? t("Watch until") : t("End time")}
+              minimum={start || localDateTimeValue(new Date())}
+              onChange={onEndChange}
+              optional={!whenLive}
+              value={end}
+            />
+          </div>
+          {whenLive && onSilenceStopChange ? (
+            <Field>
+              <FieldLabel>{t("Stop after silence")}</FieldLabel>
+              <Select
+                onValueChange={(value) => onSilenceStopChange(value ?? "0")}
+                value={silenceStop}
+              >
+                <SelectTrigger className="w-full sm:w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {silenceStopOptions.map((minutes) => (
+                      <SelectItem key={minutes} value={minutes}>
+                        {minutes === "0"
+                          ? t("Only at the end of the window")
+                          : t("After {value0} minutes without speech", {
+                              value0: minutes,
+                            })}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                {t(
+                  "Ends the capture when the programme returns to music or silence, for example after a session. Breaks shorter than this keep the capture running."
+                )}
+              </FieldDescription>
+            </Field>
+          ) : null}
+          {whenLive && planKey && onPlanFollowChange ? (
+            <Frame>
+              <Frame.Panel>
+                <Frame.Row>
+                  <Frame.Content>
+                    <Frame.Title as="p">
+                      {t("Follow schedule changes")}
+                    </Frame.Title>
+                    <Frame.Description>
+                      {t(
+                        "JustAI re-checks the published plan and moves the window if the session is rescheduled. If the session disappears from the plan you get a warning."
+                      )}
+                    </Frame.Description>
+                  </Frame.Content>
+                  <Frame.Actions>
+                    <Switch
+                      aria-label={t("Follow schedule changes")}
+                      checked={planFollow}
+                      onCheckedChange={onPlanFollowChange}
+                    />
+                  </Frame.Actions>
+                </Frame.Row>
+              </Frame.Panel>
+            </Frame>
+          ) : null}
+          <p className="text-xs leading-4 text-muted-foreground">
+            {whenLive
+              ? t(
+                  "If nothing is heard before the window ends you get a warning on the session. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
+                )
+              : t(
+                  "Without an end time, capture stops when the stream ends. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
+                )}
           </p>
         </div>
       ) : null}
+    </>
+  )
+}
+
+/** Change the schedule of a capture that has not started yet. */
+function StreamScheduleEditDialog({
+  source,
+  onClose,
+  onSaved,
+}: {
+  source: TranscriptionSource | null
+  onClose: () => void
+  onSaved: (id: string, patch: Partial<TranscriptionSource>) => void
+}) {
+  return (
+    <Dialog
+      open={Boolean(source)}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      {source ? (
+        <StreamScheduleEditForm
+          key={source.id}
+          onClose={onClose}
+          onSaved={onSaved}
+          source={source}
+        />
+      ) : null}
+    </Dialog>
+  )
+}
+
+function StreamScheduleEditForm({
+  source,
+  onClose,
+  onSaved,
+}: {
+  source: TranscriptionSource
+  onClose: () => void
+  onSaved: (id: string, patch: Partial<TranscriptionSource>) => void
+}) {
+  const { t } = useTranslations()
+  const [start, setStart] = useState(() =>
+    source.scheduledStartAt
+      ? localDateTimeValue(new Date(source.scheduledStartAt))
+      : ""
+  )
+  const [end, setEnd] = useState(() =>
+    source.scheduledEndAt
+      ? localDateTimeValue(new Date(source.scheduledEndAt))
+      : ""
+  )
+  const [mode, setMode] = useState<StartMode>(
+    source.startMode === "when_live" ? "when_live" : "at_time"
+  )
+  const [silenceStop, setSilenceStop] = useState(
+    String(Math.round((source.silenceStopSeconds ?? 0) / 60))
+  )
+  const [follow, setFollow] = useState(Boolean(source.planFollow))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const watching = source.transportStatus === "watching"
+
+  const silenceOptionsForSource = silenceStopOptions.includes(silenceStop)
+    ? silenceStopOptions
+    : [...silenceStopOptions, silenceStop]
+  const invalid = streamScheduleInvalid(true, mode, start, end)
+
+  const save = async () => {
+    if (invalid || saving) return
+    setSaving(true)
+    setError("")
+    try {
+      const silenceSeconds = Number(silenceStop) * 60
+      const keepPlan = mode === "when_live" && follow && source.planKey
+      await api.patch(
+        `/api/v1/transcription/stream-sources/${source.id}/schedule`,
+        {
+          scheduledStartAt: new Date(start).toISOString(),
+          scheduledEndAt: end ? new Date(end).toISOString() : undefined,
+          startMode: mode,
+          silenceStopSeconds: silenceSeconds > 0 ? silenceSeconds : undefined,
+          planFollow: keepPlan ? true : undefined,
+          planKey: keepPlan ? source.planKey : undefined,
+        }
+      )
+      onSaved(source.id, {
+        scheduledStartAt: new Date(start).toISOString(),
+        scheduledEndAt: end ? new Date(end).toISOString() : null,
+        startMode: mode,
+        silenceStopSeconds: silenceSeconds,
+        planFollow: Boolean(keepPlan),
+        planKey: keepPlan ? source.planKey : "",
+        alert: "",
+      })
+      onClose()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The schedule could not be changed."
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("Edit schedule")}</DialogTitle>
+          <DialogDescription>
+            {watching
+              ? t(
+                  "JustAI is already watching for the broadcast. You can still change when it stops looking."
+                )
+              : t(
+                  "Use this when the broadcaster changed its plan. Nothing is lost; the capture simply follows the new times."
+                )}
+          </DialogDescription>
+        </DialogHeader>
+        {error ? <DialogError message={error} /> : null}
+        <DialogBody>
+          <FieldGroup>
+            <StreamScheduleFields
+              editing
+              end={end}
+              idPrefix="edit-stream-schedule"
+              onEndChange={setEnd}
+              onPlanFollowChange={setFollow}
+              onScheduledChange={() => {}}
+              onSilenceStopChange={setSilenceStop}
+              onStartChange={setStart}
+              onStartModeChange={watching ? undefined : setMode}
+              planFollow={follow}
+              planKey={source.planKey ?? ""}
+              scheduled
+              silenceStop={
+                silenceOptionsForSource.includes(silenceStop)
+                  ? silenceStop
+                  : "0"
+              }
+              start={start}
+              startLocked={watching}
+              startMode={mode}
+            />
+          </FieldGroup>
+        </DialogBody>
+        <DialogFooter>
+          <Button onClick={onClose} variant="outline">
+            {t("Cancel")}
+          </Button>
+          <Button disabled={invalid || saving} onClick={() => void save()}>
+            {saving ? <Spinner /> : null}
+            {t("Save schedule")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </>
   )
 }
@@ -542,11 +899,18 @@ export function LiveTranscriptionView({
   const [streamScheduled, setStreamScheduled] = useState(false)
   const [streamScheduledStart, setStreamScheduledStart] = useState("")
   const [streamScheduledEnd, setStreamScheduledEnd] = useState("")
+  const [streamStartMode, setStreamStartMode] = useState<StartMode>("at_time")
+  const [streamSilenceStop, setStreamSilenceStop] = useState("0")
+  const [streamPlanKey, setStreamPlanKey] = useState("")
+  const [streamPlanFollow, setStreamPlanFollow] = useState(true)
+  const [editingSchedule, setEditingSchedule] =
+    useState<TranscriptionSource | null>(null)
   const [streamStarting, setStreamStarting] = useState(false)
   const [streamCheck, setStreamCheck] = useState<{
     url: string
     name?: string
     error?: string
+    plan?: StreamPlanSession[]
   } | null>(null)
   const checkedStreamReady =
     streamCheck?.url === streamURL.trim() && Boolean(streamCheck.name)
@@ -556,12 +920,13 @@ export function LiveTranscriptionView({
     if (!url) return
     const timer = window.setTimeout(() => {
       void api
-        .post<{ name: string; kind: string }>(
+        .post<{ name: string; kind: string; plan?: StreamPlanSession[] }>(
           "/api/v1/transcription/stream-sources/resolve",
           { url }
         )
         .then((result) => {
-          if (!cancelled) setStreamCheck({ url, name: result.name })
+          if (!cancelled)
+            setStreamCheck({ url, name: result.name, plan: result.plan })
         })
         .catch((caught) => {
           if (!cancelled)
@@ -579,6 +944,58 @@ export function LiveTranscriptionView({
       window.clearTimeout(timer)
     }
   }, [streamURL])
+  const streamPlan = checkedStreamReady ? (streamCheck?.plan ?? []) : []
+  const selectStreamPlan = (key: string) => {
+    const session = streamPlan.find((item) => item.key === key)
+    setStreamPlanKey(session ? key : "")
+    if (!session) return
+    setStreamScheduled(true)
+    setStreamStartMode("when_live")
+    setStreamPlanFollow(true)
+    // A session that has already begun is watched from now on.
+    const from = Math.max(Date.now(), new Date(session.windowStartAt).getTime())
+    setStreamScheduledStart(localDateTimeValue(new Date(from)))
+    setStreamScheduledEnd(localDateTimeValue(new Date(session.windowEndAt)))
+    if (streamSilenceStop === "0") setStreamSilenceStop("30")
+  }
+  const streamWatchProps = {
+    startMode: streamStartMode,
+    onStartModeChange: setStreamStartMode,
+    silenceStop: streamSilenceStop,
+    onSilenceStopChange: setStreamSilenceStop,
+    plan: streamPlan,
+    planKey: streamPlanKey,
+    onPlanKeyChange: selectStreamPlan,
+    planFollow: streamPlanFollow,
+    onPlanFollowChange: setStreamPlanFollow,
+  }
+  const streamSchedulePayload = () => {
+    if (!streamScheduled) return {}
+    const silenceSeconds = Number(streamSilenceStop) * 60
+    const followPlan =
+      streamStartMode === "when_live" && streamPlanFollow && streamPlanKey
+    return {
+      scheduledStartAt: streamScheduledStart
+        ? new Date(streamScheduledStart).toISOString()
+        : undefined,
+      scheduledEndAt: streamScheduledEnd
+        ? new Date(streamScheduledEnd).toISOString()
+        : undefined,
+      startMode: streamStartMode,
+      silenceStopSeconds: silenceSeconds > 0 ? silenceSeconds : undefined,
+      planFollow: followPlan ? true : undefined,
+      planKey: followPlan ? streamPlanKey : undefined,
+    }
+  }
+  const resetStreamSchedule = () => {
+    setStreamScheduled(false)
+    setStreamScheduledStart("")
+    setStreamScheduledEnd("")
+    setStreamStartMode("at_time")
+    setStreamSilenceStop("0")
+    setStreamPlanKey("")
+    setStreamPlanFollow(true)
+  }
   const streamCheckFeedback = streamURL.trim() ? (
     <p
       role="status"
@@ -902,7 +1319,8 @@ export function LiveTranscriptionView({
         event.type === "transcription.bot"
       ) {
         const sourceId = String(data.sourceId ?? "")
-        const transportStatus = String(data.status ?? "")
+        const transportStatus =
+          data.status === undefined ? "" : String(data.status)
         if (!sourceId) return
         setSnapshot((current) =>
           current
@@ -933,6 +1351,10 @@ export function LiveTranscriptionView({
                         : transportStatus === "stopped"
                           ? ""
                           : source.lastError,
+                    alert:
+                      typeof data.alert === "string"
+                        ? data.alert
+                        : source.alert,
                     lastSeenAt:
                       data.lastSeenAt === null
                         ? null
@@ -1676,14 +2098,7 @@ export function LiveTranscriptionView({
           {
             name: streamName.trim() || t("Live stream"),
             url: streamURL.trim(),
-            scheduledStartAt:
-              streamScheduled && streamScheduledStart
-                ? new Date(streamScheduledStart).toISOString()
-                : undefined,
-            scheduledEndAt:
-              streamScheduled && streamScheduledEnd
-                ? new Date(streamScheduledEnd).toISOString()
-                : undefined,
+            ...streamSchedulePayload(),
           }
         )
         createdSource = {
@@ -2031,14 +2446,7 @@ export function LiveTranscriptionView({
         {
           name: streamName.trim() || t("Live stream"),
           url: streamURL.trim(),
-          scheduledStartAt:
-            streamScheduled && streamScheduledStart
-              ? new Date(streamScheduledStart).toISOString()
-              : undefined,
-          scheduledEndAt:
-            streamScheduled && streamScheduledEnd
-              ? new Date(streamScheduledEnd).toISOString()
-              : undefined,
+          ...streamSchedulePayload(),
         }
       )
       setSnapshot((current) =>
@@ -2057,7 +2465,8 @@ export function LiveTranscriptionView({
                 ...current.session,
                 status:
                   current.session.status === "waiting" &&
-                  result.stream.status !== "scheduled"
+                  result.stream.status !== "scheduled" &&
+                  result.stream.status !== "watching"
                     ? "live"
                     : current.session.status,
               },
@@ -2065,9 +2474,7 @@ export function LiveTranscriptionView({
           : current
       )
       setStreamURL("")
-      setStreamScheduled(false)
-      setStreamScheduledStart("")
-      setStreamScheduledEnd("")
+      resetStreamSchedule()
       setStreamDialogOpen(false)
       onSessionsChanged()
     } catch (caught) {
@@ -2157,10 +2564,12 @@ export function LiveTranscriptionView({
     captureMode !== "external" ||
     externalSourceType === "meeting-bot" ||
     (checkedStreamReady &&
-      (!streamScheduled ||
-        (Boolean(streamScheduledStart) &&
-          (!streamScheduledEnd ||
-            new Date(streamScheduledEnd) > new Date(streamScheduledStart)))))
+      !streamScheduleInvalid(
+        streamScheduled,
+        streamStartMode,
+        streamScheduledStart,
+        streamScheduledEnd
+      ))
   const canContinueWizard =
     createStep === 0 ||
     (createStep === 1 && sourceSetupReady) ||
@@ -2321,6 +2730,7 @@ export function LiveTranscriptionView({
                 ? setShareOpen(true)
                 : rotateJoinCode())
             }
+            onEditSchedule={setEditingSchedule}
             onStartCapture={ensureCapture}
             onStopSession={stopSession}
             partial={partial}
@@ -2625,6 +3035,7 @@ export function LiveTranscriptionView({
                     onStartChange={setStreamScheduledStart}
                     scheduled={streamScheduled}
                     start={streamScheduledStart}
+                    {...streamWatchProps}
                   />
                 </FieldGroup>
               ) : (
@@ -2999,6 +3410,23 @@ export function LiveTranscriptionView({
         </TranscriptionCreationFlow>
       ) : null}
 
+      <StreamScheduleEditDialog
+        onClose={() => setEditingSchedule(null)}
+        onSaved={(id, patch) =>
+          setSnapshot((current) =>
+            current
+              ? {
+                  ...current,
+                  sources: current.sources.map((source) =>
+                    source.id === id ? { ...source, ...patch } : source
+                  ),
+                }
+              : current
+          )
+        }
+        source={editingSchedule}
+      />
+
       <Dialog
         open={streamDialogOpen}
         onOpenChange={(open) => {
@@ -3064,6 +3492,7 @@ export function LiveTranscriptionView({
                 onStartChange={setStreamScheduledStart}
                 scheduled={streamScheduled}
                 start={streamScheduledStart}
+                {...streamWatchProps}
               />
             </FieldGroup>
           </DialogBody>
@@ -3081,13 +3510,12 @@ export function LiveTranscriptionView({
               disabled={
                 streamStarting ||
                 !checkedStreamReady ||
-                (streamScheduled &&
-                  (!streamScheduledStart ||
-                    Boolean(
-                      streamScheduledEnd &&
-                      new Date(streamScheduledEnd) <=
-                        new Date(streamScheduledStart)
-                    )))
+                streamScheduleInvalid(
+                  streamScheduled,
+                  streamStartMode,
+                  streamScheduledStart,
+                  streamScheduledEnd
+                )
               }
               onClick={() => void addStreamSource()}
             >

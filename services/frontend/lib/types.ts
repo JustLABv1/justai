@@ -888,7 +888,24 @@ export type TranscriptionSource = {
   lastSeenAt?: string | null
   scheduledStartAt?: string | null
   scheduledEndAt?: string | null
+  startMode?: "at_time" | "when_live"
+  silenceStopSeconds?: number
+  planFollow?: boolean
+  planKey?: string
+  /** Heads-up about a schedule change, a missed capture or an automatic stop. */
+  alert?: string
   signalLevel: number
+}
+
+/** A session announced by the broadcaster, with the watch window derived from it. */
+export type StreamPlanSession = {
+  key: string
+  title: string
+  startAt: string
+  endAt: string
+  windowStartAt: string
+  windowEndAt: string
+  fallbackAt: string
 }
 
 export type TranscriptionSpeaker = {

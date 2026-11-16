@@ -79,6 +79,67 @@ an end time, a clean stream end completes the capture immediately. Unexpected
 disconnects are retried for 15 minutes before the capture is completed; the
 configured maximum session duration remains the final safety limit.
 
+## Scheduled capture when the broadcaster changes its plan
+
+A fixed start time breaks when a broadcaster reschedules. Livestream sources
+therefore support three layers of protection.
+
+**1. Edit the schedule.** While a capture has not started, change its times
+(`PATCH /api/v1/transcription/stream-sources/:id/schedule`, or **Edit schedule**
+on the scheduled session). A source that is already watching (see below) can
+still change its end time and silence limit.
+
+**2. Start when the stream goes live.** Instead of a start time, choose *When the
+stream goes live* and a window (`startMode: "when_live"`, `scheduledStartAt` =
+watch from, `scheduledEndAt` = watch until; the end is required and the window
+is at most 48 hours). From the window start the source is `watching`: the backend
+listens to the stream without using a transcription provider, and the session
+clock does not run. Capture starts when a few seconds of speech are heard.
+Music and silence are ignored, which matters for streams such as the Bundestag's
+that play music between sessions.
+
+Optionally set `silenceStopSeconds` (2 minutes to 4 hours) to end the capture
+when the programme returns to music or silence. Shorter breaks keep it running.
+The limit is armed only after speech was heard in that capture.
+
+**3. Follow the Bundestag plan.** For `https://www.bundestag.de/mediathek/live` the
+resolver returns the announced sessions (`plan`). Choosing one sets a watch window
+from 15 minutes before the announced start to 3 hours after the announced end
+(sessions often run long) and, with `planFollow: true` and a `planKey`, JustAI
+re-reads the plan every 10 minutes while the source is `scheduled` or `watching`
+and moves the window if the session was rescheduled. A plan-following source also
+starts 10 minutes after the announced start even if speech could not be confirmed,
+and says so in its alert.
+
+### Safety net
+
+Each stream source carries an `alert` shown on the session. It is set when the
+window moved ("Schedule updated from the Bundestag plan…"), the session vanished
+from the plan, the stream was unreachable for 10 minutes while watching, capture
+started without speech confirmation, a capture ended after the silence limit, or
+the window ended without any speech (the source then has status `failed`).
+There is no email or push notification system, so alerts appear in the session and
+are counted for operators in the backend's `/metrics`:
+
+```text
+justai_livestream_watching
+justai_livestream_events_total{event="speech_start|fallback_start|watch_missed|silence_stop|plan_changed|plan_missing|plan_fetch_failed|stream_unreachable"}
+```
+
+Alert on `increase(justai_livestream_events_total{event="watch_missed"}[1h]) > 0`.
+
+### Limits of speech detection
+
+Speech is told from music by cheap audio features (no model), calibrated on the
+Bundestag music programme and synthetic German speech. It can be fooled by heavy
+background noise: at about 15 dB signal-to-noise (white noise) it no longer
+recognised speech in testing. The design is therefore defensive: detection only
+decides when to *start* and when to *stop*, it never drops audio during a capture,
+the silence limit is armed only once speech was heard, and plan-following sources
+have the time-based fallback above. Check the first live captures against the
+real stream. The eight-hour `transcription.max_session_hours` limit still applies
+from the moment capture starts; raise it for long plenary days.
+
 ## Meeting-bot ingress
 
 `POST /api/v1/transcription/sessions/:sessionId/bot-sources` creates a
