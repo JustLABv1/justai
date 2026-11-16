@@ -31,6 +31,8 @@ import { useMemo, useState, type ReactNode } from "react"
 import type { LiveTranscriptionOrbitProps } from "@/components/live-transcription-orbit"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
 import { Badge } from "@/components/panelui/badge"
+import { ScheduledCaptureCard } from "@/components/scheduled-capture-card"
+import type { TranscriptionTopic } from "@/lib/types"
 import { Button } from "@/components/panelui/button"
 import { RealtimeConnectionStatus } from "@/components/realtime-connection-status"
 import type { SSEConnectionState } from "@/lib/sse-transport"
@@ -62,6 +64,7 @@ type Props = LiveTranscriptionOrbitProps & {
   processingSettings?: ReactNode
   /** Agenda items of the session, readable as soon as each is finished. */
   topicsPanel?: ReactNode
+  topics?: TranscriptionTopic[]
   /** Reschedule a capture that has not started yet. */
   onEditSchedule?: (
     source: LiveTranscriptionOrbitProps["snapshot"]["sources"][number]
@@ -111,6 +114,7 @@ export function LiveTranscriptionConversationView({
   processingSettings,
   onEditSchedule,
   topicsPanel,
+  topics = [],
   mode,
   snapshot,
   user,
@@ -180,11 +184,6 @@ export function LiveTranscriptionConversationView({
     snapshot.session.status === "waiting" &&
     scheduledSources.length > 0 &&
     !snapshot.sources.some((source) => source.status === "connected")
-  const scheduleTime = (value: string) =>
-    new Intl.DateTimeFormat(locale, {
-      dateStyle: "full",
-      timeStyle: "short",
-    }).format(new Date(value))
   if (scheduled)
     return (
       <div className="mx-auto w-full max-w-7xl rounded-2xl bg-card">
@@ -228,7 +227,7 @@ export function LiveTranscriptionConversationView({
         </header>
         <section
           aria-label={t("Scheduled capture")}
-          className="flex flex-col items-center gap-5 px-6 py-12 text-center"
+          className="flex flex-col items-center gap-5 px-6 py-8 text-center"
         >
           <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <CalendarClock className="size-7" />
@@ -247,70 +246,16 @@ export function LiveTranscriptionConversationView({
               )}
             </p>
           </div>
-          <dl className="flex w-full max-w-lg flex-col gap-4 rounded-xl bg-muted/40 p-5 text-left text-sm">
+          <div className="flex w-full flex-col items-center gap-3">
             {scheduledSources.map((source) => (
-              <div key={source.id} className="flex flex-col gap-2">
-                <dt className="font-medium">{source.name || "Livestream"}</dt>
-                <dd>
-                  <span className="text-muted-foreground">
-                    {source.startMode === "when_live"
-                      ? source.transportStatus === "watching"
-                        ? t("Watching since ·")
-                        : t("Watches from ·")
-                      : t("Starts ·")}{" "}
-                  </span>
-                  {scheduleTime(source.scheduledStartAt!)}
-                </dd>
-                {source.startMode === "when_live" ? (
-                  <dd className="text-muted-foreground">
-                    {source.transportStatus === "watching"
-                      ? t(
-                          "Listening now. Capture begins as soon as speech is heard."
-                        )
-                      : t(
-                          "Capture begins when the stream goes live, not at a fixed time."
-                        )}
-                  </dd>
-                ) : null}
-                {source.alert ? (
-                  <dd
-                    className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-200"
-                    role="status"
-                  >
-                    {translateStreamAlert(t, source.alert ?? "")}
-                  </dd>
-                ) : null}
-                {source.scheduledEndAt ? (
-                  <dd>
-                    <span className="text-muted-foreground">
-                      {t("Ends ·")}{" "}
-                    </span>
-                    {scheduleTime(source.scheduledEndAt)}
-                  </dd>
-                ) : (
-                  <dd className="text-muted-foreground">
-                    {t("Stops when the stream ends.")}
-                  </dd>
-                )}
-                {onEditSchedule ? (
-                  <dd>
-                    <Button
-                      onClick={() => onEditSchedule(source)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {t("Edit schedule")}
-                    </Button>
-                  </dd>
-                ) : null}
-              </div>
+              <ScheduledCaptureCard
+                key={source.id}
+                onEditSchedule={onEditSchedule}
+                source={source}
+                topics={topics}
+              />
             ))}
-            <div className="text-xs text-muted-foreground">
-              {t("Times shown in")}{" "}
-              {Intl.DateTimeFormat().resolvedOptions().timeZone}
-              {t(". The JustAI server must remain running.")}
-            </div>
-          </dl>
+          </div>
           {topicsPanel ? (
             <div className="w-full max-w-2xl">{topicsPanel}</div>
           ) : null}

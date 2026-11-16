@@ -6,6 +6,7 @@ import { useTranslations } from "@/components/locale-provider"
 import { Button } from "@/components/panelui/button"
 import { Checkbox } from "@/components/panelui/checkbox"
 import { Spinner } from "@/components/panelui/spinner"
+import { PlanSummary } from "@/components/plan-summary"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -170,23 +171,19 @@ export function BundestagTopicPicker({
                 )
               })}
             </ul>
-            <p
-              className={cn(
-                "text-xs leading-4",
-                chosen.length ? "text-muted-foreground" : "text-destructive"
-              )}
-              role={chosen.length ? undefined : "alert"}
-            >
-              {chosen.length && firstStart
-                ? t(
-                    "{value0} topics selected. Capture starts around {value1}; planned times often slip, JustAI adjusts to the delay it observes.",
-                    {
-                      value0: chosen.length,
-                      value1: time.format(firstStart),
-                    }
-                  )
-                : t("Choose at least one topic.")}
-            </p>
+            {chosen.length && firstStart ? (
+              <PlanSummary>
+                {t(
+                  chosen.length === 1
+                    ? "1 topic selected. Capture starts around {value1}; planned times often slip, JustAI adjusts to the delay it observes."
+                    : "{value0} topics selected. Capture starts around {value1}; planned times often slip, JustAI adjusts to the delay it observes.",
+                  {
+                    value0: chosen.length,
+                    value1: time.format(firstStart),
+                  }
+                )}
+              </PlanSummary>
+            ) : null}
           </>
         )
       ) : null}

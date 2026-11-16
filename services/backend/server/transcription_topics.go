@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,14 +19,14 @@ import (
 	"justai-backend/provider"
 )
 
-const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at`
+const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at`
 
 func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	var t models.TranscriptionTopic
 	var source uuid.NullUUID
 	var start, end sql.NullInt64
-	var plannedStart, plannedEnd sql.NullTime
-	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt); err != nil {
+	var plannedStart, plannedEnd, originalStart, planChanged sql.NullTime
+	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged); err != nil {
 		return t, err
 	}
 	if source.Valid {
@@ -36,6 +37,12 @@ func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	}
 	if plannedEnd.Valid {
 		t.PlannedEndAt = &plannedEnd.Time
+	}
+	if originalStart.Valid {
+		t.OriginalStartAt = &originalStart.Time
+	}
+	if planChanged.Valid {
+		t.PlanChangedAt = &planChanged.Time
 	}
 	if start.Valid {
 		t.StartedOffsetMs = &start.Int64
@@ -68,8 +75,10 @@ func loadTopic(ctx context.Context, db *sql.DB, topicID uuid.UUID) (models.Trans
 }
 
 // syncTopics stores the items of a sitting as planned topics. Items already opened keep
-// their state; only planned ones follow later changes of the published plan.
-func syncTopics(ctx context.Context, db *sql.DB, sessionID, sourceID uuid.UUID, items []planItem) error {
+// their state; only planned ones follow later changes of the published plan. It returns
+// the planned topics whose slot moved by more than a minute.
+func syncTopics(ctx context.Context, db *sql.DB, sessionID, sourceID uuid.UUID, items []planItem) ([]uuid.UUID, error) {
+	var moved []uuid.UUID
 	for i, it := range items {
 		numbers := make([]int64, len(it.Numbers))
 		for n, v := range it.Numbers {
@@ -79,18 +88,33 @@ func syncTopics(ctx context.Context, db *sql.DB, sessionID, sourceID uuid.UUID, 
 		if sourceID != uuid.Nil {
 			source = sourceID
 		}
-		if _, err := db.ExecContext(ctx, `
+		var id uuid.UUID
+		var changed bool
+		err := db.QueryRowContext(ctx, `
 			INSERT INTO transcription_topics (session_id, source_id, topic_key, sort_order, kind, label, numbers, title, planned_start_at, planned_end_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			ON CONFLICT (session_id, topic_key) DO UPDATE
-			SET sort_order = $4, title = $8, planned_start_at = $9, planned_end_at = $10, updated_at = now()
-			WHERE transcription_topics.status = 'planned'`,
-			sessionID, source, it.Key, i, it.Kind, it.Label, pq.Array(numbers), it.Title, it.StartAt, it.EndAt); err != nil {
-			return err
+			SET sort_order = $4, title = $8, planned_start_at = $9, planned_end_at = $10, updated_at = now(),
+			    original_start_at = CASE WHEN `+topicSlotMoved+` THEN COALESCE(transcription_topics.original_start_at, transcription_topics.planned_start_at) ELSE transcription_topics.original_start_at END,
+			    plan_changed_at = CASE WHEN `+topicSlotMoved+` THEN now() ELSE transcription_topics.plan_changed_at END
+			WHERE transcription_topics.status = 'planned'
+			RETURNING id, COALESCE(plan_changed_at = now(), FALSE)`,
+			sessionID, source, it.Key, i, it.Kind, it.Label, pq.Array(numbers), it.Title, it.StartAt, it.EndAt).Scan(&id, &changed)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // the topic is already open or finished
+		}
+		if err != nil {
+			return moved, err
+		}
+		if changed {
+			moved = append(moved, id)
 		}
 	}
-	return nil
+	return moved, nil
 }
+
+// topicSlotMoved compares the stored slot with the new one ($9, $10) in syncTopics.
+const topicSlotMoved = `(transcription_topics.planned_start_at IS DISTINCT FROM $9 AND abs(extract(epoch FROM (transcription_topics.planned_start_at - $9))) > 60 OR transcription_topics.planned_end_at IS DISTINCT FROM $10 AND abs(extract(epoch FROM (transcription_topics.planned_end_at - $10))) > 60)`
 
 func (m *TranscriptionManager) broadcastTopic(sessionID, topicID uuid.UUID) {
 	if topic, err := loadTopic(context.Background(), m.DB, topicID); err == nil {
@@ -313,7 +337,7 @@ func (a *App) loadSittingTopics(ctx context.Context, sessionID, sourceID uuid.UU
 	if len(forSitting) == 0 {
 		return 0, fmt.Errorf("the planned course has no items for the %d. sitting", sessionNo)
 	}
-	if err := syncTopics(ctx, a.DB, sessionID, sourceID, forSitting); err != nil {
+	if _, err := syncTopics(ctx, a.DB, sessionID, sourceID, forSitting); err != nil {
 		return 0, err
 	}
 	return len(forSitting), nil
@@ -338,6 +362,10 @@ func (a *App) updateTranscriptionTopic(c *gin.Context) {
 	}
 	updated, _ := loadTopic(c, a.DB, topic.ID)
 	a.Live.broadcastTopic(topic.SessionID, topic.ID)
+	if request.Starred != nil {
+		// With "only selected topics" the selection decides when the capture runs.
+		a.Live.rescheduleTopicCapture(c, topic.SessionID, false)
+	}
 	c.JSON(http.StatusOK, gin.H{"topic": updated})
 }
 

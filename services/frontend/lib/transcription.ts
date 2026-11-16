@@ -212,6 +212,15 @@ export function translateStreamAlert(
       "Schedule updated from the Bundestag plan: {value0} starts {value1} (Berlin time).",
       { value0: plan[1], value1: plan[2] }
     )
+  const moved =
+    /^The Bundestag plan changed: capture now starts at (.+) \(Berlin time\)\.$/.exec(
+      alert
+    )
+  if (moved)
+    return t(
+      "The Bundestag plan changed: capture now starts at {value0} (Berlin time).",
+      { value0: moved[1] }
+    )
   const pause =
     /^Paused until (\d{1,2}:\d{2}) \(Berlin time\), shortly before the next selected topic: (.+)\.$/.exec(
       alert

@@ -4939,4 +4939,100 @@ export const de = {
     "Alle ausgewählten Themen sind abgeschlossen. Die Aufnahme wurde beendet.",
   "Paused until {value0} (Berlin time), shortly before the next selected topic: {value1}.":
     "Pausiert bis {value0} Uhr (Berliner Zeit), kurz vor dem nächsten ausgewählten Thema: {value1}.",
+  "{value0}: select date": "{value0}: Datum auswählen",
+  "{value0}: time (HH:MM)": "{value0}: Uhrzeit (HH:MM)",
+  "Times in your browser time zone ({value0}), 24-hour format.":
+    "Zeiten in der Zeitzone deines Browsers ({value0}), 24-Stunden-Format.",
+  "Choose a sitting.": "Wähle eine Sitzung.",
+  "Capture starts right away.": "Die Aufnahme beginnt sofort.",
+  "Only the {value0} selected topics of sitting {value1}: JustAI starts shortly before the first one, pauses in between and ends after the last.":
+    "Nur die {value0} ausgewählten Themen der {value1}. Sitzung: JustAI startet kurz vor dem ersten, pausiert dazwischen und endet nach dem letzten.",
+  "JustAI watches from {value0} to {value1} and starts as soon as someone speaks.":
+    "JustAI beobachtet von {value0} bis {value1} und startet, sobald gesprochen wird.",
+  "Each topic is ready as soon as it is finished.":
+    "Jedes Thema steht bereit, sobald es abgeschlossen ist.",
+  "Schedule changes are followed.": "Planänderungen werden übernommen.",
+  "Capture ends when the window closes.":
+    "Die Aufnahme endet mit dem Zeitfenster.",
+  "Capture ends after {value0} minutes without speech.":
+    "Die Aufnahme endet nach {value0} Minuten ohne Sprache.",
+  "Capture starts at {value0}.": "Die Aufnahme beginnt um {value0}.",
+  "It ends at {value0}.": "Sie endet um {value0}.",
+  "It ends when the stream ends.": "Sie endet, wenn der Stream endet.",
+  "A livestream webpage or a direct audio/video link. It is stored encrypted.":
+    "Eine Livestream-Webseite oder ein direkter Audio-/Video-Link. Er wird verschlüsselt gespeichert.",
+  "Loading stream sources…": "Streamquellen werden geladen…",
+  "Stream source": "Streamquelle",
+  "Stream relay": "Stream-Relay",
+  "Own link": "Eigener Link",
+  "A webpage or direct stream": "Webseite oder direkter Stream",
+  "JustAI listens from the start of the window and begins capturing as soon as it hears speech. Music and silence are ignored.":
+    "JustAI hört ab Beginn des Zeitfensters mit und startet die Aufnahme, sobald gesprochen wird. Musik und Stille werden ignoriert.",
+  "Ends the capture when the programme returns to music or silence. Shorter breaks keep it running.":
+    "Beendet die Aufnahme, wenn wieder Musik oder Stille läuft. Kürzere Pausen laufen weiter.",
+  "JustAI re-checks the published plan and moves the window if the sitting is rescheduled.":
+    "JustAI prüft den veröffentlichten Plan regelmäßig und verschiebt das Zeitfenster, wenn die Sitzung verlegt wird.",
+  "Capture begins when you start the session.":
+    "Die Aufnahme beginnt, sobald du die Sitzung startest.",
+  "Bundestag sitting": "Bundestagssitzung",
+  "Follows the published plan, whole or by topic.":
+    "Folgt dem veröffentlichten Plan, ganz oder nach Themen.",
+  "Own time window": "Eigenes Zeitfenster",
+  "A fixed time, or watch for the broadcast.":
+    "Feste Uhrzeit oder auf die Übertragung warten.",
+  "When should JustAI capture?": "Wann soll JustAI aufnehmen?",
+  "Checking for a published session plan…":
+    "Suche nach einem veröffentlichten Sitzungsplan…",
+  Sitting: "Sitzung",
+  "Choose a sitting": "Sitzung auswählen",
+  "What should be captured?": "Was soll aufgenommen werden?",
+  Adjust: "Anpassen",
+  "If nothing is heard you get a warning on the session. Disconnects are retried for 15 minutes; the eight-hour session limit is the final safeguard.":
+    "Wird nichts gehört, bekommst du eine Warnung an der Sitzung. Verbindungsabbrüche werden 15 Minuten lang neu versucht; das Limit von acht Stunden pro Sitzung ist die letzte Absicherung.",
+  "Create and schedule": "Erstellen und planen",
+  "When and what should JustAI capture?": "Wann und was soll JustAI aufnehmen?",
+  "Pick a relay source or paste a livestream link. JustAI checks it right away.":
+    "Wähle eine Relay-Quelle oder füge einen Livestream-Link ein. JustAI prüft ihn sofort.",
+  "Captured on the server; your browser can be closed. Short drops are reconnected automatically.":
+    "Wird auf dem Server aufgenommen; dein Browser kann geschlossen werden. Kurze Abbrüche werden automatisch neu verbunden.",
+  Change: "Ändern",
+  Stream: "Stream",
+  "When & what": "Wann & was",
+  "Only the selected topic of sitting {value1}: JustAI starts shortly before it and ends after it.":
+    "Nur das ausgewählte Thema der {value1}. Sitzung: JustAI startet kurz davor und endet danach.",
+  "1 topic selected. Capture starts around {value1}; planned times often slip, JustAI adjusts to the delay it observes.":
+    "1 Thema ausgewählt. Die Aufnahme beginnt gegen {value1}; geplante Zeiten verschieben sich oft, JustAI passt sich der beobachteten Verspätung an.",
+  "Listening for the broadcast": "Wartet auf die Übertragung",
+  "Starts {value0}": "Beginnt {value0}",
+  "Starts in {value0}": "Beginnt in {value0}",
+  "Watches from {value0}; capture begins when speech is heard.":
+    "Beobachtet ab {value0}; die Aufnahme beginnt, sobald gesprochen wird.",
+  "{value0}, shortly before the first selected topic.":
+    "{value0}, kurz vor dem ersten ausgewählten Thema.",
+  "Selected topics": "Ausgewählte Themen",
+  moved: "verschoben",
+  "Pauses between topics and ends after the last one. If the sitting runs late, JustAI waits longer; at the latest it stops at {value0}. Change the selection with the checkboxes in the topics list.":
+    "Pausiert zwischen den Themen und endet nach dem letzten. Läuft die Sitzung länger, wartet JustAI mit; spätestens um {value0} ist Schluss. Die Auswahl änderst du mit den Häkchen in der Themenliste.",
+  "Ends at the latest {value0}.": "Endet spätestens {value0}.",
+  "The Bundestag plan moved {value0} agenda items.":
+    "Der Bundestag hat {value0} Tagesordnungspunkte verschoben.",
+  "JustAI regularly checks the Bundestag plan and follows changes.":
+    "JustAI prüft den Plan des Bundestags regelmäßig und übernimmt Änderungen.",
+  "The JustAI server must remain running.":
+    "Der JustAI-Server muss weiterlaufen.",
+  "Selected for recording": "Zur Aufnahme vorgemerkt",
+  "Do not record this topic": "Thema nicht aufnehmen",
+  "Record this topic": "Thema aufnehmen",
+  "moved, previously {value0}": "verschoben, vorher {value0}",
+  "The Bundestag plan changed: capture now starts at {value0} (Berlin time).":
+    "Der Plan des Bundestags hat sich geändert: Die Aufnahme beginnt jetzt am {value0} Uhr (Berliner Zeit).",
+  "Record “{value0}”": "„{value0}“ aufnehmen",
+  "Do not notify me when this topic is finished":
+    "Nicht benachrichtigen, wenn das Thema abgeschlossen ist",
+  "Notify me when this topic is finished":
+    "Benachrichtigen, wenn das Thema abgeschlossen ist",
+  "Not selected": "Nicht ausgewählt",
+  "Notify when finished": "Benachrichtigung, wenn fertig",
+  "Pauses between the selected topics and ends after the last one. If the sitting runs late, JustAI waits longer; at the latest it stops at {value0}.":
+    "Pausiert zwischen den ausgewählten Themen und endet nach dem letzten. Läuft die Sitzung länger, wartet JustAI mit; spätestens um {value0} ist Schluss.",
 } as const

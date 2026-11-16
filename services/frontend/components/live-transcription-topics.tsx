@@ -1,6 +1,8 @@
 "use client"
 
 import {
+  Bell,
+  BellRing,
   Check,
   Copy,
   Download,
@@ -9,13 +11,13 @@ import {
   Play,
   Sparkles,
   Square,
-  Star,
 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
+import { Checkbox } from "@/components/panelui/checkbox"
 import {
   Dialog,
   DialogBody,
@@ -31,6 +33,7 @@ import { api } from "@/lib/api"
 import { downloadFile } from "@/lib/download-file"
 import type { TranscriptionTopic } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { topicMoved } from "@/components/scheduled-capture-card"
 
 function formatOffset(ms?: number) {
   if (ms === undefined) return ""
@@ -53,6 +56,8 @@ export function LiveTranscriptionTopics({
   finishedNotice,
   onDismissNotice,
   defaultSittingNo,
+  capturing = true,
+  topicsOnly = false,
 }: {
   sessionId: string
   topics: TranscriptionTopic[]
@@ -61,6 +66,10 @@ export function LiveTranscriptionTopics({
   finishedNotice: TranscriptionTopic | null
   onDismissNotice: () => void
   defaultSittingNo?: number
+  /** A stream is being transcribed, so a topic can be started by hand. */
+  capturing?: boolean
+  /** Only starred topics are recorded ("only selected topics"). */
+  topicsOnly?: boolean
 }) {
   const { t, locale } = useTranslations()
   const [openId, setOpenId] = useState<string | null>(null)
@@ -121,11 +130,33 @@ export function LiveTranscriptionTopics({
     }
   }
 
+  const toggleStarred = (topic: TranscriptionTopic, starred: boolean) =>
+    void run(topic.id, async () => {
+      const result = await api.patch<{ topic: TranscriptionTopic }>(
+        `/api/v1/transcription/topics/${topic.id}`,
+        { starred }
+      )
+      upsert(result.topic)
+    })
+
   const statusBadge = (topic: TranscriptionTopic) =>
     topic.status === "active" ? (
       <Badge variant="default">{t("Running")}</Badge>
     ) : topic.status === "done" ? (
       <Badge variant="secondary">{t("Finished")}</Badge>
+    ) : topicsOnly ? (
+      topic.starred ? (
+        <Badge variant="default">{t("Selected for recording")}</Badge>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          {t("Not selected")}
+        </span>
+      )
+    ) : topic.starred ? (
+      <Badge variant="outline">
+        <BellRing aria-hidden="true" className="size-3" />
+        {t("Notify when finished")}
+      </Badge>
     ) : (
       <Badge variant="outline">{t("Planned")}</Badge>
     )
@@ -217,37 +248,48 @@ export function LiveTranscriptionTopics({
             <li
               className={cn(
                 "flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2",
-                topic.status === "active" && "bg-primary/5"
+                topic.status === "active" && "bg-primary/5",
+                topicsOnly &&
+                  !topic.starred &&
+                  topic.status === "planned" &&
+                  "text-muted-foreground"
               )}
               key={topic.id}
             >
-              <Button
-                aria-label={
-                  topic.starred
-                    ? t("Remove from my topics")
-                    : t("Mark as my topic")
-                }
-                aria-pressed={topic.starred}
-                onClick={() =>
-                  void run(topic.id, async () => {
-                    const result = await api.patch<{
-                      topic: TranscriptionTopic
-                    }>(`/api/v1/transcription/topics/${topic.id}`, {
-                      starred: !topic.starred,
-                    })
-                    upsert(result.topic)
-                  })
-                }
-                size="icon-sm"
-                variant="ghost"
-              >
-                <Star
-                  className={cn(
-                    "size-4",
-                    topic.starred && "fill-amber-400 text-amber-500"
-                  )}
+              {topicsOnly && topic.status === "planned" ? (
+                <Checkbox
+                  aria-label={t("Record “{value0}”", { value0: topic.title })}
+                  checked={topic.starred}
+                  disabled={busyId === topic.id}
+                  onCheckedChange={(next) =>
+                    toggleStarred(topic, Boolean(next))
+                  }
                 />
-              </Button>
+              ) : topicsOnly ? null : (
+                <Button
+                  aria-label={
+                    topic.starred
+                      ? t("Do not notify me when this topic is finished")
+                      : t("Notify me when this topic is finished")
+                  }
+                  aria-pressed={topic.starred}
+                  disabled={busyId === topic.id}
+                  onClick={() => toggleStarred(topic, !topic.starred)}
+                  size="icon-sm"
+                  title={
+                    topic.starred
+                      ? t("Do not notify me when this topic is finished")
+                      : t("Notify me when this topic is finished")
+                  }
+                  variant="ghost"
+                >
+                  {topic.starred ? (
+                    <BellRing className="size-4 text-primary" />
+                  ) : (
+                    <Bell className="size-4 text-muted-foreground" />
+                  )}
+                </Button>
+              )}
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{topic.title}</p>
                 <p className="text-xs text-muted-foreground">
@@ -259,6 +301,13 @@ export function LiveTranscriptionTopics({
                           : ""
                       }`
                     : ""}
+                  {topic.status === "planned" && topicMoved(topic) ? (
+                    <span className="ml-1 rounded bg-amber-500/10 px-1 text-amber-900 dark:text-amber-200">
+                      {t("moved, previously {value0}", {
+                        value0: time.format(new Date(topic.originalStartAt!)),
+                      })}
+                    </span>
+                  ) : null}
                   {topic.startedOffsetMs !== undefined
                     ? ` · ${formatOffset(topic.startedOffsetMs)}${
                         topic.endedOffsetMs !== undefined
@@ -270,7 +319,7 @@ export function LiveTranscriptionTopics({
               </div>
               {statusBadge(topic)}
               <div className="flex gap-1">
-                {topic.status === "planned" ? (
+                {topic.status === "planned" && capturing ? (
                   <Button
                     disabled={busyId === topic.id}
                     onClick={() =>

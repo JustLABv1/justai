@@ -315,8 +315,20 @@ func (m *TranscriptionManager) refreshTopicPlans(ctx context.Context) {
 		return
 	}
 	for _, p := range pairs {
-		if forSitting := plenaryItemsForSession(items, p.sitting); len(forSitting) > 0 {
-			_ = syncTopics(ctx, m.DB, p.session, uuid.Nil, forSitting)
+		forSitting := plenaryItemsForSession(items, p.sitting)
+		if len(forSitting) == 0 {
+			continue
+		}
+		moved, err := syncTopics(ctx, m.DB, p.session, uuid.Nil, forSitting)
+		if err != nil {
+			continue
+		}
+		for _, id := range moved {
+			m.broadcastTopic(p.session, id)
+		}
+		if len(moved) > 0 {
+			liveStreamEvents.inc("topic_plan_changed")
+			m.rescheduleTopicCapture(ctx, p.session, true)
 		}
 	}
 }

@@ -216,3 +216,70 @@ func (a *App) bundestagAgenda(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"items": forSitting, "leadMinutes": int(topicCaptureLead / time.Minute)})
 }
+
+// rescheduleTopicCapture moves a topic-scoped capture that is waiting (not started yet,
+// or paused between topics) when the published plan moved the selected items or the
+// user changed the selection. Only plan changes leave a note on the source.
+func (m *TranscriptionManager) rescheduleTopicCapture(ctx context.Context, sessionID uuid.UUID, planChanged bool) {
+	var sourceID uuid.UUID
+	var start, end *time.Time
+	err := m.DB.QueryRowContext(ctx, `
+		SELECT stream.source_id, stream.scheduled_start_at, stream.scheduled_end_at
+		FROM transcription_stream_sources stream
+		JOIN transcription_sources source ON source.id = stream.source_id
+		WHERE source.session_id = $1 AND stream.capture_scope = 'topics' AND stream.status = 'scheduled'
+		LIMIT 1`, sessionID).Scan(&sourceID, &start, &end)
+	if err != nil {
+		return
+	}
+	topics, err := loadTopics(ctx, m.DB, sessionID)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	nextStart, nextEnd, ok := topicCaptureWindow(topics, start, now)
+	if !ok {
+		return
+	}
+	if start != nil && end != nil && absDuration(start.Sub(nextStart)) <= time.Minute && absDuration(end.Sub(nextEnd)) <= time.Minute {
+		return
+	}
+	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_stream_sources SET scheduled_start_at = $2, scheduled_end_at = $3, updated_at = now() WHERE source_id = $1 AND status = 'scheduled'`, sourceID, nextStart, nextEnd); err != nil {
+		return
+	}
+	if !planChanged {
+		m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "scheduledStartAt": nextStart, "scheduledEndAt": nextEnd})
+		return
+	}
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	message := fmt.Sprintf("The Bundestag plan changed: capture now starts at %s (Berlin time).", nextStart.In(berlin).Format("02.01. 15:04"))
+	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_stream_sources SET alert = $2, alerted_at = now() WHERE source_id = $1`, sourceID, message); err == nil {
+		liveStreamEvents.inc("plan_changed")
+	}
+	m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "alert": message, "scheduledStartAt": nextStart, "scheduledEndAt": nextEnd})
+}
+
+// topicCaptureWindow is the window for the selected topics that are still planned.
+// Before any topic was reached it is the first capture window. While paused between
+// topics, the resume time (which already includes the observed delay) only moves earlier
+// when the next selected item was brought forward; a later slot just means listening longer.
+func topicCaptureWindow(topics []models.TranscriptionTopic, current *time.Time, now time.Time) (start, end time.Time, ok bool) {
+	started := false
+	var pending []planItem
+	for _, t := range topics {
+		if t.Status != "planned" {
+			started = true
+		}
+		if t.Starred && t.Status == "planned" && t.PlannedStartAt != nil && t.PlannedEndAt != nil {
+			pending = append(pending, planItem{StartAt: *t.PlannedStartAt, EndAt: *t.PlannedEndAt})
+		}
+	}
+	if len(pending) == 0 {
+		return start, end, false
+	}
+	start, end = topicCapturePlan(pending, now)
+	if started && current != nil && !start.Before(*current) {
+		start = *current
+	}
+	return start, end, true
+}

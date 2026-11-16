@@ -90,3 +90,32 @@ func TestDecideTopicScopeMarksPassedItemsMissed(t *testing.T) {
 		t.Fatalf("after a miss: %+v", d)
 	}
 }
+
+func TestTopicCaptureWindowFollowsMovedTopics(t *testing.T) {
+	now := time.Date(2026, 11, 25, 8, 0, 0, 0, time.UTC)
+	at := func(h, m int) *time.Time { v := time.Date(2026, 11, 25, h, m, 0, 0, time.UTC); return &v }
+	topics := []models.TranscriptionTopic{
+		{Order: 0, Status: "planned", PlannedStartAt: at(9, 0), PlannedEndAt: at(13, 0)},
+		{Order: 1, Status: "planned", Starred: true, PlannedStartAt: at(13, 30), PlannedEndAt: at(15, 15)},
+	}
+	start, end, ok := topicCaptureWindow(topics, at(12, 30), now)
+	if !ok || !start.Equal(*at(13, 0)) || !end.Equal(*at(18, 15)) {
+		t.Fatalf("before the capture the window follows the moved slot, got %v–%v (%v)", start, end, ok)
+	}
+	// Paused after an earlier topic: a later slot keeps the resume time...
+	topics[0].Status = "done"
+	start, _, _ = topicCaptureWindow(topics, at(12, 50), now)
+	if !start.Equal(*at(12, 50)) {
+		t.Fatalf("a later slot must not delay the resume time, got %v", start)
+	}
+	// ...an earlier one brings it forward.
+	topics[1].PlannedStartAt, topics[1].PlannedEndAt = at(11, 0), at(12, 0)
+	start, _, _ = topicCaptureWindow(topics, at(12, 50), now)
+	if !start.Equal(*at(10, 30)) {
+		t.Fatalf("an earlier slot must bring the resume time forward, got %v", start)
+	}
+	topics[1].Starred = false
+	if _, _, ok := topicCaptureWindow(topics, at(12, 50), now); ok {
+		t.Fatal("without a selected planned topic there is nothing to schedule")
+	}
+}

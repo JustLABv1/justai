@@ -17,7 +17,7 @@ import {
   ArrowRight,
   AudioLines,
   Bot,
-  CalendarDays,
+  CalendarClock,
   Check,
   Copy,
   ChevronDown,
@@ -35,9 +35,17 @@ import { VideoTranscriptionLibrary } from "@/components/video-transcription-libr
 import { LiveProcessingSettings } from "@/components/live-processing-settings"
 import { LiveTranscriptionTopics } from "@/components/live-transcription-topics"
 import {
-  BundestagTopicPicker,
-  type CaptureScope,
-} from "@/components/bundestag-topic-picker"
+  StreamScheduleEditDialog,
+  StreamSourcePicker,
+  StreamWhenFields,
+  describeStreamSchedule,
+  initialStreamSchedule,
+  relaySourceDisplayName,
+  sittingNumber,
+  streamScheduleProblem,
+  streamSchedulePayload as buildStreamSchedulePayload,
+  type StreamSchedule,
+} from "@/components/livestream-setup"
 import { LiveTranscriptProcessingPanel } from "@/components/live-transcript-processing-panel"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
@@ -55,15 +63,9 @@ import {
 } from "@/components/panelui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/panelui/button"
-import { Calendar } from "@/components/ui/calendar"
 import { Field, FieldDescription, FieldLabel } from "@/components/panelui/field"
 import { Frame } from "@/components/panelui/frame"
 import { Input } from "@/components/panelui/input"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import {} from "@/components/ui/page"
 import {
   Select,
@@ -113,66 +115,18 @@ type SocketEvent = {
 
 type CaptureMode = "microphone" | "system-audio" | "external"
 type ExternalSourceType = "stream" | "meeting-bot"
-type SessionWizardStep = 0 | 1 | 2
 type SessionSourceChoice =
   "microphone" | "system-audio" | "stream" | "meeting-bot"
+// A livestream gets its own "when & what" step; other sources go straight to options.
+type WizardStepId = "source" | "setup" | "when" | "options"
 
-const liveSessionWizardStepsMessages = [
-  { label: "Source" },
-  { label: "Setup" },
-  { label: "Options" },
-] as const
-
-function localDateTimeValue(date: Date) {
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 16)
-}
-
-function parseLocalDateTime(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
-  if (!match) return null
-  const [, year, month, day, hour, minute] = match
-  const result = new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute)
-  )
-  return Number.isNaN(result.getTime()) ? null : result
-}
-
-function formatScheduleDateTime(value: string, emptyLabel: string) {
-  const date = parseLocalDateTime(value)
-  if (!date) return emptyLabel
-  return `${String(date.getDate()).padStart(2, "0")}.${String(
-    date.getMonth() + 1
-  ).padStart(2, "0")}.${date.getFullYear()} · ${String(
-    date.getHours()
-  ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
-}
-
-function updateLocalDateTime(
-  value: string,
-  update: Partial<{
-    date: Date
-    hour: number
-    minute: number
-  }>
-) {
-  const current = parseLocalDateTime(value) ?? new Date()
-  const date = update.date ?? current
-  return localDateTimeValue(
-    new Date(
-      date.getFullYear(),
-      date.getMonth(),
-      date.getDate(),
-      update.hour ?? current.getHours(),
-      update.minute ?? current.getMinutes()
-    )
-  )
-}
+const liveSessionWizardStepsMessages = {
+  source: { label: "Source" },
+  setup: { label: "Setup" },
+  stream: { label: "Stream" },
+  when: { label: "When & what" },
+  options: { label: "Options" },
+} as const
 
 function isYouTubePageURL(value: string) {
   try {
@@ -207,645 +161,6 @@ function DialogError({ message }: { message: string }) {
 
 const youtubeCaptureGuidance =
   "A YouTube watch page must be captured from the browser. Choose Browser tab or system, then select the YouTube tab and enable Share audio."
-
-function ScheduleDateTimePicker({
-  idPrefix,
-  label,
-  value,
-  minimum,
-  optional = false,
-  onChange,
-}: {
-  idPrefix: string
-  label: string
-  value: string
-  minimum?: string
-  optional?: boolean
-  onChange: (value: string) => void
-}) {
-  const { t } = useTranslations()
-
-  const timeZone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "Browser time zone"
-  const selected = parseLocalDateTime(value)
-  const minimumDate = minimum ? parseLocalDateTime(minimum) : undefined
-  const hours = Array.from({ length: 24 }, (_, hour) => hour)
-  const minutes = Array.from({ length: 60 }, (_, minute) => minute)
-
-  return (
-    <Field>
-      <FieldLabel>
-        {label}
-        {optional ? " (optional)" : ""}
-      </FieldLabel>
-      <div className="flex flex-col gap-2">
-        <Popover>
-          <PopoverTrigger
-            render={
-              <Button
-                aria-label={t("{value0}: select date and time", {
-                  value0: label,
-                })}
-                className="w-full justify-start"
-                id={`${idPrefix}-trigger`}
-                variant="outline"
-              >
-                <CalendarDays data-icon="inline-start" />
-                {formatScheduleDateTime(value, t("Select date and time"))}
-              </Button>
-            }
-          />
-          <PopoverContent align="start" className="w-auto p-0">
-            <Calendar
-              disabled={minimumDate ? { before: minimumDate } : undefined}
-              mode="single"
-              onSelect={(date) => {
-                if (date) onChange(updateLocalDateTime(value, { date }))
-              }}
-              selected={selected ?? undefined}
-            />
-          </PopoverContent>
-        </Popover>
-        <div className="grid grid-cols-2 gap-2">
-          <Select
-            onValueChange={(next) => {
-              if (next)
-                onChange(updateLocalDateTime(value, { hour: Number(next) }))
-            }}
-            value={
-              selected ? String(selected.getHours()).padStart(2, "0") : null
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={t("Hour")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectGroupLabel>{t("Hour (24-hour)")}</SelectGroupLabel>
-                {hours.map((hour) => (
-                  <SelectItem key={hour} value={String(hour).padStart(2, "0")}>
-                    {String(hour).padStart(2, "0")}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Select
-            onValueChange={(next) => {
-              if (next)
-                onChange(updateLocalDateTime(value, { minute: Number(next) }))
-            }}
-            value={
-              selected ? String(selected.getMinutes()).padStart(2, "0") : null
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={t("Minute")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectGroupLabel>{t("Minute")}</SelectGroupLabel>
-                {minutes.map((minute) => (
-                  <SelectItem
-                    key={minute}
-                    value={String(minute).padStart(2, "0")}
-                  >
-                    {String(minute).padStart(2, "0")}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-        <FieldDescription>
-          {t("Local browser time ·")} {timeZone} {t("· 24-hour format")}
-        </FieldDescription>
-      </div>
-    </Field>
-  )
-}
-
-type StartMode = "at_time" | "when_live"
-
-const silenceStopOptions = ["0", "10", "20", "30", "60", "120"]
-
-// A watch window ("when the stream goes live") needs both ends; a fixed start only a start.
-function streamScheduleInvalid(
-  scheduled: boolean,
-  mode: StartMode,
-  start: string,
-  end: string
-) {
-  if (!scheduled) return false
-  if (!start) return true
-  if (mode === "when_live" && !end) return true
-  return Boolean(end && new Date(end) <= new Date(start))
-}
-
-// Times follow the selected JustAI language, not the browser's: German uses 24 hours.
-/** The sitting number of a Bundestag plan key such as "bundestag-sitzung-110". */
-function sittingNumber(planKey: string) {
-  const match = /^bundestag-sitzung-(\d+)$/.exec(planKey)
-  return match ? Number(match[1]) : 0
-}
-
-function formatPlanSession(session: StreamPlanSession, locale: string) {
-  const start = new Date(session.startAt)
-  const end = new Date(session.endAt)
-  const day = new Intl.DateTimeFormat(locale, {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-  }).format(start)
-  const time = new Intl.DateTimeFormat(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-  return `${session.title} · ${day} ${time.format(start)}–${time.format(end)}`
-}
-
-type StreamScheduleFieldsProps = {
-  idPrefix: string
-  scheduled: boolean
-  start: string
-  end: string
-  onScheduledChange: (checked: boolean) => void
-  onStartChange: (value: string) => void
-  onEndChange: (value: string) => void
-  startMode?: StartMode
-  onStartModeChange?: (mode: StartMode) => void
-  silenceStop?: string
-  onSilenceStopChange?: (minutes: string) => void
-  plan?: StreamPlanSession[]
-  planKey?: string
-  onPlanKeyChange?: (key: string) => void
-  planFollow?: boolean
-  onPlanFollowChange?: (follow: boolean) => void
-  trackTopics?: boolean
-  onTrackTopicsChange?: (track: boolean) => void
-  captureScope?: CaptureScope
-  onCaptureScopeChange?: (scope: CaptureScope) => void
-  topicKeys?: string[]
-  onTopicKeysChange?: (keys: string[]) => void
-  /** Editing an existing schedule: no on/off switch, no plan picker. */
-  editing?: boolean
-  /** The watch window is already open, so its start can no longer change. */
-  startLocked?: boolean
-}
-
-function StreamScheduleFields({
-  idPrefix,
-  scheduled,
-  start,
-  end,
-  onScheduledChange,
-  onStartChange,
-  onEndChange,
-  startMode = "at_time",
-  onStartModeChange,
-  silenceStop = "0",
-  onSilenceStopChange,
-  plan = [],
-  planKey = "",
-  onPlanKeyChange,
-  planFollow = false,
-  onPlanFollowChange,
-  trackTopics = false,
-  onTrackTopicsChange,
-  captureScope = "all",
-  onCaptureScopeChange,
-  topicKeys = [],
-  onTopicKeysChange,
-  editing = false,
-  startLocked = false,
-}: StreamScheduleFieldsProps) {
-  const { t, locale } = useTranslations()
-  const whenLive = startMode === "when_live"
-  const sitting = sittingNumber(planKey)
-  // Recording only selected topics derives the whole schedule from the agenda.
-  const topicsOnly =
-    !editing && trackTopics && sitting > 0 && captureScope === "topics"
-  // Say why the form cannot be saved instead of leaving the button silently disabled.
-  const problem =
-    !scheduled || topicsOnly
-      ? ""
-      : !start
-        ? t("Choose a start time.")
-        : whenLive && !end
-          ? t(
-              "A watch window needs an end time. Choose when JustAI should stop watching for the broadcast."
-            )
-          : end && new Date(end) <= new Date(start)
-            ? t("The end time must be after the start time.")
-            : ""
-
-  return (
-    <>
-      {editing ? null : (
-        <Frame>
-          <Frame.Panel>
-            <Frame.Row>
-              <Frame.Content>
-                <Frame.Title as="p">{t("Schedule capture")}</Frame.Title>
-                <Frame.Description>
-                  {t(
-                    "JustAI connects automatically at the selected local time, or when the broadcast goes live."
-                  )}
-                </Frame.Description>
-              </Frame.Content>
-              <Frame.Actions>
-                <Switch
-                  aria-label={t("Schedule livestream capture")}
-                  checked={scheduled}
-                  onCheckedChange={onScheduledChange}
-                />
-              </Frame.Actions>
-            </Frame.Row>
-          </Frame.Panel>
-        </Frame>
-      )}
-      {scheduled ? (
-        <div className="flex flex-col gap-4">
-          {!editing && plan.length > 0 && onPlanKeyChange ? (
-            <Field>
-              <FieldLabel>{t("Bundestag session")}</FieldLabel>
-              <Select
-                onValueChange={(value) => onPlanKeyChange(value ?? "")}
-                value={planKey || "none"}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={t("Choose a session")}>
-                    {(value: string | null) => {
-                      const session = plan.find((item) => item.key === value)
-                      return session
-                        ? formatPlanSession(session, locale)
-                        : t("No session – choose times manually")
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="none">
-                      {t("No session – choose times manually")}
-                    </SelectItem>
-                    {plan.map((session) => (
-                      <SelectItem key={session.key} value={session.key}>
-                        {formatPlanSession(session, locale)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                {t(
-                  "The session plan is published by the Bundestag. JustAI watches from shortly before the announced start until well after the announced end."
-                )}
-              </FieldDescription>
-            </Field>
-          ) : null}
-          {onStartModeChange && !startLocked && !topicsOnly ? (
-            <Field>
-              <FieldLabel>{t("Start")}</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={() => onStartModeChange("at_time")}
-                  size="sm"
-                  type="button"
-                  variant={whenLive ? "outline" : "default"}
-                >
-                  {t("At the exact time")}
-                </Button>
-                <Button
-                  onClick={() => onStartModeChange("when_live")}
-                  size="sm"
-                  type="button"
-                  variant={whenLive ? "default" : "outline"}
-                >
-                  {t("When the stream goes live")}
-                </Button>
-              </div>
-              <FieldDescription>
-                {whenLive
-                  ? t(
-                      "JustAI listens from the start of the window and begins capturing as soon as it hears speech, so a changed broadcast plan does not matter. Music and silence are ignored."
-                    )
-                  : t(
-                      "Capture starts at exactly this time, even if the broadcaster changed its plan."
-                    )}
-              </FieldDescription>
-            </Field>
-          ) : null}
-          {topicsOnly ? null : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {startLocked ? (
-                <Field>
-                  <FieldLabel>{t("Watching since")}</FieldLabel>
-                  <p className="text-sm text-muted-foreground">
-                    {formatScheduleDateTime(start, t("Select date and time"))}
-                  </p>
-                </Field>
-              ) : (
-                <ScheduleDateTimePicker
-                  idPrefix={`${idPrefix}-scheduled-start`}
-                  label={whenLive ? t("Watch from") : t("Start time")}
-                  minimum={localDateTimeValue(new Date())}
-                  onChange={onStartChange}
-                  value={start}
-                />
-              )}
-              <ScheduleDateTimePicker
-                idPrefix={`${idPrefix}-scheduled-end`}
-                label={whenLive ? t("Watch until") : t("End time")}
-                minimum={start || localDateTimeValue(new Date())}
-                onChange={onEndChange}
-                optional={!whenLive}
-                value={end}
-              />
-            </div>
-          )}
-          {whenLive && onSilenceStopChange && !topicsOnly ? (
-            <Field>
-              <FieldLabel>{t("Stop after silence")}</FieldLabel>
-              <Select
-                onValueChange={(value) => onSilenceStopChange(value ?? "0")}
-                value={silenceStop}
-              >
-                <SelectTrigger className="w-full sm:w-64">
-                  <SelectValue>
-                    {(value: string | null) =>
-                      !value || value === "0"
-                        ? t("Only at the end of the window")
-                        : t("After {value0} minutes without speech", {
-                            value0: value,
-                          })
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {silenceStopOptions.map((minutes) => (
-                      <SelectItem key={minutes} value={minutes}>
-                        {minutes === "0"
-                          ? t("Only at the end of the window")
-                          : t("After {value0} minutes without speech", {
-                              value0: minutes,
-                            })}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                {t(
-                  "Ends the capture when the programme returns to music or silence, for example after a session. Breaks shorter than this keep the capture running."
-                )}
-              </FieldDescription>
-            </Field>
-          ) : null}
-          {!editing &&
-          /^bundestag-sitzung-\d+$/.test(planKey) &&
-          onTrackTopicsChange ? (
-            <Frame>
-              <Frame.Panel>
-                <Frame.Row>
-                  <Frame.Content>
-                    <Frame.Title as="p">{t("Track topics")}</Frame.Title>
-                    <Frame.Description>
-                      {t(
-                        "JustAI recognises each agenda item from the chair’s announcements. A topic’s transcript is ready as soon as that topic is finished, while the sitting goes on."
-                      )}
-                    </Frame.Description>
-                  </Frame.Content>
-                  <Frame.Actions>
-                    <Switch
-                      aria-label={t("Track topics")}
-                      checked={trackTopics}
-                      onCheckedChange={onTrackTopicsChange}
-                    />
-                  </Frame.Actions>
-                </Frame.Row>
-                {trackTopics && onCaptureScopeChange && onTopicKeysChange ? (
-                  <Frame.Row>
-                    <Frame.Content>
-                      <BundestagTopicPicker
-                        onScopeChange={onCaptureScopeChange}
-                        onSelectedChange={onTopicKeysChange}
-                        scope={captureScope}
-                        selected={topicKeys}
-                        sittingNo={sitting}
-                      />
-                    </Frame.Content>
-                  </Frame.Row>
-                ) : null}
-              </Frame.Panel>
-            </Frame>
-          ) : null}
-          {whenLive && planKey && onPlanFollowChange && !topicsOnly ? (
-            <Frame>
-              <Frame.Panel>
-                <Frame.Row>
-                  <Frame.Content>
-                    <Frame.Title as="p">
-                      {t("Follow schedule changes")}
-                    </Frame.Title>
-                    <Frame.Description>
-                      {t(
-                        "JustAI re-checks the published plan and moves the window if the session is rescheduled. If the session disappears from the plan you get a warning."
-                      )}
-                    </Frame.Description>
-                  </Frame.Content>
-                  <Frame.Actions>
-                    <Switch
-                      aria-label={t("Follow schedule changes")}
-                      checked={planFollow}
-                      onCheckedChange={onPlanFollowChange}
-                    />
-                  </Frame.Actions>
-                </Frame.Row>
-              </Frame.Panel>
-            </Frame>
-          ) : null}
-          {problem ? (
-            <p className="text-sm leading-5 text-destructive" role="alert">
-              {problem}
-            </p>
-          ) : null}
-          {topicsOnly ? null : (
-            <p className="text-xs leading-4 text-muted-foreground">
-              {whenLive
-                ? t(
-                    "If nothing is heard before the window ends you get a warning on the session. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
-                  )
-                : t(
-                    "Without an end time, capture stops when the stream ends. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
-                  )}
-            </p>
-          )}
-        </div>
-      ) : null}
-    </>
-  )
-}
-
-/** Change the schedule of a capture that has not started yet. */
-function StreamScheduleEditDialog({
-  source,
-  onClose,
-  onSaved,
-}: {
-  source: TranscriptionSource | null
-  onClose: () => void
-  onSaved: (id: string, patch: Partial<TranscriptionSource>) => void
-}) {
-  return (
-    <Dialog
-      open={Boolean(source)}
-      onOpenChange={(open) => {
-        if (!open) onClose()
-      }}
-    >
-      {source ? (
-        <StreamScheduleEditForm
-          key={source.id}
-          onClose={onClose}
-          onSaved={onSaved}
-          source={source}
-        />
-      ) : null}
-    </Dialog>
-  )
-}
-
-function StreamScheduleEditForm({
-  source,
-  onClose,
-  onSaved,
-}: {
-  source: TranscriptionSource
-  onClose: () => void
-  onSaved: (id: string, patch: Partial<TranscriptionSource>) => void
-}) {
-  const { t } = useTranslations()
-  const [start, setStart] = useState(() =>
-    source.scheduledStartAt
-      ? localDateTimeValue(new Date(source.scheduledStartAt))
-      : ""
-  )
-  const [end, setEnd] = useState(() =>
-    source.scheduledEndAt
-      ? localDateTimeValue(new Date(source.scheduledEndAt))
-      : ""
-  )
-  const [mode, setMode] = useState<StartMode>(
-    source.startMode === "when_live" ? "when_live" : "at_time"
-  )
-  const [silenceStop, setSilenceStop] = useState(
-    String(Math.round((source.silenceStopSeconds ?? 0) / 60))
-  )
-  const [follow, setFollow] = useState(Boolean(source.planFollow))
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState("")
-  const watching = source.transportStatus === "watching"
-
-  const silenceOptionsForSource = silenceStopOptions.includes(silenceStop)
-    ? silenceStopOptions
-    : [...silenceStopOptions, silenceStop]
-  const invalid = streamScheduleInvalid(true, mode, start, end)
-
-  const save = async () => {
-    if (invalid || saving) return
-    setSaving(true)
-    setError("")
-    try {
-      const silenceSeconds = Number(silenceStop) * 60
-      const keepPlan = mode === "when_live" && follow && source.planKey
-      await api.patch(
-        `/api/v1/transcription/stream-sources/${source.id}/schedule`,
-        {
-          scheduledStartAt: new Date(start).toISOString(),
-          scheduledEndAt: end ? new Date(end).toISOString() : undefined,
-          startMode: mode,
-          silenceStopSeconds: silenceSeconds > 0 ? silenceSeconds : undefined,
-          planFollow: keepPlan ? true : undefined,
-          planKey: keepPlan ? source.planKey : undefined,
-        }
-      )
-      onSaved(source.id, {
-        scheduledStartAt: new Date(start).toISOString(),
-        scheduledEndAt: end ? new Date(end).toISOString() : null,
-        startMode: mode,
-        silenceStopSeconds: silenceSeconds,
-        planFollow: Boolean(keepPlan),
-        planKey: keepPlan ? source.planKey : "",
-        alert: "",
-      })
-      onClose()
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The schedule could not be changed."
-      )
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{t("Edit schedule")}</DialogTitle>
-          <DialogDescription>
-            {watching
-              ? t(
-                  "JustAI is already watching for the broadcast. You can still change when it stops looking."
-                )
-              : t(
-                  "Use this when the broadcaster changed its plan. Nothing is lost; the capture simply follows the new times."
-                )}
-          </DialogDescription>
-        </DialogHeader>
-        {error ? <DialogError message={error} /> : null}
-        <DialogBody>
-          <FieldGroup>
-            <StreamScheduleFields
-              editing
-              end={end}
-              idPrefix="edit-stream-schedule"
-              onEndChange={setEnd}
-              onPlanFollowChange={setFollow}
-              onScheduledChange={() => {}}
-              onSilenceStopChange={setSilenceStop}
-              onStartChange={setStart}
-              onStartModeChange={watching ? undefined : setMode}
-              planFollow={follow}
-              planKey={source.planKey ?? ""}
-              scheduled
-              silenceStop={
-                silenceOptionsForSource.includes(silenceStop)
-                  ? silenceStop
-                  : "0"
-              }
-              start={start}
-              startLocked={watching}
-              startMode={mode}
-            />
-          </FieldGroup>
-        </DialogBody>
-        <DialogFooter>
-          <Button onClick={onClose} variant="outline">
-            {t("Cancel")}
-          </Button>
-          <Button disabled={invalid || saving} onClick={() => void save()}>
-            {saving ? <Spinner /> : null}
-            {t("Save schedule")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </>
-  )
-}
 
 const liveSessionSourceOptionsMessages: Array<{
   key: SessionSourceChoice
@@ -918,7 +233,7 @@ export function LiveTranscriptionView({
     liveSessionWizardStepsMessages
   )
 
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const processingSessionId = snapshot?.session.id
@@ -971,6 +286,7 @@ export function LiveTranscriptionView({
     []
   )
   const [title, setTitle] = useState("Room session")
+  const [titleEdited, setTitleEdited] = useState(false)
   const [language, setLanguage] = useState("auto")
   const languageItems = useMemo(
     () =>
@@ -992,21 +308,15 @@ export function LiveTranscriptionView({
   const [captureMode, setCaptureMode] = useState<CaptureMode>("microphone")
   const [externalSourceType, setExternalSourceType] =
     useState<ExternalSourceType>("stream")
-  const [createStep, setCreateStep] = useState<SessionWizardStep>(0)
+  const [createStep, setCreateStep] = useState(0)
   const [streamDialogOpen, setStreamDialogOpen] = useState(false)
-  const [streamName, setStreamName] = useState(t("Live stream"))
+  // Empty means "use the suggestion" (relay source or the checked stream's name).
+  const [streamName, setStreamName] = useState("")
+  const [streamRelayName, setStreamRelayName] = useState("")
   const [streamURL, setStreamURL] = useState("")
-  const [streamScheduled, setStreamScheduled] = useState(false)
-  const [streamScheduledStart, setStreamScheduledStart] = useState("")
-  const [streamScheduledEnd, setStreamScheduledEnd] = useState("")
-  const [streamStartMode, setStreamStartMode] = useState<StartMode>("at_time")
-  const [streamSilenceStop, setStreamSilenceStop] = useState("0")
-  const [streamPlanKey, setStreamPlanKey] = useState("")
-  const [streamPlanFollow, setStreamPlanFollow] = useState(true)
-  const [streamTrackTopics, setStreamTrackTopics] = useState(true)
-  const [streamCaptureScope, setStreamCaptureScope] =
-    useState<CaptureScope>("all")
-  const [streamTopicKeys, setStreamTopicKeys] = useState<string[]>([])
+  const [streamSchedule, setStreamSchedule] = useState<StreamSchedule>(
+    initialStreamSchedule
+  )
   const [topics, setTopics] = useState<TranscriptionTopic[]>([])
   const [topicNotice, setTopicNotice] = useState<TranscriptionTopic | null>(
     null
@@ -1075,90 +385,25 @@ export function LiveTranscriptionView({
     }
   }, [streamURL])
   const streamPlan = checkedStreamReady ? (streamCheck?.plan ?? []) : []
-  const selectStreamPlan = (key: string) => {
-    const session = streamPlan.find((item) => item.key === key)
-    setStreamPlanKey(session ? key : "")
-    setStreamTopicKeys([])
-    if (!session) return
-    setStreamScheduled(true)
-    setStreamStartMode("when_live")
-    setStreamPlanFollow(true)
-    // A session that has already begun is watched from now on.
-    const from = Math.max(Date.now(), new Date(session.windowStartAt).getTime())
-    setStreamScheduledStart(localDateTimeValue(new Date(from)))
-    setStreamScheduledEnd(localDateTimeValue(new Date(session.windowEndAt)))
-    if (streamSilenceStop === "0") setStreamSilenceStop("30")
-  }
-  const streamWatchProps = {
-    startMode: streamStartMode,
-    onStartModeChange: setStreamStartMode,
-    silenceStop: streamSilenceStop,
-    onSilenceStopChange: setStreamSilenceStop,
-    plan: streamPlan,
-    planKey: streamPlanKey,
-    onPlanKeyChange: selectStreamPlan,
-    planFollow: streamPlanFollow,
-    onPlanFollowChange: setStreamPlanFollow,
-    trackTopics: streamTrackTopics,
-    onTrackTopicsChange: setStreamTrackTopics,
-    captureScope: streamCaptureScope,
-    onCaptureScopeChange: setStreamCaptureScope,
-    topicKeys: streamTopicKeys,
-    onTopicKeysChange: setStreamTopicKeys,
-  }
-  // Recording only selected Bundestag topics: the backend derives the schedule.
-  const streamTopicsOnly =
-    streamScheduled &&
-    streamTrackTopics &&
-    sittingNumber(streamPlanKey) > 0 &&
-    streamCaptureScope === "topics"
-  const streamSetupInvalid = streamTopicsOnly
-    ? streamTopicKeys.length === 0
-    : streamScheduleInvalid(
-        streamScheduled,
-        streamStartMode,
-        streamScheduledStart,
-        streamScheduledEnd
-      )
-  const streamSchedulePayload = () => {
-    if (!streamScheduled) return {}
-    if (streamTopicsOnly)
-      return {
-        captureScope: "topics",
-        topicKeys: streamTopicKeys,
-        topicsSessionNo: sittingNumber(streamPlanKey),
-      }
-    const silenceSeconds = Number(streamSilenceStop) * 60
-    const followPlan =
-      streamStartMode === "when_live" && streamPlanFollow && streamPlanKey
-    return {
-      scheduledStartAt: streamScheduledStart
-        ? new Date(streamScheduledStart).toISOString()
-        : undefined,
-      scheduledEndAt: streamScheduledEnd
-        ? new Date(streamScheduledEnd).toISOString()
-        : undefined,
-      startMode: streamStartMode,
-      silenceStopSeconds: silenceSeconds > 0 ? silenceSeconds : undefined,
-      planFollow: followPlan ? true : undefined,
-      planKey: followPlan ? streamPlanKey : undefined,
-      topicsSessionNo:
-        streamTrackTopics && sittingNumber(streamPlanKey)
-          ? sittingNumber(streamPlanKey)
-          : undefined,
-    }
-  }
-  const resetStreamSchedule = () => {
-    setStreamScheduled(false)
-    setStreamScheduledStart("")
-    setStreamScheduledEnd("")
-    setStreamStartMode("at_time")
-    setStreamSilenceStop("0")
-    setStreamPlanKey("")
-    setStreamPlanFollow(true)
-    setStreamTrackTopics(true)
-    setStreamCaptureScope("all")
-    setStreamTopicKeys([])
+  const streamPlanLoading =
+    Boolean(streamURL.trim()) && streamCheck?.url !== streamURL.trim()
+  const streamScheduled = streamSchedule.when !== "now"
+  const streamScheduleIssue = streamScheduleProblem(
+    streamSchedule,
+    streamPlan,
+    t
+  )
+  const streamSetupInvalid = Boolean(streamScheduleIssue)
+  const streamSchedulePayload = () => buildStreamSchedulePayload(streamSchedule)
+  const resetStreamSchedule = () => setStreamSchedule(initialStreamSchedule)
+  const streamNameSuggestion =
+    streamRelayName ||
+    (checkedStreamReady ? (streamCheck?.name ?? "") : "") ||
+    t("Live stream")
+  const effectiveStreamName = streamName.trim() || streamNameSuggestion
+  const pickStreamURL = (url: string) => {
+    setStreamURL(url)
+    setStreamRelayName("")
   }
   const streamCheckFeedback = streamURL.trim() ? (
     <p
@@ -1176,10 +421,36 @@ export function LiveTranscriptionView({
         : streamCheck.error ||
           t(
             "{value0} · Stream found. JustAI captures it on the server; your browser can be closed.",
-            { value0: streamCheck.name }
+            { value0: streamRelayName || streamCheck.name }
           )}
     </p>
   ) : null
+  const streamSourceFields = (
+    <>
+      <StreamSourcePicker
+        onRelayPick={(source) => {
+          setStreamURL(source.url)
+          setStreamRelayName(relaySourceDisplayName(source))
+        }}
+        onURLChange={pickStreamURL}
+        url={streamURL}
+      />
+      {streamURL.trim() ? (
+        <>
+          {streamCheckFeedback}
+          <Field>
+            <FieldLabel>{t("Source name")}</FieldLabel>
+            <Input
+              id="stream-source-name"
+              onChange={(event) => setStreamName(event.target.value)}
+              placeholder={streamNameSuggestion}
+              value={streamName}
+            />
+          </Field>
+        </>
+      ) : null}
+    </>
+  )
 
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [botName, setBotName] = useState(t("Meeting bot"))
@@ -1519,6 +790,15 @@ export function LiveTranscriptionView({
                       typeof data.alert === "string"
                         ? data.alert
                         : source.alert,
+                    // A moved plan or a changed topic selection reschedules the capture.
+                    scheduledStartAt:
+                      typeof data.scheduledStartAt === "string"
+                        ? data.scheduledStartAt
+                        : source.scheduledStartAt,
+                    scheduledEndAt:
+                      typeof data.scheduledEndAt === "string"
+                        ? data.scheduledEndAt
+                        : source.scheduledEndAt,
                     lastSeenAt:
                       data.lastSeenAt === null
                         ? null
@@ -2278,7 +1558,7 @@ export function LiveTranscriptionView({
         }>(
           `/api/v1/transcription/sessions/${result.session.id}/stream-sources`,
           {
-            name: streamName.trim() || t("Live stream"),
+            name: effectiveStreamName,
             url: streamURL.trim(),
             ...streamSchedulePayload(),
           }
@@ -2626,7 +1906,7 @@ export function LiveTranscriptionView({
       }>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/stream-sources`,
         {
-          name: streamName.trim() || t("Live stream"),
+          name: effectiveStreamName,
           url: streamURL.trim(),
           ...streamSchedulePayload(),
         }
@@ -2656,6 +1936,8 @@ export function LiveTranscriptionView({
           : current
       )
       setStreamURL("")
+      setStreamName("")
+      setStreamRelayName("")
       resetStreamSchedule()
       setStreamDialogOpen(false)
       onSessionsChanged()
@@ -2759,14 +2041,26 @@ export function LiveTranscriptionView({
         (source) => source.kind === "stream" && /bundestag/i.test(source.name)
       )
     )
-  const sourceSetupReady =
-    captureMode !== "external" ||
-    externalSourceType === "meeting-bot" ||
-    (checkedStreamReady && !streamSetupInvalid)
+  const wizardStepIds: WizardStepId[] =
+    selectedWizardSource === "stream"
+      ? ["source", "setup", "when", "options"]
+      : ["source", "setup", "options"]
+  const wizardStep =
+    wizardStepIds[Math.min(createStep, wizardStepIds.length - 1)]
+  const lastWizardStep = wizardStepIds.length - 1
+  const wizardSteps = wizardStepIds.map((id) =>
+    id === "setup" && selectedWizardSource === "stream"
+      ? liveSessionWizardSteps.stream
+      : liveSessionWizardSteps[id]
+  )
   const canContinueWizard =
-    createStep === 0 ||
-    (createStep === 1 && sourceSetupReady) ||
-    (createStep === 2 && Boolean(effectiveSelectedEndpoint))
+    wizardStep === "source" ||
+    (wizardStep === "setup" &&
+      (captureMode !== "external" ||
+        externalSourceType === "meeting-bot" ||
+        checkedStreamReady)) ||
+    (wizardStep === "when" && !streamSetupInvalid) ||
+    (wizardStep === "options" && Boolean(effectiveSelectedEndpoint))
   const selectWizardSource = (choice: SessionSourceChoice) => {
     if (choice === "stream" || choice === "meeting-bot") {
       setCaptureMode("external")
@@ -2776,12 +2070,28 @@ export function LiveTranscriptionView({
     setCaptureMode(choice)
   }
   const goToNextWizardStep = () => {
-    if (!canContinueWizard || createStep === 2) return
-    setCreateStep((current) => (current + 1) as SessionWizardStep)
+    if (!canContinueWizard || createStep >= lastWizardStep) return
+    const next = wizardStepIds[createStep + 1]
+    // Name a livestream session after what it captures unless it was renamed.
+    if (
+      next === "options" &&
+      selectedWizardSource === "stream" &&
+      !titleEdited
+    ) {
+      const session = streamPlan.find(
+        (item) => item.key === streamSchedule.planKey
+      )
+      setTitle(
+        streamSchedule.when === "sitting" && session
+          ? `${effectiveStreamName} · ${session.title}`
+          : effectiveStreamName
+      )
+    }
+    setCreateStep(createStep + 1)
   }
   const goToPreviousWizardStep = () => {
     if (createStep === 0) return
-    setCreateStep((current) => (current - 1) as SessionWizardStep)
+    setCreateStep(createStep - 1)
   }
   const captureViewMode = snapshot
     ? resolveCaptureViewMode(snapshot, captureMode, externalSourceType)
@@ -2924,9 +2234,17 @@ export function LiveTranscriptionView({
                 : rotateJoinCode())
             }
             onEditSchedule={setEditingSchedule}
+            topics={sessionTopics}
             topicsPanel={
               sessionTopicsVisible ? (
                 <LiveTranscriptionTopics
+                  capturing={snapshot.sources.some(
+                    (source) =>
+                      source.kind === "stream" && source.status === "connected"
+                  )}
+                  topicsOnly={snapshot.sources.some(
+                    (source) => source.captureScope === "topics"
+                  )}
                   defaultSittingNo={sessionSittingNumber || undefined}
                   finishedNotice={
                     topicNotice?.sessionId === snapshot.session.id
@@ -2958,9 +2276,12 @@ export function LiveTranscriptionView({
         <TranscriptionCreationFlow
           title={t("New live session")}
           description={t("Choose an audio source and how it is processed.")}
-          steps={liveSessionWizardSteps}
-          step={createStep}
-          onStepChange={(step) => setCreateStep(step as SessionWizardStep)}
+          steps={wizardSteps}
+          step={Math.min(createStep, lastWizardStep)}
+          onStepChange={(step) => {
+            if (step < createStep) setCreateStep(step)
+            else if (step === createStep + 1) goToNextWizardStep()
+          }}
           busy={starting}
           footer={
             <footer className="flex flex-wrap items-center justify-end gap-4 pt-4">
@@ -2981,7 +2302,7 @@ export function LiveTranscriptionView({
                     {t("Cancel")}
                   </Button>
                 )}
-                {createStep < 2 ? (
+                {createStep < lastWizardStep ? (
                   <Button
                     disabled={!canContinueWizard}
                     onClick={goToNextWizardStep}
@@ -3000,7 +2321,10 @@ export function LiveTranscriptionView({
                       </>
                     ) : (
                       <>
-                        <Play data-icon="inline-start" /> {t("Start session")}
+                        <Play data-icon="inline-start" />{" "}
+                        {selectedWizardSource === "stream" && streamScheduled
+                          ? t("Create and schedule")
+                          : t("Start session")}
                       </>
                     )}
                   </Button>
@@ -3029,7 +2353,7 @@ export function LiveTranscriptionView({
             </div>
           ) : null}
 
-          {createStep === 0 ? (
+          {wizardStep === "source" ? (
             <div className="flex flex-col gap-5" key="source-step">
               <div>
                 <p className="text-sm font-medium">
@@ -3079,7 +2403,24 @@ export function LiveTranscriptionView({
                 </PuAlert.Description>
               </PuAlert>
             </div>
-          ) : createStep === 1 ? (
+          ) : wizardStep === "when" ? (
+            <div className="flex flex-col gap-5" key="when-step">
+              <div>
+                <p className="text-sm font-medium">
+                  {t("When and what should JustAI capture?")}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {effectiveStreamName}
+                </p>
+              </div>
+              <StreamWhenFields
+                onChange={setStreamSchedule}
+                plan={streamPlan}
+                planLoading={streamPlanLoading}
+                schedule={streamSchedule}
+              />
+            </div>
+          ) : wizardStep === "setup" ? (
             <div className="flex flex-col gap-5" key="setup-step">
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -3106,7 +2447,7 @@ export function LiveTranscriptionView({
                           )
                         : selectedWizardSource === "stream"
                           ? t(
-                              "Paste a livestream link. JustAI checks the source before you schedule it."
+                              "Pick a relay source or paste a livestream link. JustAI checks it right away."
                             )
                           : t(
                               "Prepare a platform adapter or desktop companion to send meeting audio."
@@ -3197,56 +2538,7 @@ export function LiveTranscriptionView({
                   </PuAlert>
                 </div>
               ) : selectedWizardSource === "stream" ? (
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel>{t("Source name")}</FieldLabel>
-                    <Input
-                      id="session-stream-name"
-                      onChange={(event) => setStreamName(event.target.value)}
-                      value={streamName}
-                    />
-                  </Field>
-                  <RelaySourcePicker
-                    onPick={(source) => {
-                      setStreamURL(source.url)
-                      setStreamName(source.name)
-                    }}
-                    selectedURL={streamURL}
-                  />
-                  <Field>
-                    <FieldLabel>{t("Livestream link")}</FieldLabel>
-                    <Input
-                      id="session-stream-url"
-                      onChange={(event) => setStreamURL(event.target.value)}
-                      placeholder="https://www.bundestag.de/mediathek/live"
-                      type="url"
-                      value={streamURL}
-                    />
-                    <FieldDescription>
-                      {t(
-                        "Paste a livestream webpage or a direct audio/video link. JustAI checks whether automatic capture is supported."
-                      )}
-                    </FieldDescription>
-                  </Field>
-                  {streamCheckFeedback}
-                  <StreamScheduleFields
-                    end={streamScheduledEnd}
-                    idPrefix="session-stream"
-                    onEndChange={setStreamScheduledEnd}
-                    onScheduledChange={(checked) => {
-                      setStreamScheduled(checked)
-                      if (checked && !streamScheduledStart) {
-                        setStreamScheduledStart(
-                          localDateTimeValue(new Date(Date.now() + 15 * 60_000))
-                        )
-                      }
-                    }}
-                    onStartChange={setStreamScheduledStart}
-                    scheduled={streamScheduled}
-                    start={streamScheduledStart}
-                    {...streamWatchProps}
-                  />
-                </FieldGroup>
+                <FieldGroup>{streamSourceFields}</FieldGroup>
               ) : (
                 <FieldGroup>
                   <Field>
@@ -3318,7 +2610,10 @@ export function LiveTranscriptionView({
                     <FieldLabel>{t("Session name")}</FieldLabel>
                     <Input
                       id="session-title"
-                      onChange={(event) => setTitle(event.target.value)}
+                      onChange={(event) => {
+                        setTitle(event.target.value)
+                        setTitleEdited(true)
+                      }}
                       value={title}
                     />
                   </Field>
@@ -3591,29 +2886,90 @@ export function LiveTranscriptionView({
                   </CollapsibleContent>
                 </Collapsible>
               </FieldGroup>
-              <PuAlert tone="info" variant="plain">
-                <PuAlert.Icon>
-                  <ShieldCheck aria-hidden="true" />
-                </PuAlert.Icon>
-                <PuAlert.Title>{t("What happens next")}</PuAlert.Title>
-                <PuAlert.Description>
-                  {selectedWizardSource === "system-audio"
-                    ? t(
-                        "The browser opens its native share picker. Choose the tab or window and enable Share audio."
-                      )
-                    : selectedWizardSource === "meeting-bot"
+              {selectedWizardSource === "stream" ? (
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{t("Overview")}</Frame.Title>
+                  </Frame.Header>
+                  <Frame.Panel>
+                    <Frame.Row>
+                      <Frame.Media>
+                        <Tv aria-hidden="true" />
+                      </Frame.Media>
+                      <Frame.Content>
+                        <Frame.Title as="p">{effectiveStreamName}</Frame.Title>
+                        <Frame.Description>
+                          {t(
+                            "Captured on the server; your browser can be closed. Short drops are reconnected automatically."
+                          )}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions>
+                        <Button
+                          onClick={() => setCreateStep(1)}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t("Change")}
+                        </Button>
+                      </Frame.Actions>
+                    </Frame.Row>
+                    <Frame.Row>
+                      <Frame.Media>
+                        <CalendarClock aria-hidden="true" />
+                      </Frame.Media>
+                      <Frame.Content>
+                        <Frame.Title as="p">
+                          {streamSchedule.when === "sitting"
+                            ? (streamPlan.find(
+                                (item) => item.key === streamSchedule.planKey
+                              )?.title ?? t("Bundestag sitting"))
+                            : streamScheduled
+                              ? t("Own time window")
+                              : t("Start now")}
+                        </Frame.Title>
+                        <Frame.Description>
+                          {describeStreamSchedule(
+                            streamSchedule,
+                            streamPlan,
+                            t,
+                            locale
+                          )}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions>
+                        <Button
+                          onClick={() => setCreateStep(2)}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t("Change")}
+                        </Button>
+                      </Frame.Actions>
+                    </Frame.Row>
+                  </Frame.Panel>
+                </Frame>
+              ) : (
+                <PuAlert tone="info" variant="plain">
+                  <PuAlert.Icon>
+                    <ShieldCheck aria-hidden="true" />
+                  </PuAlert.Icon>
+                  <PuAlert.Title>{t("What happens next")}</PuAlert.Title>
+                  <PuAlert.Description>
+                    {selectedWizardSource === "system-audio"
                       ? t(
-                          "The room starts first, then JustAI shows a one-time ingest token for your adapter. It does not automatically join the third-party meeting."
+                          "The browser opens its native share picker. Choose the tab or window and enable Share audio."
                         )
-                      : selectedWizardSource === "stream"
+                      : selectedWizardSource === "meeting-bot"
                         ? t(
-                            "JustAI starts the decoder and reconnects automatically when the authorized live source or provider briefly drops."
+                            "The room starts first, then JustAI shows a one-time ingest token for your adapter. It does not automatically join the third-party meeting."
                           )
                         : t(
                             "The browser asks for microphone permission, then audio begins flowing into the room."
                           )}
-                </PuAlert.Description>
-              </PuAlert>
+                  </PuAlert.Description>
+                </PuAlert>
+              )}
             </div>
           )}
         </TranscriptionCreationFlow>
@@ -3655,54 +3011,14 @@ export function LiveTranscriptionView({
           <DialogBody>
             {error ? <DialogError message={error} /> : null}
             <FieldGroup>
-              <Field>
-                <FieldLabel>{t("Source name")}</FieldLabel>
-                <Input
-                  id="stream-source-name"
-                  onChange={(event) => setStreamName(event.target.value)}
-                  value={streamName}
+              {streamSourceFields}
+              {checkedStreamReady ? (
+                <StreamWhenFields
+                  onChange={setStreamSchedule}
+                  plan={streamPlan}
+                  schedule={streamSchedule}
                 />
-              </Field>
-              <RelaySourcePicker
-                onPick={(source) => {
-                  setStreamURL(source.url)
-                  setStreamName(source.name)
-                }}
-                selectedURL={streamURL}
-              />
-              <Field>
-                <FieldLabel>{t("Livestream link")}</FieldLabel>
-                <Input
-                  id="stream-source-url"
-                  onChange={(event) => setStreamURL(event.target.value)}
-                  placeholder="https://www.bundestag.de/mediathek/live"
-                  type="url"
-                  value={streamURL}
-                />
-                <FieldDescription>
-                  {t(
-                    "Paste a livestream webpage or direct stream link. The link is stored encrypted and checked again when capture starts."
-                  )}
-                </FieldDescription>
-              </Field>
-              {streamCheckFeedback}
-              <StreamScheduleFields
-                end={streamScheduledEnd}
-                idPrefix="stream-source"
-                onEndChange={setStreamScheduledEnd}
-                onScheduledChange={(checked) => {
-                  setStreamScheduled(checked)
-                  if (checked && !streamScheduledStart) {
-                    setStreamScheduledStart(
-                      localDateTimeValue(new Date(Date.now() + 15 * 60_000))
-                    )
-                  }
-                }}
-                onStartChange={setStreamScheduledStart}
-                scheduled={streamScheduled}
-                start={streamScheduledStart}
-                {...streamWatchProps}
-              />
+              ) : null}
             </FieldGroup>
           </DialogBody>
           <DialogFooter>
@@ -4042,105 +3358,6 @@ export function LiveTranscriptionView({
         </DialogContent>
       </Dialog>
     </div>
-  )
-}
-
-type RelaySource = {
-  id: string
-  name: string
-  url: string
-  relay: string
-  status: "live" | "idle" | "offline"
-}
-
-// Offers the sources of the configured stream relays so users don't need to
-// know the relay URLs. Renders nothing when no relay is configured.
-function RelaySourcePicker({
-  onPick,
-  selectedURL,
-}: {
-  onPick: (source: RelaySource) => void
-  selectedURL: string
-}) {
-  const { t } = useTranslations()
-  const [sources, setSources] = useState<RelaySource[]>([])
-  const [unavailable, setUnavailable] = useState<string[]>([])
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    void api
-      .get<{
-        enabled: boolean
-        sources: RelaySource[]
-        unavailable: string[]
-      }>("/api/v1/transcription/stream-relay/sources")
-      .then((result) => {
-        if (cancelled || !result.enabled) return
-        setSources(result.sources)
-        setUnavailable(result.unavailable ?? [])
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-  if (failed)
-    return (
-      <p className="text-xs leading-4 text-muted-foreground">
-        {t("The stream relay sources could not be loaded.")}
-      </p>
-    )
-  if (sources.length === 0 && unavailable.length === 0) return null
-  const multipleRelays = new Set(sources.map((source) => source.relay)).size > 1
-  const statusLabel = (status: RelaySource["status"]) =>
-    status === "live"
-      ? t("Live")
-      : status === "idle"
-        ? t("Starts on demand")
-        : t("Offline")
-  return (
-    <Field>
-      <FieldLabel>{t("Stream relay sources")}</FieldLabel>
-      <div className="flex flex-wrap gap-2">
-        {sources.map((source) => (
-          <Button
-            key={`${source.relay}/${source.id}`}
-            onClick={() => onPick(source)}
-            size="sm"
-            type="button"
-            variant={selectedURL.trim() === source.url ? "default" : "outline"}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "mr-1.5 inline-block size-2 rounded-full",
-                source.status === "live"
-                  ? "bg-emerald-500"
-                  : source.status === "idle"
-                    ? "bg-amber-500"
-                    : "bg-muted-foreground/50"
-              )}
-            />
-            {multipleRelays ? `${source.relay} · ${source.name}` : source.name}
-            <span className="sr-only"> ({statusLabel(source.status)})</span>
-          </Button>
-        ))}
-      </div>
-      <FieldDescription>
-        {t(
-          "Pick a source offered by your stream relay, or paste a link below. Green: live, amber: starts when needed, grey: offline."
-        )}
-      </FieldDescription>
-      {unavailable.length > 0 ? (
-        <p className="text-xs leading-4 text-destructive" role="status">
-          {t("Some relays could not be reached: {value0}", {
-            value0: unavailable.join(", "),
-          })}
-        </p>
-      ) : null}
-    </Field>
   )
 }
 

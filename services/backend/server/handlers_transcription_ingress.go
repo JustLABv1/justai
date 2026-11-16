@@ -200,7 +200,7 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 	}
 	if captureScope == "topics" {
 		// The selected items are the user's topics: recorded, and announced when finished.
-		if err := syncTopics(c, a.DB, sessionID, source.ID, sittingItems); err == nil {
+		if _, err := syncTopics(c, a.DB, sessionID, source.ID, sittingItems); err == nil {
 			_, _ = a.DB.ExecContext(c, `UPDATE transcription_topics SET starred = (topic_key = ANY($2)), updated_at = now() WHERE session_id = $1`, sessionID, pq.Array(request.TopicKeys))
 		}
 	} else if request.TopicsSessionNo > 0 && isBundestagPlanURL(streamURL) {

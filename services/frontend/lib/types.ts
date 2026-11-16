@@ -892,6 +892,8 @@ export type TranscriptionSource = {
   silenceStopSeconds?: number
   planFollow?: boolean
   planKey?: string
+  /** "topics" when only selected agenda items are captured. */
+  captureScope?: string
   /** Heads-up about a schedule change, a missed capture or an automatic stop. */
   alert?: string
   signalLevel: number
@@ -909,6 +911,9 @@ export type TranscriptionTopic = {
   title: string
   plannedStartAt?: string
   plannedEndAt?: string
+  /** The first planned start, set when the published plan moved the item. */
+  originalStartAt?: string
+  planChangedAt?: string
   status: "planned" | "active" | "done"
   startedOffsetMs?: number
   endedOffsetMs?: number
