@@ -136,7 +136,7 @@ export function LiveTranscriptionConversationView({
 }: Props) {
   const presentation = useTranslatedConfig(presentationMessages)
 
-  const { t, locale } = useTranslations()
+  const { t } = useTranslations()
 
   const config = presentation[mode]
   const SourceIcon = config.icon
@@ -194,9 +194,6 @@ export function LiveTranscriptionConversationView({
           </div>
           <div className="flex flex-wrap gap-2">
             {processingSettings}
-            <Button onClick={onShare} size="sm" variant="outline">
-              <Share2 data-icon="inline-start" /> {t("Share")}
-            </Button>
             <AlertDialog>
               <AlertDialogTrigger
                 render={<Button size="sm" variant="outline" />}
@@ -308,9 +305,12 @@ export function LiveTranscriptionConversationView({
               ? t("{value0} in room", { value0: snapshot.speakers.length || 1 })
               : t("1 source")}
           </Badge>
-          <Button onClick={onShare} size="sm" variant="outline">
-            <Share2 data-icon="inline-start" /> {t("Share")}
-          </Button>
+          {/* Inviting people only makes sense where they join with their microphone. */}
+          {isMicRoom ? (
+            <Button onClick={onShare} size="sm" variant="outline">
+              <Share2 data-icon="inline-start" /> {t("Invite participants")}
+            </Button>
+          ) : null}
           {!capturing && mode === "browser-system" && canStartCapture ? (
             <Button onClick={() => void onStartCapture()} size="sm">
               <Play data-icon="inline-start" /> {t("Start source")}

@@ -5035,4 +5035,5 @@ export const de = {
   "Notify when finished": "Benachrichtigung, wenn fertig",
   "Pauses between the selected topics and ends after the last one. If the sitting runs late, JustAI waits longer; at the latest it stops at {value0}.":
     "Pausiert zwischen den ausgewählten Themen und endet nach dem letzten. Läuft die Sitzung länger, wartet JustAI mit; spätestens um {value0} ist Schluss.",
+  "Invite participants": "Teilnehmende einladen",
 } as const
