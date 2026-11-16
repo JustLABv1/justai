@@ -4880,4 +4880,63 @@ export const de = {
     "Zeitplan aus dem Bundestagsplan aktualisiert: {value0} beginnt {value1} (Berliner Zeit).",
   "Capture ended automatically: no speech was heard for {value0} minutes.":
     "Die Aufnahme wurde automatisch beendet: {value0} Minuten lang war keine Sprache zu hören.",
+  "Choose a start time.": "Wähle eine Startzeit.",
+  "A watch window needs an end time. Choose when JustAI should stop watching for the broadcast.":
+    "Ein Beobachtungsfenster braucht eine Endzeit. Wähle, wann JustAI aufhören soll, auf die Sendung zu warten.",
+  "The action failed.": "Die Aktion ist fehlgeschlagen.",
+  "The agenda items could not be loaded.":
+    "Die Tagesordnungspunkte konnten nicht geladen werden.",
+  Planned: "Geplant",
+  "{value0} of {value1} finished": "{value0} von {value1} abgeschlossen",
+  "“{value0}” is finished. The transcript is ready.":
+    "„{value0}“ ist abgeschlossen. Das Transkript liegt vor.",
+  "Open transcript": "Transkript öffnen",
+  "Load the agenda items of a Bundestag sitting. JustAI then recognises each item from the chair’s announcements and makes its transcript available as soon as it is finished.":
+    "Lade die Tagesordnungspunkte einer Bundestagssitzung. JustAI erkennt dann jeden Punkt an den Ansagen der Präsidentin und stellt sein Transkript bereit, sobald er abgeschlossen ist.",
+  "Sitting number": "Sitzungsnummer",
+  "e.g. 110": "z. B. 110",
+  "Load agenda items": "Tagesordnungspunkte laden",
+  "Remove from my topics": "Aus meinen Themen entfernen",
+  "Mark as my topic": "Als mein Thema markieren",
+  planned: "geplant",
+  "Use if the announcement was not recognised.":
+    "Nutze das, wenn die Ansage nicht erkannt wurde.",
+  "Start now": "Jetzt starten",
+  Finish: "Beenden",
+  "The transcript could not be loaded.":
+    "Das Transkript konnte nicht geladen werden.",
+  "The summary could not be started.":
+    "Die Zusammenfassung konnte nicht gestartet werden.",
+  "This topic is still running. The transcript updates while it goes on.":
+    "Dieses Thema läuft noch. Das Transkript aktualisiert sich, solange es andauert.",
+  "This topic is finished.": "Dieses Thema ist abgeschlossen.",
+  "The summary is being written…": "Die Zusammenfassung wird erstellt…",
+  "The summary failed.": "Die Zusammenfassung ist fehlgeschlagen.",
+  "Copying is not available here.": "Kopieren ist hier nicht verfügbar.",
+  "The download failed.": "Der Download ist fehlgeschlagen.",
+  "Summarise again": "Erneut zusammenfassen",
+  Summarise: "Zusammenfassen",
+  "Track topics": "Themen mitschneiden",
+  "JustAI recognises each agenda item from the chair’s announcements. A topic’s transcript is ready as soon as that topic is finished, while the sitting goes on.":
+    "JustAI erkennt jeden Tagesordnungspunkt an den Ansagen der Präsidentin. Das Transkript eines Themas liegt vor, sobald dieses Thema abgeschlossen ist, während die Sitzung weiterläuft.",
+  "The agenda items of the sitting could not be loaded. You can load them again from the topics list.":
+    "Die Tagesordnungspunkte der Sitzung konnten nicht geladen werden. Du kannst sie in der Themenliste erneut laden.",
+  "Whole sitting": "Ganze Sitzung",
+  "Only selected topics": "Nur ausgewählte Themen",
+  "The whole sitting is transcribed. Each topic is ready as soon as it is finished.":
+    "Die ganze Sitzung wird transkribiert. Jedes Thema liegt vor, sobald es abgeschlossen ist.",
+  "Only your topics are transcribed: JustAI starts {value0} minutes before the first one, pauses between them and ends after the last. This saves transcription time.":
+    "Nur deine Themen werden transkribiert: JustAI startet {value0} Minuten vor dem ersten, pausiert dazwischen und endet nach dem letzten. Das spart Transkriptionszeit.",
+  "Loading the agenda…": "Tagesordnung wird geladen…",
+  "No agenda items are published for this sitting yet.":
+    "Für diese Sitzung sind noch keine Tagesordnungspunkte veröffentlicht.",
+  "{value0} topics selected. Capture starts around {value1}; planned times often slip, JustAI adjusts to the delay it observes.":
+    "{value0} Themen ausgewählt. Die Aufnahme beginnt gegen {value1}; geplante Zeiten verschieben sich oft, JustAI passt sich der beobachteten Verspätung an.",
+  "Choose at least one topic.": "Wähle mindestens ein Thema.",
+  "A selected topic was called up before the capture window began, so it was not recorded. The capture continues with the remaining topics.":
+    "Ein ausgewähltes Thema wurde aufgerufen, bevor das Aufnahmefenster begann, und wurde daher nicht aufgenommen. Die Aufnahme läuft mit den übrigen Themen weiter.",
+  "All selected topics are finished. The capture has ended.":
+    "Alle ausgewählten Themen sind abgeschlossen. Die Aufnahme wurde beendet.",
+  "Paused until {value0} (Berlin time), shortly before the next selected topic: {value1}.":
+    "Pausiert bis {value0} Uhr (Berliner Zeit), kurz vor dem nächsten ausgewählten Thema: {value1}.",
 } as const

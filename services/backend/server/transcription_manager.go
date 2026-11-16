@@ -61,6 +61,7 @@ type TranscriptionManager struct {
 	buffers          map[uuid.UUID]*pcmBuffer
 	streamCancels    map[uuid.UUID]context.CancelFunc
 	lastPlanRefresh  time.Time // owned by the stream scheduler goroutine
+	lastTopicRefresh time.Time
 	rootCtx          context.Context
 	joinMu           sync.Mutex
 	joins            map[string][]time.Time

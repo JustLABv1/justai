@@ -38,7 +38,7 @@ func (l *liveStreamMetrics) write(b *strings.Builder) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	b.WriteString("# HELP justai_livestream_events_total Livestream schedule events: speech_start, fallback_start, watch_missed, silence_stop, plan_changed, plan_missing, plan_fetch_failed, stream_unreachable.\n# TYPE justai_livestream_events_total counter\n")
+	b.WriteString("# HELP justai_livestream_events_total Livestream schedule events: speech_start, fallback_start, watch_missed, silence_stop, plan_changed, plan_missing, plan_fetch_failed, stream_unreachable, topic_started, topic_finished, topics_unavailable.\n# TYPE justai_livestream_events_total counter\n")
 	for _, name := range names {
 		fmt.Fprintf(b, "justai_livestream_events_total{event=%q} %d\n", name, l.counts[name].Load())
 	}

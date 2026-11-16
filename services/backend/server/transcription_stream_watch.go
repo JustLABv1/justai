@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -270,4 +271,52 @@ func absDuration(d time.Duration) time.Duration {
 		return -d
 	}
 	return d
+}
+
+// refreshTopicPlans moves the planned slots of agenda items when the published plan
+// changes. Topics that are already open or finished keep their state.
+func (m *TranscriptionManager) refreshTopicPlans(ctx context.Context) {
+	if time.Since(m.lastTopicRefresh) < 15*time.Minute {
+		return
+	}
+	rows, err := m.DB.QueryContext(ctx, `
+		SELECT DISTINCT topic.session_id, split_part(topic.topic_key, '-', 1)
+		FROM transcription_topics topic
+		JOIN transcription_sessions session ON session.id = topic.session_id
+		WHERE topic.status = 'planned' AND session.status IN ('waiting', 'live', 'paused')`)
+	if err != nil {
+		return
+	}
+	type pair struct {
+		session uuid.UUID
+		sitting int
+	}
+	var pairs []pair
+	for rows.Next() {
+		var p pair
+		var prefix string
+		if rows.Scan(&p.session, &prefix) == nil {
+			if n, convErr := strconv.Atoi(strings.TrimPrefix(prefix, "s")); convErr == nil {
+				p.sitting = n
+				pairs = append(pairs, p)
+			}
+		}
+	}
+	_ = rows.Close()
+	if len(pairs) == 0 {
+		return
+	}
+	m.lastTopicRefresh = time.Now()
+	fetchCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	items, err := fetchBundestagAblaufplan(fetchCtx, provider.SafeHTTPClient(20*time.Second, m.Config.AllowPrivate))
+	if err != nil {
+		liveStreamEvents.inc("plan_fetch_failed")
+		return
+	}
+	for _, p := range pairs {
+		if forSitting := plenaryItemsForSession(items, p.sitting); len(forSitting) > 0 {
+			_ = syncTopics(ctx, m.DB, p.session, uuid.Nil, forSitting)
+		}
+	}
 }

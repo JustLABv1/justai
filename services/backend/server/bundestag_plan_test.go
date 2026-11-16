@@ -66,3 +66,19 @@ func TestParseBundestagPlanHandlesOpenEndedAndDecimalTimes(t *testing.T) {
 		t.Errorf("decimal start = %+v", plan[1])
 	}
 }
+
+func TestBundestagPlanAppliesToRelaySourcesNamedBundestag(t *testing.T) {
+	t.Setenv("JUSTAI_STREAM_RELAY_URL", "https://relay.example.org")
+	for raw, want := range map[string]bool{
+		"https://www.bundestag.de/mediathek/live":            true,
+		"https://relay.example.org/v1/sources/bundestag":     true,
+		"https://relay.example.org/v1/sources/Bundestag-HD":  true,
+		"https://relay.example.org/v1/sources/radio":         false,
+		"https://relay.example.org/v1/sources/bundestag?x=1": false,
+		"https://other.example.org/v1/sources/bundestag":     false,
+	} {
+		if got := isBundestagPlanURL(raw); got != want {
+			t.Errorf("%s: got %v, want %v", raw, got, want)
+		}
+	}
+}

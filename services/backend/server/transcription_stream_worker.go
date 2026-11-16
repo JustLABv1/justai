@@ -35,6 +35,7 @@ func (m *TranscriptionManager) streamSourceSchedulerLoop(ctx context.Context) {
 		case <-ticker.C:
 			m.startConfiguredStreamSources(ctx)
 			m.refreshFollowedPlans(ctx)
+			m.refreshTopicPlans(ctx)
 		}
 	}
 }
@@ -253,7 +254,8 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 		_ = m.DB.QueryRow(`SELECT status FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&streamStatus)
 		if sourceStatus != "stopped" {
 			m.markSource(sessionID, sourceID, "disconnected")
-			if streamStatus != "failed" {
+			// A topic-scoped capture pauses by rescheduling itself; keep that state.
+			if streamStatus != "failed" && streamStatus != "scheduled" {
 				m.setStreamStatus(sessionID, sourceID, "reconnecting", "", false)
 			}
 		}
@@ -262,6 +264,7 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	}()
 
 	var sourceOffset atomic.Int64
+	sourceOffset.Store(m.continueSourceOffset(ctx, sessionID, sourceID))
 	reconnectDeadline := time.Now().Add(time.Duration(reconnectGraceSeconds) * time.Second)
 	for {
 		if scheduledEndAt.Valid && !time.Now().Before(scheduledEndAt.Time) {
@@ -388,6 +391,7 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				continue
 			}
 			m.broadcast(sessionID, "transcription.final", ginData{"sourceId": sourceID, "segment": segment})
+			m.observeTopics(persistCtx, sessionID, sourceID, textValue, startOffset)
 		}
 		eventsDone <- eventErr
 	}()
@@ -541,6 +545,7 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 
 func (m *TranscriptionManager) finishLiveStream(sessionID, sourceID uuid.UUID, reason string) {
 	now := time.Now().UTC()
+	m.finishTopicsAtStreamEnd(sessionID, sourceID)
 	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = 'stopped', last_error = '', updated_at = $2 WHERE source_id = $1`, sourceID, now)
 	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = $2 WHERE id = $1`, sourceID, now)
 	result, _ := m.DB.Exec(`UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status IN ('waiting', 'live', 'paused') AND NOT EXISTS (SELECT 1 FROM transcription_sources other WHERE other.session_id = $1 AND other.id <> $3 AND other.status <> 'stopped')`, sessionID, now, sourceID)

@@ -60,6 +60,8 @@ type Props = LiveTranscriptionOrbitProps & {
   transportStatus: SSEConnectionState
   interruptionAt?: Date | null
   processingSettings?: ReactNode
+  /** Agenda items of the session, readable as soon as each is finished. */
+  topicsPanel?: ReactNode
   /** Reschedule a capture that has not started yet. */
   onEditSchedule?: (
     source: LiveTranscriptionOrbitProps["snapshot"]["sources"][number]
@@ -108,6 +110,7 @@ const presentationMessages: Record<Props["mode"], SourcePresentation> = {
 export function LiveTranscriptionConversationView({
   processingSettings,
   onEditSchedule,
+  topicsPanel,
   mode,
   snapshot,
   user,
@@ -129,7 +132,7 @@ export function LiveTranscriptionConversationView({
 }: Props) {
   const presentation = useTranslatedConfig(presentationMessages)
 
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const config = presentation[mode]
   const SourceIcon = config.icon
@@ -178,7 +181,7 @@ export function LiveTranscriptionConversationView({
     scheduledSources.length > 0 &&
     !snapshot.sources.some((source) => source.status === "connected")
   const scheduleTime = (value: string) =>
-    new Intl.DateTimeFormat(undefined, {
+    new Intl.DateTimeFormat(locale, {
       dateStyle: "full",
       timeStyle: "short",
     }).format(new Date(value))
@@ -308,6 +311,9 @@ export function LiveTranscriptionConversationView({
               {t(". The JustAI server must remain running.")}
             </div>
           </dl>
+          {topicsPanel ? (
+            <div className="w-full max-w-2xl">{topicsPanel}</div>
+          ) : null}
           <p className="text-xs text-muted-foreground">
             {t("The transcript will appear here when capture starts.")}
           </p>
@@ -458,6 +464,9 @@ export function LiveTranscriptionConversationView({
           </DropdownMenu>
         </div>
       </header>
+      {topicsPanel ? (
+        <div className="border-b px-5 py-4 sm:px-6">{topicsPanel}</div>
+      ) : null}
 
       <RealtimeConnectionStatus
         className="mx-5 mt-4 sm:mx-6"

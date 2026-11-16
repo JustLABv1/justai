@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/lib/pq"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,6 +36,13 @@ type transcriptionStreamSourceRequest struct {
 	SilenceStopSeconds int    `json:"silenceStopSeconds"`
 	PlanFollow         bool   `json:"planFollow"`
 	PlanKey            string `json:"planKey"`
+	// TopicsSessionNo loads the agenda items of that Bundestag sitting as topics, so they
+	// can be read as soon as each one is finished.
+	TopicsSessionNo int `json:"topicsSessionNo"`
+	// CaptureScope "topics" records only around the agenda items in TopicKeys and
+	// pauses in between; "all" (default) records the whole sitting.
+	CaptureScope string   `json:"captureScope"`
+	TopicKeys    []string `json:"topicKeys"`
 }
 
 const defaultLiveStreamReconnectGraceSeconds = 15 * 60
@@ -82,6 +91,41 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 	startMode, modeErr := normalizeStartMode(request.StartMode)
 	if modeErr != nil {
 		writeError(c, http.StatusBadRequest, modeErr)
+		return
+	}
+	captureScope := "all"
+	var sittingItems, selectedItems []planItem
+	if request.CaptureScope == "topics" {
+		// The capture window is derived from the selected items, not from the form.
+		if request.TopicsSessionNo <= 0 || !isBundestagPlanURL(streamURL) || len(request.TopicKeys) == 0 || len(request.TopicKeys) > 50 {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("choose at least one topic of a Bundestag sitting to record only selected topics"))
+			return
+		}
+		items, agendaErr := a.cachedAblaufplan(c)
+		if agendaErr != nil {
+			writeError(c, http.StatusBadGateway, fmt.Errorf("the agenda of the sitting could not be loaded: %w", agendaErr))
+			return
+		}
+		sittingItems = plenaryItemsForSession(items, request.TopicsSessionNo)
+		wanted := map[string]bool{}
+		for _, key := range request.TopicKeys {
+			wanted[key] = true
+		}
+		for _, it := range sittingItems {
+			if wanted[it.Key] {
+				selectedItems = append(selectedItems, it)
+			}
+		}
+		if len(selectedItems) != len(wanted) {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("a selected topic is no longer on the agenda of this sitting"))
+			return
+		}
+		windowStart, windowEnd := topicCapturePlan(selectedItems, now)
+		request.ScheduledStartAt, request.ScheduledEndAt = &windowStart, &windowEnd
+		startMode, request.PlanFollow, request.PlanKey = "at_time", false, ""
+		captureScope = "topics"
+	} else if request.CaptureScope != "" && request.CaptureScope != "all" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("capture scope must be all or topics"))
 		return
 	}
 	requestedStart := request.ScheduledStartAt
@@ -142,7 +186,7 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 	source.ScheduledStartAt = scheduledStartAt
 	source.ScheduledEndAt = scheduledEndAt
 	source.StartMode, source.SilenceStopSeconds, source.PlanFollow, source.PlanKey = watch.StartMode, watch.SilenceStopSeconds, watch.PlanFollow, watch.PlanKey
-	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_stream_sources (source_id, url_ciphertext, protocol, status, scheduled_start_at, scheduled_end_at, reconnect_grace_seconds, start_mode, silence_stop_seconds, plan_follow, plan_key, plan_fallback_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, source.ID, encryptedURL, stream.Protocol, stream.Status, scheduledStartAt, scheduledEndAt, stream.ReconnectGraceSeconds, watch.StartMode, watch.SilenceStopSeconds, watch.PlanFollow, watch.PlanKey, watch.FallbackAt); err != nil {
+	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_stream_sources (source_id, url_ciphertext, protocol, status, scheduled_start_at, scheduled_end_at, reconnect_grace_seconds, start_mode, silence_stop_seconds, plan_follow, plan_key, plan_fallback_at, capture_scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, source.ID, encryptedURL, stream.Protocol, stream.Status, scheduledStartAt, scheduledEndAt, stream.ReconnectGraceSeconds, watch.StartMode, watch.SilenceStopSeconds, watch.PlanFollow, watch.PlanKey, watch.FallbackAt, captureScope); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -153,6 +197,18 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 	if scheduledStartAt == nil {
 		a.activateTranscriptionIngressSession(sessionID)
 		a.Live.startStreamSource(sessionID, source.ID)
+	}
+	if captureScope == "topics" {
+		// The selected items are the user's topics: recorded, and announced when finished.
+		if err := syncTopics(c, a.DB, sessionID, source.ID, sittingItems); err == nil {
+			_, _ = a.DB.ExecContext(c, `UPDATE transcription_topics SET starred = (topic_key = ANY($2)), updated_at = now() WHERE session_id = $1`, sessionID, pq.Array(request.TopicKeys))
+		}
+	} else if request.TopicsSessionNo > 0 && isBundestagPlanURL(streamURL) {
+		// Best effort: the capture works without topics, and they can be loaded later.
+		if _, topicsErr := a.loadSittingTopics(c, sessionID, source.ID, request.TopicsSessionNo); topicsErr != nil {
+			slog.Warn("agenda items could not be loaded", "sessionId", sessionID, "error", topicsErr)
+			a.Live.setStreamAlert(sessionID, source.ID, "topics_unavailable", "The agenda items of the sitting could not be loaded. You can load them again from the topics list.")
+		}
 	}
 	c.JSON(http.StatusCreated, gin.H{"source": source, "stream": stream})
 }

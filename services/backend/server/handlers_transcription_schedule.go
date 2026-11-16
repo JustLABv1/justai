@@ -57,8 +57,8 @@ func (a *App) prepareStreamWatch(ctx context.Context, streamURL, mode string, si
 	if planKey == "" || len(planKey) > 200 {
 		return opts, fmt.Errorf("choose a session from the programme plan")
 	}
-	if !isBundestagLiveURL(streamURL) {
-		return opts, fmt.Errorf("a programme plan is only available for the Bundestag live page")
+	if !isBundestagPlanURL(streamURL) {
+		return opts, fmt.Errorf("a programme plan is only available for the Bundestag live page or a relay source named bundestag")
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()

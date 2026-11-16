@@ -33,6 +33,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { VideoTranscriptionLibrary } from "@/components/video-transcription-library"
 import { LiveProcessingSettings } from "@/components/live-processing-settings"
+import { LiveTranscriptionTopics } from "@/components/live-transcription-topics"
+import {
+  BundestagTopicPicker,
+  type CaptureScope,
+} from "@/components/bundestag-topic-picker"
 import { LiveTranscriptProcessingPanel } from "@/components/live-transcript-processing-panel"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
@@ -90,6 +95,7 @@ import type {
   Endpoint,
   StreamPlanSession,
   TranscriptionJoinRequest,
+  TranscriptionTopic,
   TranscriptionRecording,
   TranscriptionSegment,
   TranscriptionSession,
@@ -137,9 +143,9 @@ function parseLocalDateTime(value: string) {
   return Number.isNaN(result.getTime()) ? null : result
 }
 
-function formatScheduleDateTime(value: string) {
+function formatScheduleDateTime(value: string, emptyLabel: string) {
   const date = parseLocalDateTime(value)
-  if (!date) return "Select date and time"
+  if (!date) return emptyLabel
   return `${String(date.getDate()).padStart(2, "0")}.${String(
     date.getMonth() + 1
   ).padStart(2, "0")}.${date.getFullYear()} · ${String(
@@ -245,7 +251,7 @@ function ScheduleDateTimePicker({
                 variant="outline"
               >
                 <CalendarDays data-icon="inline-start" />
-                {formatScheduleDateTime(value)}
+                {formatScheduleDateTime(value, t("Select date and time"))}
               </Button>
             }
           />
@@ -267,9 +273,7 @@ function ScheduleDateTimePicker({
                 onChange(updateLocalDateTime(value, { hour: Number(next) }))
             }}
             value={
-              selected
-                ? String(selected.getHours()).padStart(2, "0")
-                : undefined
+              selected ? String(selected.getHours()).padStart(2, "0") : null
             }
           >
             <SelectTrigger className="w-full">
@@ -292,9 +296,7 @@ function ScheduleDateTimePicker({
                 onChange(updateLocalDateTime(value, { minute: Number(next) }))
             }}
             value={
-              selected
-                ? String(selected.getMinutes()).padStart(2, "0")
-                : undefined
+              selected ? String(selected.getMinutes()).padStart(2, "0") : null
             }
           >
             <SelectTrigger className="w-full">
@@ -340,15 +342,22 @@ function streamScheduleInvalid(
   return Boolean(end && new Date(end) <= new Date(start))
 }
 
-function formatPlanSession(session: StreamPlanSession) {
+// Times follow the selected JustAI language, not the browser's: German uses 24 hours.
+/** The sitting number of a Bundestag plan key such as "bundestag-sitzung-110". */
+function sittingNumber(planKey: string) {
+  const match = /^bundestag-sitzung-(\d+)$/.exec(planKey)
+  return match ? Number(match[1]) : 0
+}
+
+function formatPlanSession(session: StreamPlanSession, locale: string) {
   const start = new Date(session.startAt)
   const end = new Date(session.endAt)
-  const day = new Intl.DateTimeFormat(undefined, {
+  const day = new Intl.DateTimeFormat(locale, {
     weekday: "short",
     day: "2-digit",
     month: "2-digit",
   }).format(start)
-  const time = new Intl.DateTimeFormat(undefined, {
+  const time = new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
   })
@@ -372,6 +381,12 @@ type StreamScheduleFieldsProps = {
   onPlanKeyChange?: (key: string) => void
   planFollow?: boolean
   onPlanFollowChange?: (follow: boolean) => void
+  trackTopics?: boolean
+  onTrackTopicsChange?: (track: boolean) => void
+  captureScope?: CaptureScope
+  onCaptureScopeChange?: (scope: CaptureScope) => void
+  topicKeys?: string[]
+  onTopicKeysChange?: (keys: string[]) => void
   /** Editing an existing schedule: no on/off switch, no plan picker. */
   editing?: boolean
   /** The watch window is already open, so its start can no longer change. */
@@ -395,11 +410,34 @@ function StreamScheduleFields({
   onPlanKeyChange,
   planFollow = false,
   onPlanFollowChange,
+  trackTopics = false,
+  onTrackTopicsChange,
+  captureScope = "all",
+  onCaptureScopeChange,
+  topicKeys = [],
+  onTopicKeysChange,
   editing = false,
   startLocked = false,
 }: StreamScheduleFieldsProps) {
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
   const whenLive = startMode === "when_live"
+  const sitting = sittingNumber(planKey)
+  // Recording only selected topics derives the whole schedule from the agenda.
+  const topicsOnly =
+    !editing && trackTopics && sitting > 0 && captureScope === "topics"
+  // Say why the form cannot be saved instead of leaving the button silently disabled.
+  const problem =
+    !scheduled || topicsOnly
+      ? ""
+      : !start
+        ? t("Choose a start time.")
+        : whenLive && !end
+          ? t(
+              "A watch window needs an end time. Choose when JustAI should stop watching for the broadcast."
+            )
+          : end && new Date(end) <= new Date(start)
+            ? t("The end time must be after the start time.")
+            : ""
 
   return (
     <>
@@ -436,7 +474,14 @@ function StreamScheduleFields({
                 value={planKey || "none"}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder={t("Choose a session")} />
+                  <SelectValue placeholder={t("Choose a session")}>
+                    {(value: string | null) => {
+                      const session = plan.find((item) => item.key === value)
+                      return session
+                        ? formatPlanSession(session, locale)
+                        : t("No session – choose times manually")
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -445,7 +490,7 @@ function StreamScheduleFields({
                     </SelectItem>
                     {plan.map((session) => (
                       <SelectItem key={session.key} value={session.key}>
-                        {formatPlanSession(session)}
+                        {formatPlanSession(session, locale)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -458,7 +503,7 @@ function StreamScheduleFields({
               </FieldDescription>
             </Field>
           ) : null}
-          {onStartModeChange && !startLocked ? (
+          {onStartModeChange && !startLocked && !topicsOnly ? (
             <Field>
               <FieldLabel>{t("Start")}</FieldLabel>
               <div className="flex flex-wrap gap-2">
@@ -490,33 +535,35 @@ function StreamScheduleFields({
               </FieldDescription>
             </Field>
           ) : null}
-          <div className="grid gap-4 sm:grid-cols-2">
-            {startLocked ? (
-              <Field>
-                <FieldLabel>{t("Watching since")}</FieldLabel>
-                <p className="text-sm text-muted-foreground">
-                  {formatScheduleDateTime(start)}
-                </p>
-              </Field>
-            ) : (
+          {topicsOnly ? null : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {startLocked ? (
+                <Field>
+                  <FieldLabel>{t("Watching since")}</FieldLabel>
+                  <p className="text-sm text-muted-foreground">
+                    {formatScheduleDateTime(start, t("Select date and time"))}
+                  </p>
+                </Field>
+              ) : (
+                <ScheduleDateTimePicker
+                  idPrefix={`${idPrefix}-scheduled-start`}
+                  label={whenLive ? t("Watch from") : t("Start time")}
+                  minimum={localDateTimeValue(new Date())}
+                  onChange={onStartChange}
+                  value={start}
+                />
+              )}
               <ScheduleDateTimePicker
-                idPrefix={`${idPrefix}-scheduled-start`}
-                label={whenLive ? t("Watch from") : t("Start time")}
-                minimum={localDateTimeValue(new Date())}
-                onChange={onStartChange}
-                value={start}
+                idPrefix={`${idPrefix}-scheduled-end`}
+                label={whenLive ? t("Watch until") : t("End time")}
+                minimum={start || localDateTimeValue(new Date())}
+                onChange={onEndChange}
+                optional={!whenLive}
+                value={end}
               />
-            )}
-            <ScheduleDateTimePicker
-              idPrefix={`${idPrefix}-scheduled-end`}
-              label={whenLive ? t("Watch until") : t("End time")}
-              minimum={start || localDateTimeValue(new Date())}
-              onChange={onEndChange}
-              optional={!whenLive}
-              value={end}
-            />
-          </div>
-          {whenLive && onSilenceStopChange ? (
+            </div>
+          )}
+          {whenLive && onSilenceStopChange && !topicsOnly ? (
             <Field>
               <FieldLabel>{t("Stop after silence")}</FieldLabel>
               <Select
@@ -524,7 +571,15 @@ function StreamScheduleFields({
                 value={silenceStop}
               >
                 <SelectTrigger className="w-full sm:w-64">
-                  <SelectValue />
+                  <SelectValue>
+                    {(value: string | null) =>
+                      !value || value === "0"
+                        ? t("Only at the end of the window")
+                        : t("After {value0} minutes without speech", {
+                            value0: value,
+                          })
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -547,7 +602,45 @@ function StreamScheduleFields({
               </FieldDescription>
             </Field>
           ) : null}
-          {whenLive && planKey && onPlanFollowChange ? (
+          {!editing &&
+          /^bundestag-sitzung-\d+$/.test(planKey) &&
+          onTrackTopicsChange ? (
+            <Frame>
+              <Frame.Panel>
+                <Frame.Row>
+                  <Frame.Content>
+                    <Frame.Title as="p">{t("Track topics")}</Frame.Title>
+                    <Frame.Description>
+                      {t(
+                        "JustAI recognises each agenda item from the chair’s announcements. A topic’s transcript is ready as soon as that topic is finished, while the sitting goes on."
+                      )}
+                    </Frame.Description>
+                  </Frame.Content>
+                  <Frame.Actions>
+                    <Switch
+                      aria-label={t("Track topics")}
+                      checked={trackTopics}
+                      onCheckedChange={onTrackTopicsChange}
+                    />
+                  </Frame.Actions>
+                </Frame.Row>
+                {trackTopics && onCaptureScopeChange && onTopicKeysChange ? (
+                  <Frame.Row>
+                    <Frame.Content>
+                      <BundestagTopicPicker
+                        onScopeChange={onCaptureScopeChange}
+                        onSelectedChange={onTopicKeysChange}
+                        scope={captureScope}
+                        selected={topicKeys}
+                        sittingNo={sitting}
+                      />
+                    </Frame.Content>
+                  </Frame.Row>
+                ) : null}
+              </Frame.Panel>
+            </Frame>
+          ) : null}
+          {whenLive && planKey && onPlanFollowChange && !topicsOnly ? (
             <Frame>
               <Frame.Panel>
                 <Frame.Row>
@@ -572,15 +665,22 @@ function StreamScheduleFields({
               </Frame.Panel>
             </Frame>
           ) : null}
-          <p className="text-xs leading-4 text-muted-foreground">
-            {whenLive
-              ? t(
-                  "If nothing is heard before the window ends you get a warning on the session. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
-                )
-              : t(
-                  "Without an end time, capture stops when the stream ends. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
-                )}
-          </p>
+          {problem ? (
+            <p className="text-sm leading-5 text-destructive" role="alert">
+              {problem}
+            </p>
+          ) : null}
+          {topicsOnly ? null : (
+            <p className="text-xs leading-4 text-muted-foreground">
+              {whenLive
+                ? t(
+                    "If nothing is heard before the window ends you get a warning on the session. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
+                  )
+                : t(
+                    "Without an end time, capture stops when the stream ends. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
+                  )}
+            </p>
+          )}
         </div>
       ) : null}
     </>
@@ -903,6 +1003,36 @@ export function LiveTranscriptionView({
   const [streamSilenceStop, setStreamSilenceStop] = useState("0")
   const [streamPlanKey, setStreamPlanKey] = useState("")
   const [streamPlanFollow, setStreamPlanFollow] = useState(true)
+  const [streamTrackTopics, setStreamTrackTopics] = useState(true)
+  const [streamCaptureScope, setStreamCaptureScope] =
+    useState<CaptureScope>("all")
+  const [streamTopicKeys, setStreamTopicKeys] = useState<string[]>([])
+  const [topics, setTopics] = useState<TranscriptionTopic[]>([])
+  const [topicNotice, setTopicNotice] = useState<TranscriptionTopic | null>(
+    null
+  )
+  const topicsRef = useRef<TranscriptionTopic[]>([])
+  const topicsSessionId = snapshot?.session.id
+  useEffect(() => {
+    topicsRef.current = topics
+  }, [topics])
+  useEffect(() => {
+    if (!topicsSessionId) return
+    let cancelled = false
+    void api
+      .get<{ topics: TranscriptionTopic[] }>(
+        `/api/v1/transcription/sessions/${topicsSessionId}/topics`
+      )
+      .then((result) => {
+        if (!cancelled) setTopics(result.topics)
+      })
+      .catch(() => {
+        if (!cancelled) setTopics([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [topicsSessionId])
   const [editingSchedule, setEditingSchedule] =
     useState<TranscriptionSource | null>(null)
   const [streamStarting, setStreamStarting] = useState(false)
@@ -948,6 +1078,7 @@ export function LiveTranscriptionView({
   const selectStreamPlan = (key: string) => {
     const session = streamPlan.find((item) => item.key === key)
     setStreamPlanKey(session ? key : "")
+    setStreamTopicKeys([])
     if (!session) return
     setStreamScheduled(true)
     setStreamStartMode("when_live")
@@ -968,9 +1099,35 @@ export function LiveTranscriptionView({
     onPlanKeyChange: selectStreamPlan,
     planFollow: streamPlanFollow,
     onPlanFollowChange: setStreamPlanFollow,
+    trackTopics: streamTrackTopics,
+    onTrackTopicsChange: setStreamTrackTopics,
+    captureScope: streamCaptureScope,
+    onCaptureScopeChange: setStreamCaptureScope,
+    topicKeys: streamTopicKeys,
+    onTopicKeysChange: setStreamTopicKeys,
   }
+  // Recording only selected Bundestag topics: the backend derives the schedule.
+  const streamTopicsOnly =
+    streamScheduled &&
+    streamTrackTopics &&
+    sittingNumber(streamPlanKey) > 0 &&
+    streamCaptureScope === "topics"
+  const streamSetupInvalid = streamTopicsOnly
+    ? streamTopicKeys.length === 0
+    : streamScheduleInvalid(
+        streamScheduled,
+        streamStartMode,
+        streamScheduledStart,
+        streamScheduledEnd
+      )
   const streamSchedulePayload = () => {
     if (!streamScheduled) return {}
+    if (streamTopicsOnly)
+      return {
+        captureScope: "topics",
+        topicKeys: streamTopicKeys,
+        topicsSessionNo: sittingNumber(streamPlanKey),
+      }
     const silenceSeconds = Number(streamSilenceStop) * 60
     const followPlan =
       streamStartMode === "when_live" && streamPlanFollow && streamPlanKey
@@ -985,6 +1142,10 @@ export function LiveTranscriptionView({
       silenceStopSeconds: silenceSeconds > 0 ? silenceSeconds : undefined,
       planFollow: followPlan ? true : undefined,
       planKey: followPlan ? streamPlanKey : undefined,
+      topicsSessionNo:
+        streamTrackTopics && sittingNumber(streamPlanKey)
+          ? sittingNumber(streamPlanKey)
+          : undefined,
     }
   }
   const resetStreamSchedule = () => {
@@ -995,6 +1156,9 @@ export function LiveTranscriptionView({
     setStreamSilenceStop("0")
     setStreamPlanKey("")
     setStreamPlanFollow(true)
+    setStreamTrackTopics(true)
+    setStreamCaptureScope("all")
+    setStreamTopicKeys([])
   }
   const streamCheckFeedback = streamURL.trim() ? (
     <p
@@ -1366,6 +1530,24 @@ export function LiveTranscriptionView({
               }
             : current
         )
+        return
+      }
+      if (event.type === "transcription.topic") {
+        const topic = data.topic as TranscriptionTopic | undefined
+        if (!topic?.id) return
+        const previous = topicsRef.current.find((item) => item.id === topic.id)
+        setTopics((current) =>
+          current.some((item) => item.id === topic.id)
+            ? current.map((item) => (item.id === topic.id ? topic : item))
+            : [...current, topic].sort((a, b) => a.order - b.order)
+        )
+        // Tell the user as soon as a topic they marked has finished.
+        if (
+          topic.status === "done" &&
+          previous?.status !== "done" &&
+          topic.starred
+        )
+          setTopicNotice(topic)
         return
       }
       if (event.type === "transcription.source.level") {
@@ -2560,16 +2742,27 @@ export function LiveTranscriptionView({
       (endpoint) => endpoint.id === effectiveSelectedEndpoint
     )?.name || "No endpoint selected"
 
+  const sessionTopics = topics.filter(
+    (topic) => topic.sessionId === snapshot?.session.id
+  )
+  const sessionSittingNumber =
+    snapshot?.sources
+      .map((source) => sittingNumber(source.planKey ?? ""))
+      .find(Boolean) ?? 0
+  // Offer the topics list for sessions that have topics, follow a Bundestag sitting, or
+  // capture a Bundestag source (so the agenda items can be loaded by hand).
+  const sessionTopicsVisible =
+    sessionTopics.length > 0 ||
+    sessionSittingNumber > 0 ||
+    Boolean(
+      snapshot?.sources.some(
+        (source) => source.kind === "stream" && /bundestag/i.test(source.name)
+      )
+    )
   const sourceSetupReady =
     captureMode !== "external" ||
     externalSourceType === "meeting-bot" ||
-    (checkedStreamReady &&
-      !streamScheduleInvalid(
-        streamScheduled,
-        streamStartMode,
-        streamScheduledStart,
-        streamScheduledEnd
-      ))
+    (checkedStreamReady && !streamSetupInvalid)
   const canContinueWizard =
     createStep === 0 ||
     (createStep === 1 && sourceSetupReady) ||
@@ -2731,6 +2924,22 @@ export function LiveTranscriptionView({
                 : rotateJoinCode())
             }
             onEditSchedule={setEditingSchedule}
+            topicsPanel={
+              sessionTopicsVisible ? (
+                <LiveTranscriptionTopics
+                  defaultSittingNo={sessionSittingNumber || undefined}
+                  finishedNotice={
+                    topicNotice?.sessionId === snapshot.session.id
+                      ? topicNotice
+                      : null
+                  }
+                  onDismissNotice={() => setTopicNotice(null)}
+                  onTopics={setTopics}
+                  sessionId={snapshot.session.id}
+                  topics={sessionTopics}
+                />
+              ) : null
+            }
             onStartCapture={ensureCapture}
             onStopSession={stopSession}
             partial={partial}
@@ -3508,14 +3717,7 @@ export function LiveTranscriptionView({
             </Button>
             <Button
               disabled={
-                streamStarting ||
-                !checkedStreamReady ||
-                streamScheduleInvalid(
-                  streamScheduled,
-                  streamStartMode,
-                  streamScheduledStart,
-                  streamScheduledEnd
-                )
+                streamStarting || !checkedStreamReady || streamSetupInvalid
               }
               onClick={() => void addStreamSource()}
             >

@@ -212,6 +212,15 @@ export function translateStreamAlert(
       "Schedule updated from the Bundestag plan: {value0} starts {value1} (Berlin time).",
       { value0: plan[1], value1: plan[2] }
     )
+  const pause =
+    /^Paused until (\d{1,2}:\d{2}) \(Berlin time\), shortly before the next selected topic: (.+)\.$/.exec(
+      alert
+    )
+  if (pause)
+    return t(
+      "Paused until {value0} (Berlin time), shortly before the next selected topic: {value1}.",
+      { value0: pause[1], value1: pause[2] }
+    )
   const silence =
     /^Capture ended automatically: no speech was heard for (\d+) minutes\.$/.exec(
       alert

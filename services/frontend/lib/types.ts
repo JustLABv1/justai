@@ -897,6 +897,29 @@ export type TranscriptionSource = {
   signalLevel: number
 }
 
+/** One agenda item of a live session (for example an item of a Bundestag sitting). */
+export type TranscriptionTopic = {
+  id: string
+  sessionId: string
+  sourceId?: string
+  key: string
+  order: number
+  kind: string
+  label: string
+  title: string
+  plannedStartAt?: string
+  plannedEndAt?: string
+  status: "planned" | "active" | "done"
+  startedOffsetMs?: number
+  endedOffsetMs?: number
+  detectedBy?: string
+  starred: boolean
+  summary?: string
+  summaryStatus: "none" | "processing" | "completed" | "failed"
+  summaryError?: string
+  updatedAt: string
+}
+
 /** A session announced by the broadcaster, with the watch window derived from it. */
 export type StreamPlanSession = {
   key: string
