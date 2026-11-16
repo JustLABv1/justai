@@ -2028,6 +2028,7 @@ export function TranscriptWorkspace({
       const includeInsights =
         exportSupportsInsights && includeInsightsInExport && insightsReady
       const query = summaryExportQuery()
+      query.set("uiLanguage", locale)
       if (insightsOnlyExport) query.set("insightsOnly", "true")
       else if (includeInsights) query.set("includeInsights", "true")
       const exportUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}?${query}`

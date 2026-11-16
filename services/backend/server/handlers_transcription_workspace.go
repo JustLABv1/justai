@@ -10,7 +10,9 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1112,6 +1114,12 @@ func (a *App) exportTranscription(c *gin.Context) {
 	if exportInsights != nil && exportInsights.Language == "auto" && language != "auto" {
 		exportInsights.Language = language
 	}
+	if normalized, ok := normalizeTranscriptionInsightLanguage(language); !ok || normalized == "auto" {
+		// Auto-detected transcripts have no fixed language, so label the export in the UI language.
+		if uiLanguage, ok := normalizeTranscriptionInsightLanguage(c.Query("uiLanguage")); ok && uiLanguage != "auto" {
+			language = uiLanguage
+		}
+	}
 	options := transcriptionSummaryExportOptions{BoldSpeakers: strings.EqualFold(c.Query("boldSpeakers"), "true"), Speakers: speakers}
 	if c.Request.Method == http.MethodPost {
 		var draft transcriptionSummaryExportDraft
@@ -1617,18 +1625,19 @@ const (
 	transcriptPDFPageHeight      = 792.0
 	transcriptPDFLeftMargin      = 54.0
 	transcriptPDFRightMargin     = 558.0
-	transcriptPDFTextX           = 118.0
-	transcriptPDFTitleTopY       = 730.0
+	transcriptPDFTextX           = 112.0
+	transcriptPDFContentWidth    = 504.0
+	transcriptPDFTitleTopY       = 698.0
 	transcriptPDFTitleFontSize   = 15.0
 	transcriptPDFTitleLineHeight = 20.0
-	transcriptPDFBodyTopY        = 714.0
-	transcriptPDFBodyBottomY     = 54.0
+	transcriptPDFBodyTopY        = 730.0
+	transcriptPDFBodyBottomY     = 62.0
 	transcriptPDFBodyFontSize    = 10.5
-	transcriptPDFBodyLineHeight  = 15.0
-	transcriptPDFParagraphGap    = 9.0
+	transcriptPDFBodyLineHeight  = 14.5
+	transcriptPDFParagraphGap    = 11.0
 	transcriptPDFBodyLineCharMax = 76
 	transcriptPDFBlockCharMax    = 720
-	transcriptPDFBrandColor      = "0.13 0.38 0.89"
+	transcriptPDFBrandColor      = "0.09 0.39 0.94"
 	transcriptPDFBrandDark       = "0.11 0.14 0.20"
 	transcriptPDFBrandMuted      = "0.43 0.47 0.54"
 	transcriptPDFBrandLine       = "0.85 0.89 0.94"
@@ -1683,7 +1692,7 @@ func transcriptPDFTitleLines(title string) []string {
 }
 
 func transcriptPDFFirstPageBodyTopY(title string, insightsOnly bool) float64 {
-	gap := 48.0 // Includes the transcript section label and separator.
+	gap := 48.0 // Includes the section label and separator.
 	if insightsOnly {
 		gap = 30.0
 	}
@@ -1701,7 +1710,7 @@ func buildTranscriptPDFLocalized(title string, rows []transcriptionExportRow, in
 	currentY := transcriptPDFFirstPageBodyTopY(title, insightsOnly)
 
 	for _, block := range blocks {
-		wrapped := wrapTranscriptPDFLine(block.Text, transcriptPDFBodyLineCharMax)
+		wrapped := wrapTranscriptPDFWidth(block.Text, "F1", transcriptPDFBodyFontSize, transcriptPDFRightMargin-transcriptPDFTextX)
 		lineCount := len(wrapped)
 		if block.Speaker != "" {
 			lineCount++
@@ -1755,11 +1764,19 @@ func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *
 	if insights == nil {
 		return
 	}
-	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "insights"), X: transcriptPDFLeftMargin, Font: "F2", Size: 12, Color: transcriptPDFBrandDark}, 22)
+	if len(*pages) == 1 && len((*pages)[0].Lines) == 0 {
+		// Insights-only export: the first-page header already names the document.
+		*currentY += 4
+	}
+	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: strings.ToUpper(transcriptionExportLabel(language, "insights")), X: transcriptPDFLeftMargin, Font: "F2", Size: 8.5, Color: transcriptPDFBrandColor}, 22)
 	page := &(*pages)[len(*pages)-1]
 	headerY := page.Lines[len(page.Lines)-1].Y
-	page.Lines = append(page.Lines, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "language") + ": " + transcriptionExportLanguageName(insights.Language), X: transcriptPDFRightMargin - 160, Y: headerY + 1, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
-	page.SectionRuleY = headerY - 9
+	languageText := transcriptionExportLabel(language, "language") + ": " + transcriptionExportLanguageName(insights.Language)
+	if normalized, _ := normalizeTranscriptionInsightLanguage(insights.Language); normalized == "auto" {
+		languageText = ""
+	}
+	page.Lines = append(page.Lines, transcriptPDFTextLine{Text: languageText, X: transcriptPDFRightMargin - transcriptPDFTextWidth(languageText, "F1", 8.5), Y: headerY, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
+	page.SectionRuleY = headerY - 8
 	if insights.Status != "completed" {
 		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Status: " + insights.Status, X: transcriptPDFLeftMargin, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandDark}, transcriptPDFBodyLineHeight)
 		if strings.TrimSpace(insights.Error) != "" {
@@ -1768,10 +1785,10 @@ func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *
 		return
 	}
 	if strings.TrimSpace(insights.Summary) != "" {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "summary"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFSectionHeading(pages, currentY, transcriptionExportLabel(language, "summary"))
 		for index, paragraph := range transcriptionSummaryParagraphs(insights.Summary) {
 			if index > 0 {
-				*currentY -= 8
+				*currentY -= 11
 			}
 			prefix := summaryExportSpeakerPrefix(paragraph, options...)
 			if prefix != "" {
@@ -1780,10 +1797,10 @@ func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *
 			}
 			appendTranscriptPDFWrappedFlow(pages, currentY, paragraph, transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
-		*currentY -= 5
+		*currentY -= 8
 	}
 	if len(insights.Chapters) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "chapters"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFSectionHeading(pages, currentY, transcriptionExportLabel(language, "chapters"))
 		for _, chapter := range insights.Chapters {
 			text := fmt.Sprintf("[%s] %s", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 			if strings.TrimSpace(chapter.Summary) != "" {
@@ -1791,23 +1808,88 @@ func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *
 			}
 			appendTranscriptPDFWrappedFlow(pages, currentY, text, transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
-		*currentY -= 5
+		*currentY -= 8
 	}
 	if len(insights.Topics) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "topics"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFSectionHeading(pages, currentY, transcriptionExportLabel(language, "topics"))
 		appendTranscriptPDFWrappedFlow(pages, currentY, strings.Join(insights.Topics, ", "), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
-		*currentY -= 5
+		*currentY -= 8
 	}
 	if len(insights.ActionItems) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "actions"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFSectionHeading(pages, currentY, transcriptionExportLabel(language, "actions"))
 		for _, item := range insights.ActionItems {
 			appendTranscriptPDFWrappedFlow(pages, currentY, "- "+strings.TrimSpace(item), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
 	}
 }
 
-func appendTranscriptPDFWrappedFlow(pages *[]transcriptPDFPage, currentY *float64, text string, x float64, width int, font string, size float64, color string) {
-	for _, line := range wrapTranscriptPDFLine(text, width) {
+func appendTranscriptPDFSectionHeading(pages *[]transcriptPDFPage, currentY *float64, label string) {
+	// Keep a heading together with at least the first lines of its section.
+	if *currentY-60 < transcriptPDFBodyBottomY {
+		*pages = append(*pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
+		*currentY = transcriptPDFBodyTopY
+	}
+	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: label, X: transcriptPDFLeftMargin, Font: "F2", Size: 11, Color: transcriptPDFBrandColor}, 19)
+}
+
+var transcriptPDFHelvetica = [2]string{
+	"278 278 355 556 556 889 667 191 333 333 389 584 278 333 278 278 556 556 556 556 556 556 556 556 556 556 278 278 584 584 584 556 1015 667 667 722 722 667 611 778 722 278 500 667 556 833 722 778 667 778 722 667 611 722 667 944 667 667 611 278 278 278 469 556 333 556 556 500 556 556 278 556 556 222 222 500 222 833 556 556 556 556 333 500 278 556 500 722 500 500 500 334 260 334 584",
+	"278 333 474 556 556 889 722 238 333 333 389 584 278 333 278 278 556 556 556 556 556 556 556 556 556 556 333 333 584 584 584 611 975 722 722 722 722 667 611 778 722 278 556 722 611 833 722 778 667 778 722 667 611 722 667 944 667 667 611 333 278 333 584 556 333 556 611 556 611 556 333 611 611 278 278 556 278 889 611 611 611 611 389 556 333 611 556 778 556 556 500 389 280 389 584",
+}
+
+var transcriptPDFWidthTables = func() [2][]float64 {
+	var tables [2][]float64
+	for index, raw := range transcriptPDFHelvetica {
+		for _, field := range strings.Fields(raw) {
+			value, _ := strconv.ParseFloat(field, 64)
+			tables[index] = append(tables[index], value)
+		}
+	}
+	return tables
+}()
+
+// transcriptPDFTextWidth measures text in the built-in Helvetica faces (F1
+// regular, F2 bold) so wrapping can use the full page width.
+func transcriptPDFTextWidth(value, fontName string, size float64) float64 {
+	table := transcriptPDFWidthTables[0]
+	if fontName == "F2" {
+		table = transcriptPDFWidthTables[1]
+	}
+	total := 0.0
+	for _, character := range norm.NFD.String(norm.NFC.String(value)) {
+		switch {
+		case character >= 32 && character <= 126:
+			total += table[character-32]
+		case character >= 0x300 && character <= 0x36f:
+			// Combining marks add no advance.
+		default:
+			total += 556
+		}
+	}
+	return total * size / 1000
+}
+
+func wrapTranscriptPDFWidth(value, fontName string, size, maxWidth float64) []string {
+	words := strings.Fields(value)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	lines := []string{""}
+	for _, word := range words {
+		current := lines[len(lines)-1]
+		if current == "" {
+			lines[len(lines)-1] = word
+		} else if transcriptPDFTextWidth(current+" "+word, fontName, size) <= maxWidth {
+			lines[len(lines)-1] = current + " " + word
+		} else {
+			lines = append(lines, word)
+		}
+	}
+	return lines
+}
+
+func appendTranscriptPDFWrappedFlow(pages *[]transcriptPDFPage, currentY *float64, text string, x float64, _ int, font string, size float64, color string) {
+	for _, line := range wrapTranscriptPDFWidth(text, font, size, transcriptPDFRightMargin-x) {
 		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: line, X: x, Font: font, Size: size, Color: color}, transcriptPDFBodyLineHeight)
 	}
 }
@@ -1887,10 +1969,8 @@ func renderTranscriptPDFLocalized(title string, pages []transcriptPDFPage, langu
 	for pageNumber, page := range pages {
 		var content strings.Builder
 		if pageNumber == 0 {
-			appendTranscriptPDFBrandMark(&content, transcriptPDFLeftMargin, 744, 14)
-			// Text uses a baseline, while the mark uses its bounding box. Lower
-			// the baseline so the visible wordmark is centered beside the icon.
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI", X: 75, Y: 748, Font: "F2", Size: 9, Color: transcriptPDFBrandDark})
+			appendTranscriptPDFLogo(&content, transcriptPDFLeftMargin, 738, 20)
+			fmt.Fprintf(&content, "%s RG\n0.6 w\n54 726 m 558 726 l S\n", transcriptPDFBrandLine)
 			for index, line := range transcriptPDFTitleLines(title) {
 				appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: line, X: transcriptPDFLeftMargin, Y: transcriptPDFTitleTopY - float64(index)*transcriptPDFTitleLineHeight, Font: "F2", Size: transcriptPDFTitleFontSize, Color: transcriptPDFBrandDark})
 			}
@@ -1906,7 +1986,10 @@ func renderTranscriptPDFLocalized(title string, pages []transcriptPDFPage, langu
 		for _, line := range page.Lines {
 			appendTranscriptPDFText(&content, line)
 		}
-		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: fmt.Sprintf("%s %d / %d", transcriptionExportLabel(language, "page"), pageNumber+1, len(pages)), X: 495, Y: 30, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
+		fmt.Fprintf(&content, "%s RG\n0.5 w\n54 44 m 558 44 l S\n", transcriptPDFBrandLine)
+		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: transcriptPDFLeftMargin, Y: 30, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted}.truncated(380))
+		pageLabel := fmt.Sprintf("%s %d / %d", transcriptionExportLabel(language, "page"), pageNumber+1, len(pages))
+		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: pageLabel, X: transcriptPDFRightMargin - transcriptPDFTextWidth(pageLabel, "F1", 8), Y: 30, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
 
 		contentObject := fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(content.String()), content.String())
 		objects = append(objects, contentObject)
@@ -1920,6 +2003,7 @@ func renderTranscriptPDFLocalized(title string, pages []transcriptPDFPage, langu
 		kids = append(kids, fmt.Sprintf("%d 0 R", ref))
 	}
 	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(pageRefs))
+	objects = append(objects, fmt.Sprintf("<< /Title (%s) /Producer (JustAI) >>", pdfTextLiteral(title)))
 	var output bytes.Buffer
 	output.WriteString("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")
 	offsets := make([]int, len(objects)+1)
@@ -1932,7 +2016,7 @@ func renderTranscriptPDFLocalized(title string, pages []transcriptPDFPage, langu
 	for index := 1; index < len(offsets); index++ {
 		fmt.Fprintf(&output, "%010d 00000 n \n", offsets[index])
 	}
-	fmt.Fprintf(&output, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xrefOffset)
+	fmt.Fprintf(&output, "trailer\n<< /Size %d /Root 1 0 R /Info %d 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, len(objects), xrefOffset)
 	return output.Bytes()
 }
 
@@ -1940,20 +2024,118 @@ func appendTranscriptPDFRectangle(content *strings.Builder, x, y, width, height 
 	fmt.Fprintf(content, "q\n%s rg\n%.2f %.2f %.2f %.2f re\nf\nQ\n", color, x, y, width, height)
 }
 
-func appendTranscriptPDFBrandMark(content *strings.Builder, x, y, size float64) {
-	scale := size / 64
-	strokeWidth := 6 * scale
-	fmt.Fprintf(content, "q\n%s RG\n%.2f w\n1 J\n", transcriptPDFBrandColor, strokeWidth)
-	// This is the compact vector form of the JustAI mark used in the web app.
-	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f c S\n", x+10*scale, y+size-12*scale, x+10*scale, y+size-18*scale, x+10*scale, y+size-25*scale, x+16*scale, y+size-30*scale, x+25*scale, y+size-30*scale)
-	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f c S\n", x+54*scale, y+size-12*scale, x+54*scale, y+size-18*scale, x+54*scale, y+size-25*scale, x+48*scale, y+size-30*scale, x+39*scale, y+size-30*scale)
-	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c S\n", x+32*scale, y+size-20*scale, x+32*scale, y+size-39*scale, x+32*scale, y+size-48*scale, x+27*scale, y+size-53*scale, x+19*scale, y+size-53*scale, x+13*scale, y+size-53*scale, x+9*scale, y+size-50*scale, x+6*scale, y+size-46*scale)
+// Vector paths of the horizontal JustAI logo (design/justai-logo-kit/masters/justai-horizontal.svg).
+var transcriptPDFLogoSymbolPaths = []string{
+	"M40 36H88V132C88 150.78 103.22 166 122 166H216V212H122C76.71 212 40 176.18 40 132Z",
+	"M120 52H200V132H152V98H120Z",
+}
 
-	cx := x + 32*scale
-	cy := y + size - 9*scale
-	radius := 4.5 * scale
-	kappa := radius * 0.5522848
-	fmt.Fprintf(content, "%s rg\n%.2f %.2f m %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c f\nQ\n", transcriptPDFBrandColor, cx+radius, cy, cx+radius, cy+kappa, cx+kappa, cy+radius, cx, cy+radius, cx-kappa, cy+radius, cx-radius, cy+kappa, cx-radius, cy, cx-radius, cy-kappa, cx-kappa, cy-radius, cx, cy-radius, cx+kappa, cy-radius, cx+radius, cy-kappa, cx+radius, cy)
+var transcriptPDFLogoWordmarkPaths = []struct {
+	OffsetX float64
+	Path    string
+}{
+	{0, "M42 0H56V66C56 89 45 102 26 102C9 102 0 92 0 76H14C14 84 18 89 26 89C37 89 42 81 42 66Z"},
+	{72, "M0 28H14V72C14 84 20 89 29 89C40 89 46 82 46 70V28H60V100H47V92C42 99 35 102 26 102C9 102 0 92 0 74Z"},
+	{148, "M53 34L47 45C41 41 35 39 28 39C19 39 14 42 14 47C14 52 19 54 30 57C47 61 56 67 56 79C56 94 44 102 27 102C16 102 6 99 0 93L7 82C13 87 20 90 28 90C37 90 42 87 42 81C42 76 37 73 26 71C9 67 0 61 0 48C0 34 12 26 28 26C38 26 46 29 53 34Z"},
+	{220, "M12 8H26V28H46V40H26V76C26 85 29 89 37 89H46V101H35C20 101 12 93 12 77V40H0V28H12Z"},
+	{286, "M37 0H53L90 100H75L66 75H24L15 100H0ZM29 62H61L45 17Z"},
+	{394, "M0 0H14V100H0Z"},
+}
+
+// appendTranscriptPDFLogo draws the horizontal logo with its bottom-left corner
+// at (x, y) and the given visible height in points.
+func appendTranscriptPDFLogo(content *strings.Builder, x, y, height float64) {
+	const boxLeft, boxBottom, boxHeight = 40.0, 212.0, 176.0
+	scale := height / boxHeight
+	fmt.Fprintf(content, "q\n%s rg\n", transcriptPDFBrandColor)
+	for _, path := range transcriptPDFLogoSymbolPaths {
+		content.WriteString(transcriptPDFSVGPathToPDF(path, func(px, py float64) (float64, float64) {
+			return x + (px-boxLeft)*scale, y + (boxBottom-py)*scale
+		}))
+		content.WriteString("f\n")
+	}
+	for _, glyph := range transcriptPDFLogoWordmarkPaths {
+		offset := glyph.OffsetX
+		content.WriteString(transcriptPDFSVGPathToPDF(glyph.Path, func(px, py float64) (float64, float64) {
+			sx := 288 + 1.15*(offset+px)
+			sy := 69 + 1.15*py
+			return x + (sx-boxLeft)*scale, y + (boxBottom-sy)*scale
+		}))
+		content.WriteString("f*\n")
+	}
+	content.WriteString("Q\n")
+}
+
+// transcriptPDFSVGPathToPDF converts absolute M/L/H/V/C/Z SVG path data into PDF
+// path operators, mapping each point through transform.
+func transcriptPDFSVGPathToPDF(path string, transform func(x, y float64) (float64, float64)) string {
+	tokens := transcriptPDFPathTokenPattern.FindAllString(path, -1)
+	var out strings.Builder
+	var curX, curY float64
+	command := byte(0)
+	numbers := func(count int, index *int) []float64 {
+		values := make([]float64, count)
+		for i := range values {
+			values[i], _ = strconv.ParseFloat(tokens[*index], 64)
+			*index++
+		}
+		return values
+	}
+	point := func(px, py float64) string {
+		tx, ty := transform(px, py)
+		return fmt.Sprintf("%.2f %.2f", tx, ty)
+	}
+	for index := 0; index < len(tokens); {
+		token := tokens[index]
+		if len(token) == 1 && token[0] >= 'A' && token[0] <= 'Z' {
+			command = token[0]
+			index++
+			if command == 'Z' {
+				out.WriteString("h\n")
+				continue
+			}
+		}
+		switch command {
+		case 'M':
+			v := numbers(2, &index)
+			curX, curY = v[0], v[1]
+			out.WriteString(point(curX, curY) + " m\n")
+			command = 'L'
+		case 'L':
+			v := numbers(2, &index)
+			curX, curY = v[0], v[1]
+			out.WriteString(point(curX, curY) + " l\n")
+		case 'H':
+			v := numbers(1, &index)
+			curX = v[0]
+			out.WriteString(point(curX, curY) + " l\n")
+		case 'V':
+			v := numbers(1, &index)
+			curY = v[0]
+			out.WriteString(point(curX, curY) + " l\n")
+		case 'C':
+			v := numbers(6, &index)
+			curX, curY = v[4], v[5]
+			out.WriteString(point(v[0], v[1]) + " " + point(v[2], v[3]) + " " + point(v[4], v[5]) + " c\n")
+		default:
+			index++
+		}
+	}
+	return out.String()
+}
+
+var transcriptPDFPathTokenPattern = regexp.MustCompile(`[A-Za-z]|-?\d+(?:\.\d+)?`)
+
+func (line transcriptPDFTextLine) truncated(maxWidth float64) transcriptPDFTextLine {
+	if transcriptPDFTextWidth(line.Text, line.Font, line.Size) <= maxWidth {
+		return line
+	}
+	runes := []rune(line.Text)
+	for len(runes) > 1 && transcriptPDFTextWidth(string(runes)+"...", line.Font, line.Size) > maxWidth {
+		runes = runes[:len(runes)-1]
+	}
+	line.Text = strings.TrimSpace(string(runes)) + "..."
+	return line
 }
 
 func appendTranscriptPDFText(content *strings.Builder, line transcriptPDFTextLine) {
