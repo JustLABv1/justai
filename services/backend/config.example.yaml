@@ -35,6 +35,24 @@ code_runner:
   url: ""
   token: ""
 
+# Optional external livestream relay for capture through a file-inspecting proxy
+# (see deploy/stream-relay/README.md). Leave url empty to disable. Environment
+# variables JUSTAI_STREAM_RELAY_URL / _TOKEN_FILE / _TOKEN override this entry.
+# url must be an HTTPS origin without path. Prefer token_file over token.
+stream_relay:
+  name: ""          # optional label shown in the source picker (default: host)
+  url: ""
+  token_file: ""
+  token: ""
+
+# Additional relays (up to 8 in total), each with its own token, for separate
+# trust groups. The source picker lists the sources of every relay. Environment:
+# JUSTAI_STREAM_RELAYS="name=https://host|/path/to/token_file,..." adds more.
+stream_relays: []
+  # - name: "Berlin relay"
+  #   url: "https://relay-berlin.example.org"
+  #   token_file: "/run/secrets/relay_berlin_token"
+
 transcription:
   # Choose one: local or s3. Audio recording is opt-in per session.
   storage_driver: "local"

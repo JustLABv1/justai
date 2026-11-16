@@ -2,9 +2,9 @@
 
 The relay runs on infrastructure that can reach the public MP3 source. JustAI
 behind the firewall makes only outbound HTTPS requests to it. Every audio response
-is a completed five-second WAV file with an explicit `Content-Length` (160,044 bytes including the WAV header,
-16 kHz mono signed PCM16 little endian). It does not require a streaming response
-through the corporate proxy. Expect roughly 5–6 seconds of extra latency plus
+is a completed WAV segment with an explicit `Content-Length` (five seconds by default:
+160,044 bytes including the WAV header; 16 kHz mono signed PCM16 little endian). It does not require a streaming response
+through the corporate proxy. Expect roughly one segment length plus a second of extra latency (5–6 s by default) plus
 proxy inspection, transport and transcription time.
 
 This first version supports **direct HTTPS MP3 sources with `audio/mpeg`**, including
@@ -34,17 +34,24 @@ Point your TLS ingress at `127.0.0.1:8080`, and give JustAI the same `RELAY_TOKE
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RELAY_SOURCES` | – | `id=https://url,id2=https://url2` (instead of `sources.json`) |
+| `RELAY_SOURCES` | – | `id=https://url,id2=Display name\|https://url2` (instead of `sources.json`; the optional `Name\|` prefix is shown in JustAI's source picker) |
 | `RELAY_TOKEN` | – | Bearer token; several comma-separated for rotation (instead of the token file) |
 | `RELAY_SOURCES_FILE`, `RELAY_TOKEN_FILE` | `/etc/stream-relay/sources.json`, `/run/secrets/relay_token` | File-based alternatives |
 | `RELAY_HTTP` | `false` | `true` = plain HTTP behind your TLS ingress |
 | `RELAY_LISTEN` | `:8443` / `:8080` | Listen address |
 | `RELAY_TLS_CERT`, `RELAY_TLS_KEY` | `/etc/stream-relay/tls.crt`, `/run/secrets/tls_key` | Direct HTTPS |
 | `RELAY_MAX_CONNS`, `RELAY_MAX_CONNS_PER_IP` | `128`, `16` (`0` with HTTP) | Connection limits |
+| `RELAY_SEGMENT_SECONDS` | `5` | Audio per segment (1–10). `2` or `3` lowers latency by a few seconds but means more polling requests through your proxy. Also `"segmentSeconds"` in `sources.json`. |
+| `RELAY_ON_DEMAND`, `RELAY_IDLE_SECONDS` | `false`, `120` | Capture a source only while JustAI requests it (listing sources does not count) and stop after this many idle seconds (10–3600). Saves bandwidth; the first request waits one segment plus start-up. Also `"onDemand"` / `"idleSeconds"` in `sources.json`. |
 
 Environment variables are easier to leak than files (`docker inspect`, crash
 reports). For tokens, prefer the file-based setup below when others can inspect
 containers on the host. If both are set, `RELAY_TOKEN` and `RELAY_SOURCES` win.
+
+With `RELAY_ON_DEMAND`, an idle source reports status `idle` in the source list and
+starts capturing on its first manifest or segment request. A fresh epoch starts after
+each idle stop, so a reader never gets stale audio. Metric:
+`relay_upstream_sessions_total{reason="idle_stop"}`.
 
 ### Build the image yourself
 
@@ -176,7 +183,12 @@ to relay requests. Allowlist the relay host and port in the corporate proxy. The
 backend is allowed to reach this **exact configured origin**, including when it
 is on a private network; no global private-target permission is necessary.
 
-In the existing livestream URL field, enter:
+With a relay configured, JustAI's livestream dialogs show a **Stream relay sources**
+picker listing every source the relay offers (from the authenticated `GET /v1/sources`,
+which returns only IDs, display names and a `live`/`idle`/`offline` status, never upstream
+URLs). The picker marks each source with that status. Choosing one fills in
+the link, so users do not need to know it. In `sources.json`, add display names with
+`"names": {"bundestag": "Bundestag plenary audio"}`. You can also enter the link manually:
 
 ```text
 https://relay.example.org:8443/v1/sources/bundestag
@@ -187,6 +199,28 @@ like other stream URLs, and polls completed audio files. The token stays on the
 backend and is never sent to the browser or stored in the source URL. Relay errors
 use generic messages to avoid exposing credentials. Missing token configuration,
 invalid certificates and redirects fail closed.
+
+### Several relays
+
+The backend can use up to eight relays, each with its own token, for separate trust groups.
+In `config.yaml`:
+
+```yaml
+stream_relays:
+  - {name: "Berlin", url: "https://relay-berlin.example.org", token_file: "/run/secrets/relay_berlin_token"}
+  - {name: "Bonn",   url: "https://relay-bonn.example.org",   token_file: "/run/secrets/relay_bonn_token"}
+```
+
+Containers can use the environment instead (entries are added to the YAML ones; tokens are
+always read from files):
+
+```text
+JUSTAI_STREAM_RELAYS=Berlin=https://relay-berlin.example.org|/run/secrets/relay_berlin_token,Bonn=https://relay-bonn.example.org|/run/secrets/relay_bonn_token
+```
+
+For Helm use `backend.streamRelays` (see the chart README). `stream_relay` (single entry,
+overridable by `JUSTAI_STREAM_RELAY_*`) still works and is listed first. The picker lists every relay's sources (prefixed with the relay name when
+there are several) and notes any relay it could not reach.
 
 ## Operation and security boundaries
 
@@ -273,6 +307,14 @@ scrape_configs:
 
 Useful alerts: `relay_upstream_up == 0`, a rising `code="401"` rate,
 `code="503"` (busy) or `reason="rejected"` sessions.
+
+### Backend metrics
+
+The JustAI backend's own `/metrics` endpoint adds, per configured relay (label `relay`):
+`justai_stream_relay_manifest_errors_total`, `_segment_errors_total`,
+`_segments_received_total`, `_reconnects_total`, `_list_errors_total` and
+`justai_stream_relay_last_success_timestamp_seconds`. Alert on a rising error or
+reconnect rate, or `time() - …last_success_timestamp_seconds > 60` while sessions run.
 
 ## Abuse protection
 

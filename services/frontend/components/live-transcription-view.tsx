@@ -2587,6 +2587,13 @@ export function LiveTranscriptionView({
                       value={streamName}
                     />
                   </Field>
+                  <RelaySourcePicker
+                    onPick={(source) => {
+                      setStreamURL(source.url)
+                      setStreamName(source.name)
+                    }}
+                    selectedURL={streamURL}
+                  />
                   <Field>
                     <FieldLabel>{t("Livestream link")}</FieldLabel>
                     <Input
@@ -3019,6 +3026,13 @@ export function LiveTranscriptionView({
                   value={streamName}
                 />
               </Field>
+              <RelaySourcePicker
+                onPick={(source) => {
+                  setStreamURL(source.url)
+                  setStreamName(source.name)
+                }}
+                selectedURL={streamURL}
+              />
               <Field>
                 <FieldLabel>{t("Livestream link")}</FieldLabel>
                 <Input
@@ -3398,6 +3412,105 @@ export function LiveTranscriptionView({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+type RelaySource = {
+  id: string
+  name: string
+  url: string
+  relay: string
+  status: "live" | "idle" | "offline"
+}
+
+// Offers the sources of the configured stream relays so users don't need to
+// know the relay URLs. Renders nothing when no relay is configured.
+function RelaySourcePicker({
+  onPick,
+  selectedURL,
+}: {
+  onPick: (source: RelaySource) => void
+  selectedURL: string
+}) {
+  const { t } = useTranslations()
+  const [sources, setSources] = useState<RelaySource[]>([])
+  const [unavailable, setUnavailable] = useState<string[]>([])
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void api
+      .get<{
+        enabled: boolean
+        sources: RelaySource[]
+        unavailable: string[]
+      }>("/api/v1/transcription/stream-relay/sources")
+      .then((result) => {
+        if (cancelled || !result.enabled) return
+        setSources(result.sources)
+        setUnavailable(result.unavailable ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  if (failed)
+    return (
+      <p className="text-xs leading-4 text-muted-foreground">
+        {t("The stream relay sources could not be loaded.")}
+      </p>
+    )
+  if (sources.length === 0 && unavailable.length === 0) return null
+  const multipleRelays = new Set(sources.map((source) => source.relay)).size > 1
+  const statusLabel = (status: RelaySource["status"]) =>
+    status === "live"
+      ? t("Live")
+      : status === "idle"
+        ? t("Starts on demand")
+        : t("Offline")
+  return (
+    <Field>
+      <FieldLabel>{t("Stream relay sources")}</FieldLabel>
+      <div className="flex flex-wrap gap-2">
+        {sources.map((source) => (
+          <Button
+            key={`${source.relay}/${source.id}`}
+            onClick={() => onPick(source)}
+            size="sm"
+            type="button"
+            variant={selectedURL.trim() === source.url ? "default" : "outline"}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "mr-1.5 inline-block size-2 rounded-full",
+                source.status === "live"
+                  ? "bg-emerald-500"
+                  : source.status === "idle"
+                    ? "bg-amber-500"
+                    : "bg-muted-foreground/50"
+              )}
+            />
+            {multipleRelays ? `${source.relay} · ${source.name}` : source.name}
+            <span className="sr-only"> ({statusLabel(source.status)})</span>
+          </Button>
+        ))}
+      </div>
+      <FieldDescription>
+        {t(
+          "Pick a source offered by your stream relay, or paste a link below. Green: live, amber: starts when needed, grey: offline."
+        )}
+      </FieldDescription>
+      {unavailable.length > 0 ? (
+        <p className="text-xs leading-4 text-destructive" role="status">
+          {t("Some relays could not be reached: {value0}", {
+            value0: unavailable.join(", "),
+          })}
+        </p>
+      ) : null}
+    </Field>
   )
 }
 

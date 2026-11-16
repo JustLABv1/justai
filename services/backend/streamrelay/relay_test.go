@@ -245,8 +245,152 @@ func TestMP3DecodeProducesCompleteSegments(t *testing.T) {
 			t.Error("decoded audio is silent")
 		}
 		count++
-	}, upstream.Client())
+	}, upstream.Client(), SegmentBytes)
 	if err == nil || count != 2 {
 		t.Fatalf("decoded %d complete segments; err=%v", count, err)
+	}
+}
+
+func TestSourceListAndParsedNames(t *testing.T) {
+	cfg, err := ParseSources("a=https://x.example/a.mp3,b=Plenary audio|https://x.example/b.mp3")
+	if err != nil || cfg.Names["b"] != "Plenary audio" || cfg.Sources["b"] != "https://x.example/b.mp3" || cfg.Names["a"] != "" {
+		t.Fatalf("unexpected parse result %+v err=%v", cfg, err)
+	}
+	r, err := New(cfg, testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewTLSServer(r)
+	defer srv.Close()
+	configureClient(t, srv.URL)
+	// ListSources needs the test server's CA, so exercise the handler directly.
+	for _, tc := range []struct {
+		auth string
+		want int
+	}{{"", 401}, {"Bearer " + testToken, 200}} {
+		req := httptest.NewRequest("GET", "/v1/sources", nil)
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Fatalf("auth %q: got %d", tc.auth, rec.Code)
+		}
+		if tc.want == 200 {
+			body := rec.Body.String()
+			if !strings.Contains(body, `{"id":"b","name":"Plenary audio","status":"offline"}`) || !strings.Contains(body, `{"id":"a","name":"a","status":"offline"}`) || strings.Contains(body, "x.example") {
+				t.Fatalf("unexpected list %s", body)
+			}
+		}
+	}
+}
+
+func TestSegmentSecondsAndStatus(t *testing.T) {
+	r, err := New(Config{Sources: map[string]string{"radio": "https://radio.example/live.mp3"}, SegmentSeconds: 2}, testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.segBytes != 64000 || r.retained != 30 {
+		t.Fatalf("segBytes=%d retained=%d", r.segBytes, r.retained)
+	}
+	s := r.sources["radio"]
+	if s.status(false) != "offline" || s.status(true) != "idle" {
+		t.Fatal("unexpected initial status")
+	}
+	s.append(make([]byte, r.segBytes))
+	if s.status(true) != "live" {
+		t.Fatal("expected live after a segment")
+	}
+	req := httptest.NewRequest("GET", "/v1/sources/radio", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), `"segmentSeconds":2`) {
+		t.Fatalf("manifest %s", rec.Body.String())
+	}
+	req = httptest.NewRequest("GET", "/v1/sources/radio/segments/1?epoch="+s.manifest.Epoch, nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Body.Len() != 64044 {
+		t.Fatalf("segment size %d", rec.Body.Len())
+	}
+	for _, bad := range []int{-1, 11} {
+		if _, err := New(Config{Sources: map[string]string{"a": "https://radio.example/a.mp3"}, SegmentSeconds: bad}, testToken); err == nil {
+			t.Fatalf("segment length %d accepted", bad)
+		}
+	}
+}
+
+func TestOnDemandWakesAndIdlesWithFreshEpoch(t *testing.T) {
+	r, err := New(Config{Sources: map[string]string{"radio": "https://radio.example/live.mp3"}, OnDemand: true, IdleSeconds: 10}, testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := r.sources["radio"]
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if s.waitDemand(ctx, 10*time.Second) {
+		t.Fatal("capture started without any request")
+	}
+	s.touch()
+	if !s.waitDemand(context.Background(), 10*time.Second) {
+		t.Fatal("request did not wake the source")
+	}
+	// An old request no longer counts as demand.
+	s.Lock()
+	s.lastRequest = time.Now().Add(-time.Minute)
+	s.Unlock()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel2()
+	if s.waitDemand(ctx2, 10*time.Second) {
+		t.Fatal("stale request woke the source")
+	}
+	s.append(make([]byte, r.segBytes))
+	old := s.manifest.Epoch
+	s.idleStopped(r.log, time.Now(), 0)
+	if s.manifest.Epoch == old || s.manifest.Latest != 0 || len(s.segments) != 0 || s.status(true) != "idle" {
+		t.Fatalf("idle stop did not reset: %+v", s.manifest)
+	}
+}
+
+func TestMultipleRelaysAndMetrics(t *testing.T) {
+	good := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"sources":[{"id":"a","name":"Alpha","status":"live"},{"id":"../x","name":"bad"}]}`)
+	}))
+	defer good.Close()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(testToken), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = Configure(Endpoint{}, nil) })
+	if err := Configure(Endpoint{Name: "One", URL: "https://one.example", TokenFile: path}, []Endpoint{{Name: "Two", URL: "https://two.example", Token: testToken}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Configure(Endpoint{URL: "https://one.example", TokenFile: path}, []Endpoint{{URL: "https://ONE.example", Token: testToken}}); err == nil {
+		t.Fatal("duplicate relay accepted")
+	}
+	if err := Configure(Endpoint{Name: "One", URL: "https://one.example", TokenFile: path}, []Endpoint{{Name: "Two", URL: "https://two.example", Token: testToken}}); err != nil {
+		t.Fatal(err)
+	}
+	// Each relay's own token and origin are used for matching sources.
+	c, err := ForSource("https://two.example/v1/sources/radio")
+	if err != nil || c == nil || c.relay != "Two" {
+		t.Fatalf("client=%v err=%v", c, err)
+	}
+	if c, err = ForSource("https://three.example/v1/sources/radio"); c != nil || err != nil {
+		t.Fatal("unconfigured relay matched")
+	}
+	// Unreachable relays are reported, not fatal, and counted in metrics.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := ListSources(ctx); err == nil {
+		t.Fatal("expected an error when no relay is reachable")
+	}
+	var out strings.Builder
+	WriteClientMetrics(&out)
+	if !strings.Contains(out.String(), `justai_stream_relay_list_errors_total{relay="One"} 1`) || !strings.Contains(out.String(), `justai_stream_relay_list_errors_total{relay="Two"} 1`) {
+		t.Fatalf("metrics:\n%s", out.String())
 	}
 }

@@ -147,3 +147,20 @@ func clearConfigEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 }
+
+func TestParseStreamRelays(t *testing.T) {
+	got, err := ParseStreamRelays("Berlin=https://a.example|/run/a, https://b.example/|/run/b\nBonn=https://c.example:8443|/run/c")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+	if got[0] != (StreamRelayConfig{Name: "Berlin", URL: "https://a.example", TokenFile: "/run/a"}) ||
+		got[1] != (StreamRelayConfig{URL: "https://b.example", TokenFile: "/run/b"}) ||
+		got[2].URL != "https://c.example:8443" {
+		t.Fatalf("unexpected parse %+v", got)
+	}
+	for _, bad := range []string{"Berlin", "Berlin=https://a.example", "Berlin=|/run/a", "x=https://a.example|"} {
+		if _, err := ParseStreamRelays(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

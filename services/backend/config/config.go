@@ -32,6 +32,19 @@ type Config struct {
 	RepositoryMaxFiles  int
 	Transcription       TranscriptionConfig
 	CodeRunner          CodeRunnerConfig
+	StreamRelay         StreamRelayConfig
+	StreamRelays        []StreamRelayConfig
+}
+
+// StreamRelayConfig points at an external livestream relay. For the single
+// stream_relay entry, the environment variables JUSTAI_STREAM_RELAY_URL,
+// _TOKEN_FILE and _TOKEN take precedence (applied in package streamrelay).
+// Token (inline) is used only when no token file is configured.
+type StreamRelayConfig struct {
+	Name      string
+	URL       string
+	Token     string
+	TokenFile string
 }
 
 // CodeRunnerConfig points at the isolated code-runner service. The run_code
@@ -94,6 +107,15 @@ type fileConfig struct {
 	RepositoryMaxFiles  int                     `yaml:"repository_max_files"`
 	Transcription       fileTranscriptionConfig `yaml:"transcription"`
 	CodeRunner          fileCodeRunnerConfig    `yaml:"code_runner"`
+	StreamRelay         fileStreamRelayConfig   `yaml:"stream_relay"`
+	StreamRelays        []fileStreamRelayConfig `yaml:"stream_relays"`
+}
+
+type fileStreamRelayConfig struct {
+	Name      string `yaml:"name"`
+	URL       string `yaml:"url"`
+	Token     string `yaml:"token"`
+	TokenFile string `yaml:"token_file"`
 }
 
 type fileCodeRunnerConfig struct {
@@ -181,6 +203,14 @@ func Load(configPath string) (Config, error) {
 	if repositoryMaxFiles < 1 || repositoryMaxFiles > 5000 {
 		return Config{}, fmt.Errorf("JUSTAI_REPOSITORY_MAX_FILES must be between 1 and 5000")
 	}
+	streamRelays := streamRelayConfigs(fileValues.StreamRelays)
+	if raw := strings.TrimSpace(os.Getenv("JUSTAI_STREAM_RELAYS")); raw != "" {
+		fromEnv, err := ParseStreamRelays(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		streamRelays = append(streamRelays, fromEnv...)
+	}
 	codeRunner, err := codeRunnerConfig(fileValues.CodeRunner)
 	if err != nil {
 		return Config{}, err
@@ -214,7 +244,45 @@ func Load(configPath string) (Config, error) {
 		RepositoryMaxFiles:  repositoryMaxFiles,
 		Transcription:       transcriptionConfig(fileValues.Transcription),
 		CodeRunner:          codeRunner,
+		StreamRelay:         streamRelayConfig(fileValues.StreamRelay),
+		StreamRelays:        streamRelays,
 	}, nil
+}
+
+func streamRelayConfig(v fileStreamRelayConfig) StreamRelayConfig {
+	return StreamRelayConfig{Name: strings.TrimSpace(v.Name), URL: strings.TrimRight(strings.TrimSpace(v.URL), "/"), Token: strings.TrimSpace(v.Token), TokenFile: strings.TrimSpace(v.TokenFile)}
+}
+
+func streamRelayConfigs(values []fileStreamRelayConfig) []StreamRelayConfig {
+	var out []StreamRelayConfig
+	for _, v := range values {
+		out = append(out, streamRelayConfig(v))
+	}
+	return out
+}
+
+// ParseStreamRelays parses JUSTAI_STREAM_RELAYS: comma- or newline-separated
+// "name=https://origin|/path/to/token_file" entries. The "name=" prefix is
+// optional (the host is used). Tokens are always read from files.
+func ParseStreamRelays(raw string) ([]StreamRelayConfig, error) {
+	var out []StreamRelayConfig
+	for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
+		entry = strings.TrimSpace(entry)
+		name := ""
+		if !strings.HasPrefix(entry, "https://") {
+			var found bool
+			if name, entry, found = strings.Cut(entry, "="); !found {
+				return nil, fmt.Errorf("JUSTAI_STREAM_RELAYS entries must look like name=https://host|/path/to/token")
+			}
+		}
+		origin, tokenFile, found := strings.Cut(entry, "|")
+		origin, tokenFile = strings.TrimSpace(origin), strings.TrimSpace(tokenFile)
+		if !found || origin == "" || tokenFile == "" {
+			return nil, fmt.Errorf("JUSTAI_STREAM_RELAYS entries must look like name=https://host|/path/to/token")
+		}
+		out = append(out, StreamRelayConfig{Name: strings.TrimSpace(name), URL: strings.TrimRight(origin, "/"), TokenFile: tokenFile})
+	}
+	return out, nil
 }
 
 func codeRunnerConfig(values fileCodeRunnerConfig) (CodeRunnerConfig, error) {

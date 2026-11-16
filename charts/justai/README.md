@@ -154,6 +154,27 @@ so Kubernetes Secret updates can propagate. No relay token is sent to the fronte
 workload. In monolith mode the frontend and backend share a container; its filesystem
 is shared. Leave the URL empty to omit the relay environment variables and mount.
 
+### Several relays
+
+Use `backend.streamRelays` for additional relays, each with its own token Secret
+(up to eight together with `backend.streamRelay`):
+
+```yaml
+backend:
+  streamRelays:
+    - name: Berlin
+      url: https://relay-berlin.example.org
+      tokenSecret: {name: justai-relay-berlin, key: stream-relay-token}
+    - name: Bonn
+      url: https://relay-bonn.example.org
+      tokenSecret: {name: justai-relay-bonn}   # key defaults to stream-relay-token
+```
+
+The chart sets `JUSTAI_STREAM_RELAYS` (`name=url|token-file`, comma-separated) and
+mounts each Secret key read-only at `/var/run/justai/stream-relays/<index>/token`.
+These entries are added to the single `streamRelay` relay and any `stream_relays` in
+`config.yaml`. Token Secrets must already exist; they are not created by the chart.
+
 The Secret name falls back to `secrets.existingSecret` or the generated/Vault
 Secret, consistent with other `secrets.refs`. Vault must supply the selected key.
 For private test values, `secrets.create=true` supports
