@@ -467,7 +467,15 @@ type TranscriptionSource struct {
 	LastSeenAt       *time.Time `json:"lastSeenAt,omitempty"`
 	ScheduledStartAt *time.Time `json:"scheduledStartAt,omitempty"`
 	ScheduledEndAt   *time.Time `json:"scheduledEndAt,omitempty"`
-	SignalLevel      float64    `json:"signalLevel"`
+	// StartMode is "at_time" or "when_live" (watch from ScheduledStartAt until speech is heard).
+	// These are always sent (even when empty) so that clearing one reaches open sessions.
+	StartMode          string `json:"startMode"`
+	SilenceStopSeconds int    `json:"silenceStopSeconds"`
+	PlanFollow         bool   `json:"planFollow"`
+	PlanKey            string `json:"planKey"`
+	// Alert is a human-readable heads-up about schedule changes or a missed capture.
+	Alert       string  `json:"alert"`
+	SignalLevel float64 `json:"signalLevel"`
 }
 
 type TranscriptionStreamSource struct {

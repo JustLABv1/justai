@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,11 +26,35 @@ import (
 	"time"
 )
 
+// RetainedSegments is the ring size at the default 5-second segment length;
+// other lengths keep about 60 seconds of audio.
 const RetainedSegments = 12
+
+const (
+	DefaultSegmentSeconds = 5
+	DefaultIdleSeconds    = 120
+)
 
 // Sources are an operator-owned allowlist, never supplied by API clients.
 type Config struct {
 	Sources map[string]string `json:"sources"`
+	// Names are optional display names shown in the JustAI source picker.
+	Names map[string]string `json:"names,omitempty"`
+	// SegmentSeconds is the audio length of one segment (1-10, default 5). Shorter
+	// segments lower latency at the cost of more polling requests.
+	SegmentSeconds int `json:"segmentSeconds,omitempty"`
+	// OnDemand captures a source only while the backend requests it, stopping
+	// after IdleSeconds (default 120) without requests.
+	OnDemand    bool `json:"onDemand,omitempty"`
+	IdleSeconds int  `json:"idleSeconds,omitempty"`
+}
+
+// SourceInfo is the non-secret description of a source; upstream URLs are never listed.
+type SourceInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Status is "live" (audio flowing), "idle" (on-demand, not capturing) or "offline".
+	Status string `json:"status,omitempty"`
 }
 type source struct {
 	sync.RWMutex
@@ -37,15 +62,28 @@ type source struct {
 	metrics  *metrics
 	manifest Manifest
 	segments map[uint64][]byte
+
+	retained    int
+	segSeconds  int
+	capturing   bool
+	lastRequest time.Time
+	lastSegment time.Time
+	wake        chan struct{}
 }
 type Relay struct {
-	tokens   [][32]byte
-	throttle *authThrottle
-	sources  map[string]*source
-	slots    chan struct{}
-	inflight atomic.Int64
-	metrics  *metrics
-	log      *slog.Logger
+	segmentSeconds int
+	segBytes       int
+	retained       int
+	onDemand       bool
+	idle           time.Duration
+	tokens         [][32]byte
+	throttle       *authThrottle
+	sources        map[string]*source
+	names          map[string]string
+	slots          chan struct{}
+	inflight       atomic.Int64
+	metrics        *metrics
+	log            *slog.Logger
 }
 
 var errBadUpstream = errors.New("upstream must return audio/mpeg with HTTP 200; redirects are forbidden")
@@ -68,7 +106,21 @@ func NewWithTokens(cfg Config, tokens []string) (*Relay, error) {
 	if len(cfg.Sources) == 0 || len(cfg.Sources) > 8 {
 		return nil, fmt.Errorf("configure between one and eight sources")
 	}
-	r := &Relay{tokens: hashed, throttle: newAuthThrottle(), sources: make(map[string]*source), slots: make(chan struct{}, 32), metrics: newMetrics(), log: slog.Default()}
+	segSeconds := cfg.SegmentSeconds
+	if segSeconds == 0 {
+		segSeconds = DefaultSegmentSeconds
+	}
+	if segSeconds < 1 || segSeconds > 10 {
+		return nil, fmt.Errorf("segment length must be between 1 and 10 seconds")
+	}
+	idleSeconds := cfg.IdleSeconds
+	if idleSeconds == 0 {
+		idleSeconds = DefaultIdleSeconds
+	}
+	if idleSeconds < 10 || idleSeconds > 3600 {
+		return nil, fmt.Errorf("idle timeout must be between 10 and 3600 seconds")
+	}
+	r := &Relay{segmentSeconds: segSeconds, segBytes: 32000 * segSeconds, retained: (60 + segSeconds - 1) / segSeconds, onDemand: cfg.OnDemand, idle: time.Duration(idleSeconds) * time.Second, tokens: hashed, throttle: newAuthThrottle(), sources: make(map[string]*source), names: map[string]string{}, slots: make(chan struct{}, 32), metrics: newMetrics(), log: slog.Default()}
 	for id, raw := range cfg.Sources {
 		u, err := url.Parse(raw)
 		if !sourceID.MatchString(id) || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
@@ -77,7 +129,13 @@ func NewWithTokens(cfg Config, tokens []string) (*Relay, error) {
 		if ip := net.ParseIP(u.Hostname()); ip != nil && !publicIP(ip) {
 			return nil, fmt.Errorf("source %q has a forbidden address", id)
 		}
-		r.sources[id] = &source{id: id, metrics: r.metrics, segments: make(map[uint64][]byte), manifest: Manifest{Epoch: randomEpoch()}}
+		if name := strings.TrimSpace(cfg.Names[id]); name != "" {
+			if len(name) > 80 || strings.ContainsAny(name, "\r\n\x00") {
+				return nil, fmt.Errorf("source %q has an invalid display name", id)
+			}
+			r.names[id] = name
+		}
+		r.sources[id] = &source{id: id, metrics: r.metrics, segments: make(map[uint64][]byte), manifest: Manifest{Epoch: randomEpoch(), SegmentSeconds: segSeconds}, retained: r.retained, segSeconds: segSeconds, wake: make(chan struct{}, 1)}
 	}
 	return r, nil
 }
@@ -212,6 +270,25 @@ func (r *Relay) serve(w *recorder, req *http.Request) {
 		http.Error(w, "busy", 503)
 		return
 	}
+	if req.URL.Path == "/v1/sources" && req.URL.RawQuery == "" {
+		w.endpoint = "list"
+		list := make([]SourceInfo, 0, len(r.sources))
+		for id := range r.sources {
+			name := r.names[id]
+			if name == "" {
+				name = id
+			}
+			list = append(list, SourceInfo{ID: id, Name: name, Status: r.sources[id].status(r.onDemand)})
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+		body, _ := json.Marshal(struct {
+			Sources []SourceInfo `json:"sources"`
+		}{list})
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
+		return
+	}
 	parts := strings.Split(strings.TrimPrefix(req.URL.Path, "/v1/sources/"), "/")
 	if !strings.HasPrefix(req.URL.Path, "/v1/sources/") || len(parts) == 0 {
 		http.NotFound(w, req)
@@ -223,6 +300,7 @@ func (r *Relay) serve(w *recorder, req *http.Request) {
 		return
 	}
 	w.source = s.id
+	s.touch()
 	w.endpoint = "manifest"
 	if len(parts) == 3 {
 		w.endpoint = "segment"
@@ -264,24 +342,118 @@ func (r *Relay) serve(w *recorder, req *http.Request) {
 
 func (r *Relay) Run(ctx context.Context, cfg Config) {
 	for id, raw := range cfg.Sources {
-		s := r.sources[id]
-		go func() {
-			for ctx.Err() == nil {
-				began := time.Now()
-				segs0 := s.segmentCount()
-				err := capture(ctx, raw, s.append)
-				if ctx.Err() != nil {
-					return
-				}
-				s.sessionEnded(r.log, err, began, segs0)
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(3 * time.Second):
-				}
-			}
-		}()
+		go r.runSource(ctx, r.sources[id], raw)
 	}
+}
+
+func (r *Relay) runSource(ctx context.Context, s *source, raw string) {
+	for ctx.Err() == nil {
+		if r.onDemand && !s.waitDemand(ctx, r.idle) {
+			return
+		}
+		capCtx, cancel := context.WithCancel(ctx)
+		var idled atomic.Bool
+		if r.onDemand {
+			go s.watchIdle(capCtx, cancel, r.idle, &idled)
+		}
+		s.setCapturing(true)
+		began := time.Now()
+		segs0 := s.segmentCount()
+		err := capture(capCtx, raw, s.append, r.segBytes)
+		cancel()
+		s.setCapturing(false)
+		if ctx.Err() != nil {
+			return
+		}
+		if idled.Load() {
+			s.idleStopped(r.log, began, segs0)
+			continue
+		}
+		s.sessionEnded(r.log, err, began, segs0)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+func (s *source) touch() {
+	s.Lock()
+	s.lastRequest = time.Now()
+	s.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *source) lastRequestAt() time.Time {
+	s.RLock()
+	defer s.RUnlock()
+	return s.lastRequest
+}
+
+func (s *source) setCapturing(v bool) {
+	s.Lock()
+	s.capturing = v
+	s.Unlock()
+}
+
+// waitDemand blocks until the backend has requested this source recently.
+func (s *source) waitDemand(ctx context.Context, idle time.Duration) bool {
+	for {
+		if at := s.lastRequestAt(); !at.IsZero() && time.Since(at) < idle {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-s.wake:
+		}
+	}
+}
+
+func (s *source) watchIdle(ctx context.Context, cancel context.CancelFunc, idle time.Duration, idled *atomic.Bool) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if time.Since(s.lastRequestAt()) > idle {
+				idled.Store(true)
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+// idleStopped ends an on-demand capture and starts a fresh epoch so the next
+// reader never receives stale audio.
+func (s *source) idleStopped(log *slog.Logger, began time.Time, segs0 uint64) {
+	s.metrics.set("relay_upstream_up", 0, "source", s.id)
+	s.metrics.add("relay_upstream_sessions_total", 1, "source", s.id, "reason", "idle_stop")
+	log.Info("on-demand capture stopped (no requests)", "source", s.id, "duration", time.Since(began), "segments", s.segmentCount()-segs0)
+	s.Lock()
+	s.manifest = Manifest{Epoch: randomEpoch(), SegmentSeconds: s.segSeconds}
+	s.segments = make(map[uint64][]byte)
+	s.lastSegment = time.Time{}
+	s.Unlock()
+}
+
+func (s *source) status(onDemand bool) string {
+	s.RLock()
+	defer s.RUnlock()
+	if !s.lastSegment.IsZero() && time.Since(s.lastSegment) < time.Duration(2*s.segSeconds+10)*time.Second {
+		return "live"
+	}
+	if onDemand && !s.capturing {
+		return "idle"
+	}
+	return "offline"
 }
 
 // Every DNS result is checked and the connection is pinned to the checked IP.
@@ -331,15 +503,15 @@ func (c *idleConn) Read(b []byte) (int, error) {
 	return c.Conn.Read(b)
 }
 
-func capture(ctx context.Context, raw string, emit func([]byte)) error {
+func capture(ctx context.Context, raw string, emit func([]byte), segBytes int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	tr := &http.Transport{DialContext: guardedDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 10 * time.Second, MaxResponseHeaderBytes: 32 * 1024}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return captureWithClient(ctx, raw, emit, client)
+	return captureWithClient(ctx, raw, emit, client, segBytes)
 }
-func captureWithClient(ctx context.Context, raw string, emit func([]byte), client *http.Client) error {
+func captureWithClient(ctx context.Context, raw string, emit func([]byte), client *http.Client, segBytes int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", raw, nil)
@@ -378,7 +550,7 @@ func captureWithClient(ctx context.Context, raw string, emit func([]byte), clien
 		<-copied
 	}()
 	for {
-		buf := make([]byte, SegmentBytes)
+		buf := make([]byte, segBytes)
 		if _, err = io.ReadFull(output, buf); err != nil {
 			return err
 		}
@@ -422,13 +594,18 @@ func (s *source) append(pcm []byte) {
 	s.metrics.add("relay_upstream_segments_total", 1, "source", s.id)
 	s.metrics.set("relay_upstream_latest_sequence", float64(seq), "source", s.id)
 	s.metrics.set("relay_upstream_last_segment_timestamp_seconds", float64(now.Unix()), "source", s.id)
+	s.lastSegment = now
 	s.segments[seq] = pcm
-	if seq > RetainedSegments {
-		delete(s.segments, seq-RetainedSegments)
+	keep := uint64(s.retained)
+	if keep == 0 {
+		keep = RetainedSegments
+	}
+	if seq > keep {
+		delete(s.segments, seq-keep)
 	}
 	s.manifest.Oldest = 1
-	if seq > RetainedSegments {
-		s.manifest.Oldest = seq - RetainedSegments + 1
+	if seq > keep {
+		s.manifest.Oldest = seq - keep + 1
 	}
 }
 
@@ -436,13 +613,13 @@ func wavFile(pcm []byte) []byte {
 	if pcm == nil {
 		return nil
 	}
-	header := wavHeader()
+	header := wavHeader(len(pcm))
 	return append(header, pcm...)
 }
-func wavHeader() []byte {
+func wavHeader(dataLen int) []byte {
 	b := make([]byte, 44)
 	copy(b, "RIFF")
-	binary.LittleEndian.PutUint32(b[4:], SegmentBytes+36)
+	binary.LittleEndian.PutUint32(b[4:], uint32(dataLen)+36)
 	copy(b[8:], "WAVEfmt ")
 	binary.LittleEndian.PutUint32(b[16:], 16)
 	binary.LittleEndian.PutUint16(b[20:], 1)
@@ -452,6 +629,6 @@ func wavHeader() []byte {
 	binary.LittleEndian.PutUint16(b[32:], 2)
 	binary.LittleEndian.PutUint16(b[34:], 16)
 	copy(b[36:], "data")
-	binary.LittleEndian.PutUint32(b[40:], SegmentBytes)
+	binary.LittleEndian.PutUint32(b[40:], uint32(dataLen))
 	return b
 }

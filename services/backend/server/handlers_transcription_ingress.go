@@ -28,6 +28,12 @@ type transcriptionStreamSourceRequest struct {
 	URL              string     `json:"url"`
 	ScheduledStartAt *time.Time `json:"scheduledStartAt"`
 	ScheduledEndAt   *time.Time `json:"scheduledEndAt"`
+	// Watch window: StartMode "when_live" listens from ScheduledStartAt until speech is
+	// heard (and until ScheduledEndAt); SilenceStopSeconds ends a capture after that long without speech.
+	StartMode          string `json:"startMode"`
+	SilenceStopSeconds int    `json:"silenceStopSeconds"`
+	PlanFollow         bool   `json:"planFollow"`
+	PlanKey            string `json:"planKey"`
 }
 
 const defaultLiveStreamReconnectGraceSeconds = 15 * 60
@@ -73,9 +79,23 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 	}
 	parsedURL, _ := url.Parse(streamURL)
 	now := time.Now().UTC()
-	scheduledStartAt, scheduledEndAt, scheduleErr := validateTranscriptionStreamSchedule(request.ScheduledStartAt, request.ScheduledEndAt, now)
+	startMode, modeErr := normalizeStartMode(request.StartMode)
+	if modeErr != nil {
+		writeError(c, http.StatusBadRequest, modeErr)
+		return
+	}
+	requestedStart := request.ScheduledStartAt
+	if startMode == "when_live" && requestedStart == nil {
+		requestedStart = &now // watch from now
+	}
+	scheduledStartAt, scheduledEndAt, scheduleErr := validateTranscriptionStreamSchedule(requestedStart, request.ScheduledEndAt, now)
 	if scheduleErr != nil {
 		writeError(c, http.StatusBadRequest, scheduleErr)
+		return
+	}
+	watch, watchErr := a.prepareStreamWatch(c, streamURL, startMode, request.SilenceStopSeconds, request.PlanFollow, request.PlanKey, scheduledEndAt, scheduledStartAt)
+	if watchErr != nil {
+		writeError(c, http.StatusBadRequest, watchErr)
 		return
 	}
 	name := strings.TrimSpace(request.Name)
@@ -121,7 +141,8 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 	source.TransportStatus = stream.Status
 	source.ScheduledStartAt = scheduledStartAt
 	source.ScheduledEndAt = scheduledEndAt
-	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_stream_sources (source_id, url_ciphertext, protocol, status, scheduled_start_at, scheduled_end_at, reconnect_grace_seconds) VALUES ($1, $2, $3, $4, $5, $6, $7)`, source.ID, encryptedURL, stream.Protocol, stream.Status, scheduledStartAt, scheduledEndAt, stream.ReconnectGraceSeconds); err != nil {
+	source.StartMode, source.SilenceStopSeconds, source.PlanFollow, source.PlanKey = watch.StartMode, watch.SilenceStopSeconds, watch.PlanFollow, watch.PlanKey
+	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_stream_sources (source_id, url_ciphertext, protocol, status, scheduled_start_at, scheduled_end_at, reconnect_grace_seconds, start_mode, silence_stop_seconds, plan_follow, plan_key, plan_fallback_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, source.ID, encryptedURL, stream.Protocol, stream.Status, scheduledStartAt, scheduledEndAt, stream.ReconnectGraceSeconds, watch.StartMode, watch.SilenceStopSeconds, watch.PlanFollow, watch.PlanKey, watch.FallbackAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

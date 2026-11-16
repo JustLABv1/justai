@@ -19,6 +19,7 @@ import (
 	"justai-backend/config"
 	"justai-backend/database"
 	"justai-backend/server"
+	"justai-backend/streamrelay"
 )
 
 func main() {
@@ -33,6 +34,15 @@ func main() {
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
+		slog.Error("configuration failed", "error", err)
+		os.Exit(1)
+	}
+	var relays []streamrelay.Endpoint
+	for _, r := range cfg.StreamRelays {
+		relays = append(relays, streamrelay.Endpoint{Name: r.Name, URL: r.URL, Token: r.Token, TokenFile: r.TokenFile})
+	}
+	primaryRelay := streamrelay.Endpoint{Name: cfg.StreamRelay.Name, URL: cfg.StreamRelay.URL, Token: cfg.StreamRelay.Token, TokenFile: cfg.StreamRelay.TokenFile}
+	if err := streamrelay.Configure(primaryRelay, relays); err != nil {
 		slog.Error("configuration failed", "error", err)
 		os.Exit(1)
 	}

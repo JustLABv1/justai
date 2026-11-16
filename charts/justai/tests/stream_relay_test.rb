@@ -95,4 +95,48 @@ class StreamRelayChartTest < Minitest::Test
     render({'backend' => {'streamRelay' => {'url' => 'https://relay.example.org'}},
             'secrets' => {'refs' => {'streamRelayToken' => {'name' => 'relay', 'key' => '../bad'}}}}, error: 'is invalid')
   end
+  RELAYS = [
+    {'name' => 'Berlin', 'url' => 'https://relay-berlin.example.org', 'tokenSecret' => {'name' => 'relay-berlin', 'key' => 'tok'}},
+    {'name' => 'Bonn', 'url' => 'https://relay-bonn.example.org/', 'tokenSecret' => {'name' => 'relay-bonn'}}
+  ].freeze
+
+  def test_additional_relays_are_listed_and_mounted_per_secret
+    %w[microservices monolith].each do |mode|
+      docs = render('deploymentMode' => mode, 'backend' => {'streamRelays' => RELAYS})
+      app = docs.find { |d| d['kind'] == 'Deployment' && d.dig('metadata', 'labels', 'app.kubernetes.io/component') == (mode == 'monolith' ? 'monolith' : 'backend') }
+      spec = app.dig('spec', 'template', 'spec')
+      container = spec['containers'].first
+      env = container['env'].to_h { |e| [e['name'], e['value']] }
+      assert_equal 'Berlin=https://relay-berlin.example.org|/var/run/justai/stream-relays/0/token,' \
+                   'Bonn=https://relay-bonn.example.org|/var/run/justai/stream-relays/1/token', env['JUSTAI_STREAM_RELAYS']
+      refute env.key?('JUSTAI_STREAM_RELAY_URL'), 'single relay stays disabled'
+      assert_equal %w[/var/run/justai/stream-relays/0 /var/run/justai/stream-relays/1],
+                   container['volumeMounts'].select { |m| m['name'].start_with?('stream-relay-') }.map { |m| m['mountPath'] }
+      secrets = spec['volumes'].select { |v| v['name'].start_with?('stream-relay-') }.map { |v| v['secret'] }
+      assert_equal %w[relay-berlin relay-bonn], secrets.map { |x| x['secretName'] }
+      assert_equal [[{'key' => 'tok', 'path' => 'token'}], [{'key' => 'stream-relay-token', 'path' => 'token'}]], secrets.map { |x| x['items'] }
+      frontend = app_containers(docs).find { |c| c['name'] == 'frontend' }
+      next unless frontend
+      refute frontend.fetch('env', []).any? { |e| e['name'].start_with?('JUSTAI_STREAM_RELAY') }
+    end
+  end
+
+  def test_additional_relays_combine_with_the_single_relay
+    docs = render('backend' => {'streamRelay' => {'url' => 'https://relay.example.org'}, 'streamRelays' => RELAYS},
+                  'secrets' => {'existingSecret' => 'app'})
+    app = docs.find { |d| d['kind'] == 'Deployment' && d.dig('metadata', 'labels', 'app.kubernetes.io/component') == 'backend' }
+    env = app.dig('spec', 'template', 'spec', 'containers', 0, 'env').to_h { |e| [e['name'], e['value']] }
+    assert_equal 'https://relay.example.org', env['JUSTAI_STREAM_RELAY_URL']
+    assert env['JUSTAI_STREAM_RELAYS']
+  end
+
+  def test_invalid_additional_relays_fail_rendering
+    bad = lambda { |overrides| RELAYS.first.merge(overrides) }
+    render({'backend' => {'streamRelays' => [bad.call('url' => 'http://relay.example.org')]}}, error: 'must be an HTTPS origin')
+    render({'backend' => {'streamRelays' => [bad.call('url' => 'https://relay.example.org/path')]}}, error: 'must be an HTTPS origin')
+    render({'backend' => {'streamRelays' => [bad.call('name' => 'a,b')]}}, error: 'without = | or commas')
+    render({'backend' => {'streamRelays' => [bad.call('tokenSecret' => {})]}}, error: 'tokenSecret.name')
+    render({'backend' => {'streamRelays' => [bad.call('tokenSecret' => {'name' => 'x', 'key' => '../bad'})]}}, error: 'tokenSecret.key is invalid')
+    render({'backend' => {'streamRelays' => Array.new(9) { |i| bad.call('url' => "https://r#{i}.example.org") }}}, error: 'at most 8')
+  end
 end

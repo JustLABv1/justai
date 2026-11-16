@@ -36,6 +36,14 @@ export function upsertTranscriptionSource(
     clockOffsetMs: source.clockOffsetMs ?? existing?.clockOffsetMs ?? 0,
     connectedAt: source.connectedAt ?? existing?.connectedAt ?? null,
     lastSeenAt: source.lastSeenAt ?? existing?.lastSeenAt ?? null,
+    scheduledStartAt: source.scheduledStartAt ?? existing?.scheduledStartAt,
+    scheduledEndAt: source.scheduledEndAt ?? existing?.scheduledEndAt,
+    startMode: source.startMode ?? existing?.startMode,
+    silenceStopSeconds:
+      source.silenceStopSeconds ?? existing?.silenceStopSeconds,
+    planFollow: source.planFollow ?? existing?.planFollow,
+    planKey: source.planKey ?? existing?.planKey,
+    alert: source.alert ?? existing?.alert,
     signalLevel: inactive
       ? 0
       : (existing?.signalLevel ?? source.signalLevel ?? 0),
@@ -185,4 +193,33 @@ function hasUsableTiming(
   value: Pick<TranscriptionMessage, "startOffsetMs" | "endOffsetMs">
 ) {
   return value.startOffsetMs > 0 || value.endOffsetMs > value.startOffsetMs
+}
+
+/**
+ * Alerts are written by the server in English. Static messages are translated by
+ * lookup; the two that embed values are matched and re-rendered with placeholders.
+ */
+export function translateStreamAlert(
+  t: (message: string, values?: Record<string, string | number>) => string,
+  alert: string
+) {
+  const plan =
+    /^Schedule updated from the Bundestag plan: (.+) starts (.+) \(Berlin time\)\.$/.exec(
+      alert
+    )
+  if (plan)
+    return t(
+      "Schedule updated from the Bundestag plan: {value0} starts {value1} (Berlin time).",
+      { value0: plan[1], value1: plan[2] }
+    )
+  const silence =
+    /^Capture ended automatically: no speech was heard for (\d+) minutes\.$/.exec(
+      alert
+    )
+  if (silence)
+    return t(
+      "Capture ended automatically: no speech was heard for {value0} minutes.",
+      { value0: silence[1] }
+    )
+  return t(alert)
 }

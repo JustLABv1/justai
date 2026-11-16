@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -67,9 +68,17 @@ func TestResolveLivestreamPages(t *testing.T) {
 func TestResolveBundestagUsesOfficialAudio(t *testing.T) {
 	client := &http.Client{Transport: resolverTestTransport(func(r *http.Request) (*http.Response, error) {
 		body, ct := `<a href="https://media.example/audio.mp3">Audio</a>`, "text/html"
-		if r.URL.Host == "media.example" {
+		switch r.URL.String() {
+		case "https://media.example/audio.mp3":
 			body, ct = "audio", "audio/mpeg"
-		} else if r.URL.String() != "https://www.bundestag.de/mediathek/276184-276184" {
+		case bundestagLiveURL: // the published programme plan
+			page, readErr := os.ReadFile("testdata/bundestag_live_plan.html")
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			body = string(page)
+		case "https://www.bundestag.de/mediathek/276184-276184":
+		default:
 			t.Fatalf("unexpected page %s", r.URL)
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{ct}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
@@ -77,6 +86,9 @@ func TestResolveBundestagUsesOfficialAudio(t *testing.T) {
 	got, err := resolveLiveStreamWithClient(context.Background(), "https://www.bundestag.de/mediathek/live", true, client, 0)
 	if err != nil || got.URL != "https://media.example/audio.mp3" || got.Name != "Bundestag · Plenary audio" {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+	if len(got.Plan) != 4 || got.Plan[0].Key != "bundestag-sitzung-110" {
+		t.Fatalf("plan not returned: %+v", got.Plan)
 	}
 }
 

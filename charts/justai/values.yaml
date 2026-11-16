@@ -105,6 +105,12 @@ backend:
     # Public HTTPS origin, including when the relay uses HTTP behind an ingress.
     # Empty disables relay configuration and the token mount.
     url: ""
+  # Additional relays (each with its own token Secret); up to 8 together with
+  # streamRelay. Each token is mounted read-only as a file. Example:
+  #   - name: Berlin
+  #     url: https://relay-berlin.example.org
+  #     tokenSecret: {name: justai-relay-berlin, key: stream-relay-token}
+  streamRelays: []
   proxy:
     http: ""
     https: ""

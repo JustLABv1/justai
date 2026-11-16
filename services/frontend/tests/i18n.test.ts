@@ -80,3 +80,34 @@ test("static UI definitions translate without mutating machine identifiers", () 
   assert.equal(translated[0].icon, definitions[0].icon)
   assert.equal(definitions[0].label, "Sources")
 })
+
+test("server-written stream alerts are translated, including ones with values", async () => {
+  const { translateStreamAlert } = await import("../lib/transcription.ts")
+  const tDe = (message: string, values?: Record<string, string | number>) =>
+    translate("de", message, values)
+  assert.equal(
+    translateStreamAlert(
+      tDe,
+      "Schedule updated from the Bundestag plan: 110. Sitzung des Deutschen Bundestages starts 24.11. 10:00 (Berlin time)."
+    ),
+    "Zeitplan aus dem Bundestagsplan aktualisiert: 110. Sitzung des Deutschen Bundestages beginnt 24.11. 10:00 (Berliner Zeit)."
+  )
+  assert.equal(
+    translateStreamAlert(
+      tDe,
+      "Capture ended automatically: no speech was heard for 30 minutes."
+    ),
+    "Die Aufnahme wurde automatisch beendet: 30 Minuten lang war keine Sprache zu hören."
+  )
+  assert.match(
+    translateStreamAlert(
+      tDe,
+      "This session is no longer listed in the Bundestag plan. It may have been cancelled or renamed; check the schedule."
+    ),
+    /Bundestagsplan/
+  )
+  assert.equal(
+    translateStreamAlert(tDe, "Something unknown"),
+    "Something unknown"
+  )
+})

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"justai-backend/streamrelay"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -260,6 +261,8 @@ func (a *App) metricsHandler(c *gin.Context) {
 	fmt.Fprintf(&builder, "justai_http_stream_upload_duration_seconds_total %.6f\n", float64(a.httpStreamMetrics.uploadMicros.Load())/1_000_000)
 	builder.WriteString("# HELP justai_http_stream_upload_requests_total Realtime audio and control upload requests.\n# TYPE justai_http_stream_upload_requests_total counter\n")
 	fmt.Fprintf(&builder, "justai_http_stream_upload_requests_total %d\n", a.httpStreamMetrics.uploadRequests.Load())
+	streamrelay.WriteClientMetrics(&builder)
+	liveStreamEvents.write(&builder)
 	c.Data(http.StatusOK, "text/plain; version=0.0.4", []byte(builder.String()))
 }
 

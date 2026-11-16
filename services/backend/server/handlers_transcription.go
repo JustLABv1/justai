@@ -1946,7 +1946,8 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 		       source.status, source.clock_offset_ms, source.connected_at, source.last_seen_at,
 		       COALESCE(stream.protocol, ''), COALESCE(stream.status, bot.status, ''),
 		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
-		       COALESCE(bot.platform, ''), stream.scheduled_start_at, stream.scheduled_end_at
+		       COALESCE(bot.platform, ''), stream.scheduled_start_at, stream.scheduled_end_at,
+		       COALESCE(stream.start_mode, ''), COALESCE(stream.silence_stop_seconds, 0), COALESCE(stream.plan_follow, FALSE), COALESCE(stream.plan_key, ''), COALESCE(stream.alert, '')
 		FROM transcription_sources source
 		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
 		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
@@ -1959,7 +1960,7 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 	result := make([]models.TranscriptionSource, 0)
 	for rows.Next() {
 		var item models.TranscriptionSource
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform, &item.ScheduledStartAt, &item.ScheduledEndAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform, &item.ScheduledStartAt, &item.ScheduledEndAt, &item.StartMode, &item.SilenceStopSeconds, &item.PlanFollow, &item.PlanKey, &item.Alert); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

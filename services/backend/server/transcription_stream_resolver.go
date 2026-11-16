@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,8 @@ type resolvedLiveStream struct {
 	URL  string `json:"-"`
 	Name string `json:"name"`
 	Kind string `json:"kind"`
+	// Plan lists announced sessions when the broadcaster publishes a programme (Bundestag).
+	Plan []planSession `json:"plan,omitempty"`
 }
 
 // Keep the original page URL at rest: media URLs may expire before capture starts.
@@ -65,6 +68,10 @@ func resolveLiveStreamWithClient(ctx context.Context, raw string, allowPrivate b
 		}
 		result.Name = "Bundestag · Plenary audio"
 		result.Kind = "website"
+		// The published session plan lets users pick a session; failures are not fatal.
+		if plan, planErr := fetchBundestagPlan(ctx, client); planErr == nil {
+			result.Plan = plan
+		}
 		return result, nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
@@ -203,4 +210,40 @@ func (a *App) resolveTranscriptionStream(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// listStreamRelaySources offers the configured relays' sources so users do not
+// have to know the relay URLs. Relay tokens never leave the backend.
+func (a *App) listStreamRelaySources(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	list, err := streamRelaySourceCache.get(ctx)
+	if err != nil {
+		writeError(c, http.StatusBadGateway, err)
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+type relaySourceCache struct {
+	sync.Mutex
+	at   time.Time
+	list streamrelay.SourceList
+}
+
+var streamRelaySourceCache = &relaySourceCache{}
+
+// Status changes quickly (on-demand relays), so keep the cache short.
+func (rc *relaySourceCache) get(ctx context.Context) (streamrelay.SourceList, error) {
+	rc.Lock()
+	defer rc.Unlock()
+	if !rc.at.IsZero() && time.Since(rc.at) < 10*time.Second {
+		return rc.list, nil
+	}
+	list, err := streamrelay.ListSources(ctx)
+	if err != nil {
+		return streamrelay.SourceList{}, err
+	}
+	rc.list, rc.at = list, time.Now()
+	return list, nil
 }

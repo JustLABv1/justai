@@ -181,6 +181,62 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{/* Additional relays: one token Secret each, mounted at /var/run/justai/stream-relays/<index>. */}}
+{{- define "justai.validateStreamRelays" -}}
+{{- $relays := .Values.backend.streamRelays | default list -}}
+{{- $total := len $relays -}}
+{{- if .Values.backend.streamRelay.url -}}{{- $total = add1 $total -}}{{- end -}}
+{{- if gt $total 8 -}}
+{{- fail "configure at most 8 stream relays (backend.streamRelay plus backend.streamRelays)" -}}
+{{- end -}}
+{{- range $i, $r := $relays -}}
+{{- if not (regexMatch "^https://[^/?#@[:space:]|,=]+/?$" ($r.url | default "")) -}}
+{{- fail (printf "backend.streamRelays[%d].url must be an HTTPS origin without path, credentials, query or fragment" $i) -}}
+{{- end -}}
+{{- if and $r.name (not (regexMatch "^[^=|,\r\n]{1,80}$" $r.name)) -}}
+{{- fail (printf "backend.streamRelays[%d].name must be 1-80 characters without = | or commas" $i) -}}
+{{- end -}}
+{{- $secret := $r.tokenSecret | default dict -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" ($secret.name | default "")) -}}
+{{- fail (printf "backend.streamRelays[%d].tokenSecret.name must be a Kubernetes Secret name" $i) -}}
+{{- end -}}
+{{- if not (regexMatch "^[A-Za-z0-9._-]+$" ($secret.key | default "stream-relay-token")) -}}
+{{- fail (printf "backend.streamRelays[%d].tokenSecret.key is invalid" $i) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "justai.streamRelaysEnv" -}}
+{{- $entries := list -}}
+{{- range $i, $r := .Values.backend.streamRelays | default list -}}
+{{- $entries = append $entries (printf "%s=%s|/var/run/justai/stream-relays/%d/token" ($r.name | default "") ($r.url | trimSuffix "/") $i) -}}
+{{- end -}}
+{{- if $entries }}
+- name: JUSTAI_STREAM_RELAYS
+  value: {{ join "," $entries | quote }}
+{{- end }}
+{{- end }}
+
+{{- define "justai.streamRelaysMount" -}}
+{{- range $i, $r := .Values.backend.streamRelays | default list }}
+- name: stream-relay-{{ $i }}
+  mountPath: /var/run/justai/stream-relays/{{ $i }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "justai.streamRelaysVolume" -}}
+{{- range $i, $r := .Values.backend.streamRelays | default list }}
+- name: stream-relay-{{ $i }}
+  secret:
+    secretName: {{ $r.tokenSecret.name | quote }}
+    defaultMode: 0444
+    items:
+      - key: {{ $r.tokenSecret.key | default "stream-relay-token" | quote }}
+        path: token
+{{- end }}
+{{- end }}
+
 {{/* The runner and the backend share one token; both read it from the Secret. */}}
 {{- define "justai.validateCodeRunner" -}}
 {{- if .Values.codeRunner.enabled -}}

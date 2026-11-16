@@ -49,6 +49,9 @@ func main() {
 	maxConns := flag.Int("max-conns", envInt("RELAY_MAX_CONNS", 128), "maximum concurrent connections; extras are closed (keep below the file-descriptor limit)")
 	maxConnsPerIP := flag.Int("max-conns-per-ip", envInt("RELAY_MAX_CONNS_PER_IP", -1), "maximum concurrent connections per peer address (default 16 for HTTPS, 0=off with --http since every peer is the ingress)")
 	addr := flag.String("listen", envString("RELAY_LISTEN", ""), "listen address (default :8443 for HTTPS, :8080 with --http)")
+	segmentSeconds := flag.Int("segment-seconds", envInt("RELAY_SEGMENT_SECONDS", 0), "audio seconds per segment, 1-10 (env RELAY_SEGMENT_SECONDS, default 5); shorter lowers latency")
+	onDemand := flag.Bool("on-demand", envBool("RELAY_ON_DEMAND"), "capture a source only while JustAI requests it (env RELAY_ON_DEMAND=true)")
+	idleSeconds := flag.Int("idle-seconds", envInt("RELAY_IDLE_SECONDS", 0), "with --on-demand, stop capturing after this many seconds without requests, 10-3600 (env RELAY_IDLE_SECONDS, default 120)")
 	flag.Parse()
 	if *addr == "" {
 		*addr = ":8443"
@@ -70,6 +73,15 @@ func main() {
 		if err = json.Unmarshal(body, &cfg); err != nil {
 			log.Fatal("invalid source configuration")
 		}
+	}
+	if *segmentSeconds != 0 {
+		cfg.SegmentSeconds = *segmentSeconds
+	}
+	if *onDemand {
+		cfg.OnDemand = true
+	}
+	if *idleSeconds != 0 {
+		cfg.IdleSeconds = *idleSeconds
 	}
 	// One token per line (or comma-separated in RELAY_TOKEN); a second token
 	// allows rotating without downtime.

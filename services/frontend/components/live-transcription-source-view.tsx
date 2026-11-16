@@ -44,7 +44,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { groupTranscriptionSegments } from "@/lib/transcription"
+import {
+  groupTranscriptionSegments,
+  translateStreamAlert,
+} from "@/lib/transcription"
 import { cn } from "@/lib/utils"
 
 export type LiveTranscriptionCaptureViewMode =
@@ -550,7 +553,7 @@ function CaptureConnectionCard({
         ))}
         {source?.lastError ? (
           <p className="rounded-lg bg-destructive/10 px-3 py-2 text-[11px] leading-4 text-destructive">
-            {source.lastError}
+            {translateStreamAlert(t, source.lastError)}
           </p>
         ) : null}
       </CardContent>
@@ -659,6 +662,13 @@ function getCaptureStatus(
   }
   if (source?.transportStatus === "scheduled") {
     return { key: "scheduled", label: "Scheduled", variant: "outline" }
+  }
+  if (source?.transportStatus === "watching") {
+    return {
+      key: "scheduled",
+      label: "Watching for the broadcast",
+      variant: "outline",
+    }
   }
   if (source?.lastError || source?.transportStatus === "failed") {
     return { key: "failed", label: "Needs attention", variant: "destructive" }
@@ -816,6 +826,8 @@ function formatTransportStatus(value?: string) {
   switch (value) {
     case "scheduled":
       return "Scheduled"
+    case "watching":
+      return "Watching for the broadcast"
     case "connected":
       return "Connected"
     case "connecting":
