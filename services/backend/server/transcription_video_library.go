@@ -26,6 +26,13 @@ type videoTranscriptionLibraryItem struct {
 	DoneAt       *time.Time `json:"doneAt,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
+	// Live sessions only: what is captured, when a scheduled capture starts and how far
+	// the agenda items have come.
+	SourceKind       string     `json:"sourceKind,omitempty"`
+	SourceName       string     `json:"sourceName,omitempty"`
+	ScheduledStartAt *time.Time `json:"scheduledStartAt,omitempty"`
+	TopicsTotal      int        `json:"topicsTotal,omitempty"`
+	TopicsDone       int        `json:"topicsDone,omitempty"`
 }
 
 func videoLibraryPageValues(c *gin.Context) (int, int, error) {

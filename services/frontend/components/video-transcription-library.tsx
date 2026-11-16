@@ -7,7 +7,10 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import {
   AudioLines,
+  Bot,
   Mic,
+  MonitorUp,
+  Tv,
   Check,
   CircleCheck,
   ListChecks,
@@ -46,6 +49,37 @@ import {
   type VideoTranscriptionLibraryItem,
   type VideoTranscriptionLibraryPage,
 } from "@/lib/video-transcription-library"
+
+const liveSourceIcons: Record<string, typeof AudioLines> = {
+  stream: Tv,
+  browser: Mic,
+  "browser-system": MonitorUp,
+  "meeting-bot": Bot,
+}
+
+/** A small tile that says what a live session captures, instead of an empty preview. */
+function LiveSourceIcon({
+  kind,
+  status,
+}: {
+  kind?: string
+  status: VideoTranscriptionLibraryItem["status"]
+}) {
+  const Icon = (kind && liveSourceIcons[kind]) || AudioLines
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground",
+        status === "live" && "bg-primary/10 text-primary",
+        status === "waiting" &&
+          "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      )}
+    >
+      <Icon className="size-5" />
+    </span>
+  )
+}
 
 function statusTone(
   status: VideoTranscriptionLibraryItem["status"]
@@ -238,6 +272,13 @@ export function VideoTranscriptionLibrary({
   const pageCount = data
     ? Math.max(1, Math.ceil(data.total / data.pageSize))
     : 1
+  const scheduleFormatter = new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
   const dateFormatter = new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
@@ -451,18 +492,20 @@ export function VideoTranscriptionLibrary({
                       "ring-2 ring-primary"
                   )}
                 >
-                  {kind === "live" ? (
-                    <div className="flex aspect-video items-center justify-center bg-muted text-muted-foreground">
-                      <AudioLines aria-hidden="true" className="size-10" />
-                    </div>
-                  ) : (
+                  {kind === "live" ? null : (
                     <VideoTranscriptionThumbnail
                       url={item.thumbnailUrl}
                       scope={scope}
                     />
                   )}
                   <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
-                    <div className="flex min-w-0 items-start gap-2">
+                    <div className="flex min-w-0 items-start gap-3">
+                      {kind === "live" ? (
+                        <LiveSourceIcon
+                          kind={item.sourceKind}
+                          status={item.status}
+                        />
+                      ) : null}
                       <h2
                         className="min-w-0 flex-1 text-base leading-6 font-medium group-hover:underline"
                         title={item.fileName}
@@ -510,9 +553,28 @@ export function VideoTranscriptionLibrary({
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                      <time dateTime={item.createdAt}>
-                        {dateFormatter.format(new Date(item.createdAt))}
-                      </time>
+                      {kind === "live" && item.sourceName ? (
+                        <>
+                          <span className="truncate">{item.sourceName}</span>
+                          <span aria-hidden="true">·</span>
+                        </>
+                      ) : null}
+                      {kind === "live" && item.scheduledStartAt ? (
+                        <time
+                          className="font-medium text-foreground"
+                          dateTime={item.scheduledStartAt}
+                        >
+                          {t("Starts {value0}", {
+                            value0: scheduleFormatter.format(
+                              new Date(item.scheduledStartAt)
+                            ),
+                          })}
+                        </time>
+                      ) : (
+                        <time dateTime={item.createdAt}>
+                          {dateFormatter.format(new Date(item.createdAt))}
+                        </time>
+                      )}
                       {videoLibraryDuration(item.durationMs) ? (
                         <>
                           <span aria-hidden="true">·</span>
@@ -522,7 +584,34 @@ export function VideoTranscriptionLibrary({
                         </>
                       ) : null}
                     </div>
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    {kind === "live" && item.topicsTotal ? (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <ListChecks
+                              aria-hidden="true"
+                              className="size-3.5"
+                            />
+                            {t("Topics")}
+                          </span>
+                          <span className="tabular-nums">
+                            {t("{value0} of {value1} finished", {
+                              value0: item.topicsDone ?? 0,
+                              value1: item.topicsTotal,
+                            })}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width]"
+                            style={{
+                              width: `${Math.round(((item.topicsDone ?? 0) / item.topicsTotal) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="mt-auto flex min-w-0 flex-wrap items-center gap-2">
                       <Badge
                         className="max-w-full min-w-0 break-words whitespace-normal"
                         dot={
@@ -537,7 +626,11 @@ export function VideoTranscriptionLibrary({
                         !["live", "paused", "waiting"].includes(item.status) ? (
                           <Spinner className="size-3" />
                         ) : null}
-                        {t(videoLibraryStep(item))}
+                        {kind === "live" &&
+                        item.status === "waiting" &&
+                        item.scheduledStartAt
+                          ? t("Scheduled")
+                          : t(videoLibraryStep(item))}
                       </Badge>
                       {item.doneAt ? (
                         <Badge size="sm" variant="success">
