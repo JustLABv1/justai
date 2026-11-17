@@ -1,6 +1,7 @@
 "use client"
 
-import { CalendarClock, Eye, ListChecks, Radio, WifiOff } from "lucide-react"
+import { CalendarClock, Eye, Radio, WifiOff } from "lucide-react"
+import { TopicIcon } from "@/components/topic-icons"
 import { useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -307,7 +308,7 @@ export function TranscriptionViewer() {
               className="flex flex-col gap-2 self-start rounded-2xl border border-border bg-card p-4"
             >
               <h2 className="flex items-center gap-2 text-sm font-medium">
-                <ListChecks className="size-4" />
+                <TopicIcon className="size-4" />
                 {topicsOnly ? t("Selected topics") : t("Agenda items")}
               </h2>
               <ul className="flex flex-col gap-1">

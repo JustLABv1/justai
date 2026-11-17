@@ -44,6 +44,10 @@ import { layoutAgentGraph } from "@/lib/agent-graph-layout"
 import { RunFiles } from "@/components/agent-run-files"
 import { Inspector } from "@/components/panelui/inspector"
 import { WorkflowEditor, WorkflowRunGraph } from "@/components/workflow-editor"
+import {
+  KnowledgeItemPicker,
+  MCPToolPicker,
+} from "@/components/agent-context-pickers"
 import { AgentsPanel } from "@/components/agents-directory"
 import { api, resolveAPIURL } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
@@ -87,13 +91,6 @@ import { Chip } from "@/components/panelui/chip"
 import { Checkbox } from "@/components/panelui/checkbox"
 import { Button } from "@/components/panelui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
   Dialog,
   DialogBody,
   DialogContent,
@@ -109,6 +106,7 @@ import {
   FieldLabel,
   FieldSet,
   FieldLegend,
+  FieldSeparator,
 } from "@/components/ui/field"
 import { Input } from "@/components/panelui/input"
 import {
@@ -609,21 +607,6 @@ function updateContext(
   return { ...(scope ?? {}), ...patch }
 }
 
-function parseDelimitedList(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[\n,]/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-    )
-  )
-}
-
-function formatDelimitedList(value: string[] | undefined) {
-  return (value ?? []).join(", ")
-}
-
 function agentToSavedLabel(agent: Agent | undefined) {
   return agent?.name ?? "No agent selected"
 }
@@ -1028,10 +1011,11 @@ export function AgentsView({
   const openWorkflow = useCallback(
     (workflow?: AgentWorkflow) => {
       const next = workflow ? cloneWorkflow(workflow) : emptyWorkflow()
-      if (!workflow && agents[0]) {
+      if (!workflow) {
         next.definition.nodes = next.definition.nodes.map((node) => ({
           ...node,
-          agentId: agents[0].id,
+          agentId: agents[0]?.id ?? node.agentId,
+          instruction: t(node.instruction),
         }))
       }
       setWorkflowDraft(next)
@@ -1041,7 +1025,7 @@ export function AgentsView({
       setValidationTarget(null)
       setValidationTone("info")
     },
-    [agents]
+    [agents, t]
   )
 
   const openWorkflowTemplate = useCallback(
@@ -1103,7 +1087,7 @@ export function AgentsView({
       id,
       type: "agent",
       agentId: agents[0]?.id,
-      instruction: "Complete the assigned task and return a concise result.",
+      instruction: t("Complete the assigned task and return a concise result."),
       approvalMode: "read_only_auto",
       retry: { maxAttempts: 3 },
       timeoutSeconds: 600,
@@ -1307,12 +1291,17 @@ export function AgentsView({
 
   function openRunDialog() {
     if (!workflowDraft?.id) {
-      setValidationMessage("Save the workflow before running it.")
+      setValidationMessage(t("Save the workflow before running it."))
       setValidationTarget(workflowDraft?.name.trim() ? null : "name")
       setValidationTone("error")
       return
     }
     const names = workflowInputNames(workflowDraft.definition)
+    // Nothing to ask for: start the run instead of showing an empty form.
+    if (!names.length) {
+      void runWorkflow({} as WorkflowRunInput)
+      return
+    }
     setRunInput(
       Object.fromEntries(names.map((name) => [name, ""])) as WorkflowRunInput
     )
@@ -1446,14 +1435,17 @@ export function AgentsView({
           </PuAlert.Description>
         </PuAlert>
       )}
-      <PageHeader>
+      {/* In the builder the header is empty; keep only its heading for screen readers. */}
+      <PageHeader className={editingWorkflow ? "sr-only" : undefined}>
         <PageHeading>
           <PageTitle>{t("Agent workspace")}</PageTitle>
-          <PageDescription>
-            {t(
-              "Manage your team of agents, design workflows, and monitor execution."
-            )}
-          </PageDescription>
+          {!editingWorkflow && (
+            <PageDescription>
+              {t(
+                "Manage your team of agents, design workflows, and monitor execution."
+              )}
+            </PageDescription>
+          )}
         </PageHeading>
         <PageActions>
           {activeTab === "agents" && !disabled && (
@@ -1468,7 +1460,7 @@ export function AgentsView({
               </Button>
             </div>
           )}
-          {activeTab === "workflows" && !disabled && (
+          {activeTab === "workflows" && !editingWorkflow && !disabled && (
             <Button onClick={() => openWorkflow()}>
               <Plus />
               {t("New workflow")}
@@ -1494,7 +1486,14 @@ export function AgentsView({
             {
               label: t("Workflows"),
               value: workflows.length,
-              note: t("Reusable multi-step runs"),
+              note: t("{value0} scheduled", {
+                value0: workflows.filter(
+                  (workflow) =>
+                    workflow.enabled &&
+                    workflow.schedule?.kind &&
+                    workflow.schedule.kind !== "manual"
+                ).length,
+              }),
               icon: GitBranch,
             },
             {
@@ -1628,9 +1627,7 @@ export function AgentsView({
               {editingAgent ? t("Edit native agent") : t("Create native agent")}
             </DialogTitle>
             <DialogDescription>
-              {t(
-                "Native agents use JustAI’s configured model, memory, MCP permissions, and conversation runtime."
-              )}
+              {t("Runs on JustAI with your models, memory and tools.")}
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
@@ -1640,6 +1637,7 @@ export function AgentsView({
               onSubmit={(event) => void saveNative(event)}
             >
               <FieldGroup>
+                <FieldLegend variant="label">{t("Basics")}</FieldLegend>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="native-agent-name">
@@ -1711,7 +1709,7 @@ export function AgentsView({
                   </FieldLabel>
                   <Textarea
                     id="native-agent-instructions"
-                    rows={7}
+                    rows={5}
                     value={nativeForm.instructions}
                     onChange={(event) =>
                       setNativeForm({
@@ -1720,6 +1718,7 @@ export function AgentsView({
                       })
                     }
                     placeholder={t("Act as a careful research editor…")}
+                    className="min-h-32"
                   />
                   <FieldDescription>
                     {t(
@@ -1727,6 +1726,8 @@ export function AgentsView({
                     )}
                   </FieldDescription>
                 </Field>
+                <FieldSeparator />
+                <FieldLegend variant="label">{t("Model")}</FieldLegend>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="native-agent-endpoint">
@@ -1787,47 +1788,53 @@ export function AgentsView({
                     />
                   </Field>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field orientation="horizontal">
-                    <Switch
-                      aria-label={t("Use memory")}
-                      checked={nativeForm.useMemory}
-                      onCheckedChange={(checked) =>
-                        setNativeForm({ ...nativeForm, useMemory: checked })
-                      }
-                    />
-                    <div>
-                      <FieldLabel>{t("Use memory")}</FieldLabel>
+                <FieldSeparator />
+                <FieldLegend variant="label">{t("Context")}</FieldLegend>
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <FieldLabel htmlFor="native-agent-memory">
+                        {t("Use memory")}
+                      </FieldLabel>
                       <FieldDescription>
                         {t(
                           "Include the user’s approved persistent preferences."
                         )}
                       </FieldDescription>
                     </div>
-                  </Field>
-                  <Field orientation="horizontal">
                     <Switch
-                      aria-label={t("Use deep context")}
+                      id="native-agent-memory"
+                      checked={nativeForm.useMemory}
+                      onCheckedChange={(checked) =>
+                        setNativeForm({ ...nativeForm, useMemory: checked })
+                      }
+                    />
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <FieldLabel htmlFor="native-agent-deep-context">
+                        {t("Deep context")}
+                      </FieldLabel>
+                      <FieldDescription>
+                        {t("Use attached workspace context when available.")}
+                      </FieldDescription>
+                    </div>
+                    <Switch
+                      id="native-agent-deep-context"
                       checked={nativeForm.deepContext}
                       onCheckedChange={(checked) =>
                         setNativeForm({ ...nativeForm, deepContext: checked })
                       }
                     />
-                    <div>
-                      <FieldLabel>{t("Deep context")}</FieldLabel>
-                      <FieldDescription>
-                        {t("Use attached workspace context when available.")}
-                      </FieldDescription>
-                    </div>
-                  </Field>
+                  </div>
                 </div>
+                <FieldSeparator />
                 <FieldSet>
                   <FieldLegend variant="label">
                     {t("Delegation allowlist")}
                   </FieldLegend>
                   <FieldDescription>
-                    {t("Only these agents may be selected by")}{" "}
-                    <code>delegate_agent</code>.
+                    {t("Agents this agent may hand work to.")}
                   </FieldDescription>
                   {agents.filter((agent) => agent.id !== editingAgent?.id)
                     .length ? (
@@ -1862,7 +1869,7 @@ export function AgentsView({
                             />
                             <span className="truncate">{agent.name}</span>
                             <Badge className="ml-auto" variant="outline">
-                              {agent.kind}
+                              {t(agent.kind === "remote" ? "Remote" : "Native")}
                             </Badge>
                           </label>
                         ))}
@@ -1922,7 +1929,7 @@ export function AgentsView({
             </DialogTitle>
             <DialogDescription>
               {t(
-                "JustAI makes outbound A2A 1.0 HTTP+JSON/SSE calls. Credentials are encrypted and never included in cards, prompts, logs, or audit details."
+                "Connect an agent that speaks the A2A protocol. Credentials are stored encrypted and never shown in prompts or logs."
               )}
             </DialogDescription>
           </DialogHeader>
@@ -1985,7 +1992,7 @@ export function AgentsView({
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field>
+                  <Field className="sm:col-span-2">
                     <FieldLabel htmlFor="remote-connection-scope">
                       {t("Connection scope")}
                     </FieldLabel>
@@ -2323,7 +2330,7 @@ export function AgentsView({
                   : t("Connecting…")
                 : editingAgent
                   ? t("Save changes")
-                  : t("Save encrypted connection")}
+                  : t("Save connection")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2444,16 +2451,16 @@ export function AgentsView({
 
 function LoadingState({ label }: { label: string }) {
   return (
-    <Card aria-busy="true" className="border-dashed">
-      <CardContent
+    <PuCard aria-busy="true" className="border-dashed">
+      <PuCard.Content
         aria-live="polite"
         className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"
         role="status"
       >
         <RefreshCw className="mr-2 animate-spin" data-icon="inline-start" />
         {label}
-      </CardContent>
-    </Card>
+      </PuCard.Content>
+    </PuCard>
   )
 }
 
@@ -2524,7 +2531,7 @@ function WorkflowsPanel({
 }) {
   const workflowTemplates = useTranslatedConfig(workflowTemplatesMessages)
 
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const [workflowQuery, setWorkflowQuery] = useState("")
   return (
@@ -2627,16 +2634,21 @@ function WorkflowsPanel({
                           </Badge>
                           <Badge variant="secondary">
                             <Clock3 />
-                            {workflowScheduleDescription(workflow.schedule)}
+                            {workflowScheduleDescription(workflow.schedule, t)}
                           </Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {t("Next run:")}{" "}
-                          {formatWorkflowNextRun(
-                            workflow.nextRunAt,
-                            workflow.timezone
-                          )}
-                        </p>
+                        {workflow.schedule?.kind &&
+                        workflow.schedule.kind !== "manual" ? (
+                          <p className="text-xs text-muted-foreground">
+                            {t("Next run:")}{" "}
+                            {formatWorkflowNextRun(
+                              workflow.nextRunAt,
+                              workflow.timezone,
+                              t,
+                              locale
+                            )}
+                          </p>
+                        ) : null}
                       </PuCard.Content>
                       <PuCard.Footer className="justify-end" variant="panel">
                         <Button
@@ -2867,19 +2879,13 @@ function InspectorSection({
   title: string
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-t pt-3">
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm font-medium">
-        {title}
-        <ChevronDown
-          className={cn("size-4 transition-transform", open && "rotate-180")}
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="flex flex-col gap-4 py-3">{children}</div>
-      </CollapsibleContent>
-    </Collapsible>
+    <Inspector.Section collapsible defaultOpen={false}>
+      <Inspector.SectionTitle>{title}</Inspector.SectionTitle>
+      <Inspector.SectionContent className="flex flex-col gap-4">
+        {children}
+      </Inspector.SectionContent>
+    </Inspector.Section>
   )
 }
 
@@ -2912,13 +2918,9 @@ function NodeInspector({
 
   if (!node)
     return (
-      <Card className="h-fit border-dashed">
-        <CardContent className="flex min-h-48 items-center justify-center text-center text-sm text-muted-foreground">
-          {t(
-            "Select a node to configure its agent, context, and safety policy."
-          )}
-        </CardContent>
-      </Card>
+      <p className="flex min-h-48 items-center justify-center px-4 text-center text-sm text-muted-foreground">
+        {t("Select a node to configure its agent, context, and safety policy.")}
+      </p>
     )
   const context = node.context ?? {}
   const inputBindings = node.inputBindings ?? []
@@ -2960,35 +2962,25 @@ function NodeInspector({
     })
   }
 
-  const updateDelimitedContext = (
-    key: "repositoryIds" | "noteIds" | "transcriptionSessionIds" | "mcpTools",
-    value: string
-  ) => {
-    onUpdate(node.id, {
-      context: updateContext(context, { [key]: parseDelimitedList(value) }),
-    })
-  }
 
   return (
-    <Card className="h-fit">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-sm">{t("Node configuration")}</CardTitle>
-            <CardDescription>{selectedNodeId}</CardDescription>
-          </div>
+    <>
+      <Inspector.Section>
+        <Inspector.SectionTitle>
+          {t("Step")} · {selectedNodeId}
+        </Inspector.SectionTitle>
+        <Inspector.SectionAction>
           <Button
-            size="icon"
+            size="icon-sm"
             variant="ghost"
             disabled={disabled}
             onClick={onRemove}
             aria-label={t("Remove selected node")}
           >
-            <X data-icon="inline-start" />
+            <Trash2 />
           </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+        </Inspector.SectionAction>
+        <Inspector.SectionContent className="flex flex-col gap-4">
         <Field>
           <FieldLabel htmlFor={`agent-${node.id}`}>{t("Agent")}</FieldLabel>
           <Select
@@ -3004,7 +2996,7 @@ function NodeInspector({
               <SelectValue>
                 {selectedAgent
                   ? `${agentToSavedLabel(selectedAgent)} · ${
-                      selectedAgent.kind ?? "native"
+                      t(selectedAgent.kind === "remote" ? "Remote" : "Native")
                     }${
                       selectedAgent.kind === "remote" && selectedConnection
                         ? ` · ${t(connectionScopeLabel(selectedConnection.scopeType))}`
@@ -3023,7 +3015,8 @@ function NodeInspector({
                     : undefined
                   return (
                     <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name} · {agent.kind}
+                      {agent.name} ·{" "}
+                      {t(agent.kind === "remote" ? "Remote" : "Native")}
                       {agent.kind === "remote" && connection
                         ? ` · ${t(connectionScopeLabel(connection.scopeType))}`
                         : ""}
@@ -3089,6 +3082,8 @@ function NodeInspector({
             )}
           </FieldDescription>
         </Field>
+        </Inspector.SectionContent>
+      </Inspector.Section>
         <InspectorSection title={t("Safety & execution")}>
           {" "}
           <div className="grid gap-3">
@@ -3385,7 +3380,7 @@ function NodeInspector({
                       />
                       <span className="truncate">{agent.name}</span>
                       <span className="text-muted-foreground">
-                        {agent.kind}
+                        {t(agent.kind === "remote" ? "Remote" : "Native")}
                       </span>
                     </label>
                   ))
@@ -3435,6 +3430,21 @@ function NodeInspector({
                 </span>
               )}
             </div>
+            {mcpServers
+              .filter((server) => context.mcpServerIds?.includes(server.id))
+              .map((server) => (
+                <MCPToolPicker
+                  key={server.id}
+                  server={server}
+                  value={context.mcpTools}
+                  disabled={disabled}
+                  onChange={(mcpTools) =>
+                    onUpdate(node.id, {
+                      context: updateContext(context, { mcpTools }),
+                    })
+                  }
+                />
+              ))}
           </FieldSet>
           <FieldSet>
             <FieldLegend variant="label">
@@ -3521,79 +3531,52 @@ function NodeInspector({
             </div>
           </FieldSet>
           <FieldSet>
-            <FieldLegend variant="label">
-              {t("Additional context references")}
-            </FieldLegend>
+            <FieldLegend variant="label">{t("More context")}</FieldLegend>
             <FieldDescription>
               {t(
-                "Optional comma-separated IDs or tool names. Access is evaluated at run time and remains scoped to this node."
+                "Access is checked at run time and stays limited to this node."
               )}
             </FieldDescription>
             <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor={`repositories-${node.id}`}>
-                  {t("Repository IDs")}
-                </FieldLabel>
-                <Input
-                  id={`repositories-${node.id}`}
-                  value={formatDelimitedList(context.repositoryIds)}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    updateDelimitedContext("repositoryIds", event.target.value)
-                  }
-                  placeholder="repo_123, repo_456"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`notes-${node.id}`}>
-                  {t("Note IDs")}
-                </FieldLabel>
-                <Input
-                  id={`notes-${node.id}`}
-                  value={formatDelimitedList(context.noteIds)}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    updateDelimitedContext("noteIds", event.target.value)
-                  }
-                  placeholder="note_123, note_456"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`transcriptions-${node.id}`}>
-                  {t("Transcription session IDs")}
-                </FieldLabel>
-                <Input
-                  id={`transcriptions-${node.id}`}
-                  value={formatDelimitedList(context.transcriptionSessionIds)}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    updateDelimitedContext(
-                      "transcriptionSessionIds",
-                      event.target.value
-                    )
-                  }
-                  placeholder="session_123"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`mcp-tools-${node.id}`}>
-                  {t("MCP tool names")}
-                </FieldLabel>
-                <Input
-                  id={`mcp-tools-${node.id}`}
-                  value={formatDelimitedList(context.mcpTools)}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    updateDelimitedContext("mcpTools", event.target.value)
-                  }
-                  placeholder="search, fetch"
-                />
-              </Field>
+              <KnowledgeItemPicker
+                id={`repositories-${node.id}`}
+                type="repository"
+                value={context.repositoryIds}
+                disabled={disabled}
+                onChange={(repositoryIds) =>
+                  onUpdate(node.id, {
+                    context: updateContext(context, { repositoryIds }),
+                  })
+                }
+              />
+              <KnowledgeItemPicker
+                id={`notes-${node.id}`}
+                type="note"
+                value={context.noteIds}
+                disabled={disabled}
+                onChange={(noteIds) =>
+                  onUpdate(node.id, {
+                    context: updateContext(context, { noteIds }),
+                  })
+                }
+              />
+              <KnowledgeItemPicker
+                id={`transcriptions-${node.id}`}
+                type="transcript"
+                value={context.transcriptionSessionIds}
+                disabled={disabled}
+                onChange={(transcriptionSessionIds) =>
+                  onUpdate(node.id, {
+                    context: updateContext(context, {
+                      transcriptionSessionIds,
+                    }),
+                  })
+                }
+              />
             </FieldGroup>
           </FieldSet>
-        </InspectorSection>{" "}
-      </CardContent>
-    </Card>
+        </InspectorSection>
+    </>
   )
 }
 
@@ -3614,7 +3597,7 @@ function ScheduleEditor({
   onEnabledChange: (enabled: boolean) => void
   disabled?: boolean
 }) {
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const kind = schedule.kind || "manual"
   return (
@@ -3772,10 +3755,13 @@ function ScheduleEditor({
         )}
       </div>
       <div className="rounded-lg border bg-background/70 px-3 py-2 text-xs">
-        <p className="font-medium">{workflowScheduleDescription(schedule)}</p>
-        <p className="mt-1 text-muted-foreground">
-          {t("Next run:")} {formatWorkflowNextRun(nextRunAt, timezone)}
-        </p>
+        <p className="font-medium">{workflowScheduleDescription(schedule, t)}</p>
+        {schedule.kind && schedule.kind !== "manual" ? (
+          <p className="mt-1 text-muted-foreground">
+            {t("Next run:")}{" "}
+            {formatWorkflowNextRun(nextRunAt, timezone, t, locale)}
+          </p>
+        ) : null}
       </div>
     </section>
   )
@@ -3798,7 +3784,7 @@ function RunsPanel({
   workflows: AgentWorkflow[]
   disabled?: boolean
 }) {
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const [selectedID, setSelectedID] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -3893,8 +3879,17 @@ function RunsPanel({
     if (!selectedID || !showDetail) return
     let stopped = false
     let retryTimer: number | undefined
+    let reloadTimer: number | undefined
     let lastEventID = 0
     const controller = new AbortController()
+    // A reconnect replays every past event; refresh the run once per burst.
+    const scheduleReload = () => {
+      if (reloadTimer) return
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = undefined
+        if (!stopped) void reload(selectedID)
+      }, 250)
+    }
     const connect = async () => {
       if (stopped) return
       try {
@@ -3940,7 +3935,7 @@ function RunsPanel({
               } catch {
                 /* reconnectable event payload */
               }
-              void reload(selectedID)
+              scheduleReload()
             }
           }
         }
@@ -3961,6 +3956,7 @@ function RunsPanel({
       stopped = true
       controller.abort()
       if (retryTimer) window.clearTimeout(retryTimer)
+      if (reloadTimer) window.clearTimeout(reloadTimer)
     }
   }, [appendEvent, reload, selectedID, showDetail])
 
@@ -4167,7 +4163,7 @@ function RunsPanel({
                         )}
                       />
                     )}
-                    {status === "all" ? t("All statuses") : statusLabel(status)}
+                    {status === "all" ? t("All statuses") : t(statusLabel(status))}
                     <span className="text-muted-foreground tabular-nums">
                       {count}
                     </span>
@@ -4236,13 +4232,14 @@ function RunsPanel({
                       {run.error || run.summary || run.id.slice(0, 12)}
                     </Frame.Description>
                     <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-                      {run.sourceType} · {formatRunTime(run.createdAt)} ·{" "}
+                      {t(statusLabel(run.sourceType))} ·{" "}
+                      {formatRunTime(run.createdAt, locale)} ·{" "}
                       {formatRunDuration(run.startedAt, run.finishedAt)}
                     </p>
                   </Frame.Content>
                   <Frame.Actions>
                     <Badge dot variant={badgeVariant(run.status)}>
-                      {statusLabel(run.status)}
+                      {t(statusLabel(run.status))}
                     </Badge>
                     <Menu>
                       <Menu.Trigger
@@ -4367,11 +4364,11 @@ function RunsPanel({
                 disabled={disabled}
               />
             ) : showDetail ? (
-              <Card className="border-dashed">
-                <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
+              <PuCard className="border-dashed">
+                <PuCard.Content className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
                   {t("Loading run details…")}
-                </CardContent>
-              </Card>
+                </PuCard.Content>
+              </PuCard>
             ) : null}
           </div>
         </SheetContent>
@@ -4477,7 +4474,7 @@ function RunDetail({
           </h2>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge dot variant={badgeVariant(run.status)}>
-              {statusLabel(run.status)}
+              {t(statusLabel(run.status))}
             </Badge>
             <span>{new Date(run.startedAt).toLocaleString(locale)}</span>
             <span aria-hidden="true">·</span>
@@ -4805,7 +4802,7 @@ function RunAgentMessage({
           </span>
           <span className="text-xs text-muted-foreground">{node.nodeKey}</span>
           <Badge variant={badgeVariant(node.status)}>
-            {statusLabel(node.status)}
+            {t(statusLabel(node.status))}
           </Badge>
         </div>
         <div className="rounded-2xl rounded-tl-md border bg-background px-4 py-3 shadow-sm">
@@ -5021,7 +5018,7 @@ function RunEventLog({
                         </span>
                       )}
                       <time className="text-[11px] text-muted-foreground">
-                        {formatRunTime(event.createdAt)}
+                        {formatRunTime(event.createdAt, locale)}
                       </time>
                     </div>
                     <p className="mt-1 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
@@ -5106,7 +5103,7 @@ function RunNodeOverview({
       </Frame.Content>
       <Frame.Actions>
         <Badge dot variant={badgeVariant(node.status)}>
-          {statusLabel(node.status)}
+          {t(statusLabel(node.status))}
         </Badge>
       </Frame.Actions>
     </Frame.Row>
@@ -5206,12 +5203,12 @@ function formatEventType(eventType: string): string {
     .join(" · ")
 }
 
-function formatRunTime(value?: string | null): string {
+function formatRunTime(value?: string | null, locale?: string): string {
   if (!value) return ""
   const date = new Date(value)
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
 }
 
 function asRunRecord(value: unknown): Record<string, unknown> | null {
@@ -5251,12 +5248,12 @@ function ApprovalCard({
   const { t, locale } = useTranslations()
 
   return (
-    <Card className="border-primary/30 bg-primary/[0.03]">
-      <CardContent className="flex flex-col gap-3">
+    <PuCard className="border-primary/30 bg-primary/[0.03]">
+      <PuCard.Content className="flex flex-col gap-3">
         <div className="flex items-start gap-2">
           <ShieldCheck className="mt-0.5 text-primary" />
           <div className="min-w-0">
-            <p className="font-medium">{statusLabel(approval.actionType)}</p>
+            <p className="font-medium">{t(statusLabel(approval.actionType))}</p>
             <p className="text-xs text-muted-foreground">
               {t("Expires")}{" "}
               {new Date(approval.expiresAt).toLocaleString(locale)}
@@ -5280,8 +5277,8 @@ function ApprovalCard({
             {t("Approve exact action")}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </PuCard.Content>
+    </PuCard>
   )
 }
 

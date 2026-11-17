@@ -814,6 +814,65 @@ export const de = {
   "Platform admin": "Plattformverwaltung",
   Profile: "Profil",
   "Sign out": "Abmelden",
+  "Access is checked at run time and stays limited to this node.":
+    "Der Zugriff wird zur Laufzeit geprüft und bleibt auf diesen Schritt beschränkt.",
+  "Agents this agent may hand work to.":
+    "Agenten, an die dieser Agent Aufgaben abgeben darf.",
+  Basics: "Grundlagen",
+  "Complete the assigned task and return a concise result.":
+    "Erledige die zugewiesene Aufgabe und gib ein knappes Ergebnis zurück.",
+  "Connect an agent that speaks the A2A protocol. Credentials are stored encrypted and never shown in prompts or logs.":
+    "Verbinde einen Agenten, der das A2A-Protokoll spricht. Zugangsdaten werden verschlüsselt gespeichert und nie in Prompts oder Logs angezeigt.",
+  "More context": "Weiterer Kontext",
+  "Runs on JustAI with your models, memory and tools.":
+    "Läuft in JustAI mit deinen Modellen, Erinnerungen und Tools.",
+  "Save the workflow before running it.":
+    "Speichere den Workflow, bevor du ihn ausführst.",
+  "{value0} scheduled": "{value0} geplant",
+  "Canvas controls": "Steuerung der Arbeitsfläche",
+  "Fit everything in view": "Alles einpassen",
+  "Lock the canvas": "Arbeitsfläche sperren",
+  "Open inspector": "Inspektor öffnen",
+  "Zoom in": "Vergrößern",
+  "Zoom out": "Verkleinern",
+  "Delegates to 1 agent": "Delegiert an 1 Agenten",
+  "Delegates to {count} agents": "Delegiert an {count} Agenten",
+  "No delegation": "Keine Delegation",
+  "All tools": "Alle Tools",
+  "Could not load this list.": "Diese Liste konnte nicht geladen werden.",
+  "Leave empty to allow every tool of this server.":
+    "Leer lassen, um alle Tools dieses Servers zu erlauben.",
+  "This server offers no tools.": "Dieser Server bietet keine Tools an.",
+  "Tools from {server}": "Tools von {server}",
+  "{count} selected": "{count} ausgewählt",
+  Repositories: "Repositorys",
+  "No repositories": "Keine Repositorys",
+  "No repositories in Storage yet.": "Noch keine Repositorys im Speicher.",
+  "No notes": "Keine Notizen",
+  "No notes yet.": "Noch keine Notizen.",
+  "No transcriptions": "Keine Transkriptionen",
+  "No transcriptions yet.": "Noch keine Transkriptionen.",
+  "Search workflows, run IDs, or results…":
+    "Workflows, Ausführungs-IDs oder Ergebnisse suchen…",
+  "Workflow settings": "Workflow-Einstellungen",
+  "Save this workflow to calculate its next run.":
+    "Speichere den Workflow, um die nächste Ausführung zu berechnen.",
+  "Every day at {time}": "Täglich um {time}",
+  "Every {interval} days at {time}": "Alle {interval} Tage um {time}",
+  "Every week on {weekday} at {time}": "Jede Woche am {weekday} um {time}",
+  "Every {interval} weeks on {weekday} at {time}":
+    "Alle {interval} Wochen am {weekday} um {time}",
+  "Every month on day {day} at {time}": "Jeden Monat am {day}. um {time}",
+  "Every {interval} months on day {day} at {time}":
+    "Alle {interval} Monate am {day}. um {time}",
+  "Waiting Approval": "Wartet auf Freigabe",
+  "Needs Review": "Prüfung nötig",
+  Manual: "Manuell",
+  "Save connection": "Verbindung speichern",
+  "Daily news briefing": "Täglicher Nachrichtenüberblick",
+  "Research brief": "Recherche-Kurzbericht",
+  "Meeting actions": "Meeting-Aufgaben",
+  "Content review": "Inhaltsprüfung",
   Preferences: "Einstellungen",
   "Seasonal effects": "Jahreszeiten-Effekte",
   "Show seasonal backdrops and weather in the app. Saved in this browser.":

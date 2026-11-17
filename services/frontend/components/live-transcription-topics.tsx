@@ -1,16 +1,18 @@
 "use client"
 
 import {
-  Bell,
-  BellRing,
   Check,
   Copy,
   FileText,
-  ListChecks,
   Play,
   Sparkles,
   Square,
 } from "lucide-react"
+import {
+  TopicIcon,
+  TopicNotifyIcon,
+  TopicQuietIcon,
+} from "@/components/topic-icons"
 import { useCallback, useEffect, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
@@ -154,7 +156,7 @@ export function LiveTranscriptionTopics({
       )
     ) : topic.starred ? (
       <Badge variant="outline">
-        <BellRing aria-hidden="true" className="size-3" />
+        <TopicNotifyIcon aria-hidden="true" className="size-3" />
         {t("Notify when finished")}
       </Badge>
     ) : (
@@ -168,7 +170,7 @@ export function LiveTranscriptionTopics({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 font-medium">
-          <ListChecks className="size-4" /> {t("Topics")}
+          <TopicIcon className="size-4" /> {t("Topics")}
         </h3>
         {topics.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -296,9 +298,9 @@ export function LiveTranscriptionTopics({
                   variant="ghost"
                 >
                   {topic.starred ? (
-                    <BellRing className="size-4 text-primary" />
+                    <TopicNotifyIcon className="size-4 text-primary" />
                   ) : (
-                    <Bell className="size-4 text-muted-foreground" />
+                    <TopicQuietIcon className="size-4 text-muted-foreground" />
                   )}
                 </Button>
               )}
