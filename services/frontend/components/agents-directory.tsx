@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react"
 import {
-  Bot,
   CircleAlert,
   KeyRound,
   MoreHorizontal,
@@ -17,7 +16,7 @@ import {
 import { useTranslations } from "@/components/locale-provider"
 import { Alert } from "@/components/panelui/alert"
 import { AgentAvatar } from "@/components/agent-avatar"
-import { Avatar } from "@/components/panelui/avatar"
+import { Mascot } from "@/components/mascot"
 import { Badge, type BadgeProps } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Card } from "@/components/panelui/card"
@@ -119,12 +118,7 @@ export function AgentsPanel({
         {agents.length === 0 ? (
           <Card className="border-dashed">
             <Card.Content className="flex min-h-72 flex-col items-center justify-center gap-4 text-center">
-              <Avatar
-                fallback={<Bot aria-hidden="true" />}
-                name={t("Agents")}
-                shape="square"
-                size="lg"
-              />
+              <Mascot size={72} />
               <div className="grid max-w-md gap-1.5">
                 <h2 className="text-base font-semibold">
                   {t("No agents yet")}

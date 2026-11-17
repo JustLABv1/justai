@@ -3,9 +3,9 @@
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useRef, useState } from "react"
 import { useAuiState } from "@assistant-ui/react"
-import { BotAvatar } from "bot-avatars"
 
 import { BrandMark } from "@/components/brand-mark"
+import { Mascot, useIdle } from "@/components/mascot"
 import { cn } from "@/lib/utils"
 
 type ChatBrandMarkProps = {
@@ -24,6 +24,7 @@ export function ChatBrandMark({ className, isActive, mascot = false }: ChatBrand
   const wasRunning = useRef(false)
   const timer = useRef<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
+  const idle = useIdle(5 * 60 * 1000, mascot && !active)
 
   useEffect(() => {
     if (timer.current) window.clearTimeout(timer.current)
@@ -57,12 +58,9 @@ export function ChatBrandMark({ className, isActive, mascot = false }: ChatBrand
         className={cn("inline-block flex-none", className)}
         role="img"
       >
-        <BotAvatar
-          face="mouth"
-          shading="fabric"
+        <Mascot
           size="100%"
-          state={active ? "working" : "default"}
-          type="ghost"
+          state={active ? "working" : idle ? "sleeping" : "default"}
         />
       </span>
     )

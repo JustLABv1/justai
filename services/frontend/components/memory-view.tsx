@@ -1,4 +1,5 @@
 "use client"
+import { Mascot } from "@/components/mascot"
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
@@ -238,6 +239,7 @@ export function MemoryView() {
       ) : memories.length === 0 ? (
         <Empty className="min-h-52">
           <EmptyHeader>
+            <Mascot size={64} />
             <EmptyTitle>{t("No memories saved")}</EmptyTitle>
             <EmptyDescription>
               {t(

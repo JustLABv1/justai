@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { motion, useReducedMotion, type Variants } from "motion/react"
 
+import { Mascot } from "@/components/mascot"
 import { Button } from "@/components/panelui/button"
 import { useOptionalTranslations } from "@/components/locale-provider"
 import { API_URL } from "@/lib/api"
@@ -93,16 +94,15 @@ const signetA =
   "M40 36H88V132C88 150.78 103.22 166 122 166H216V212H122C76.71 212 40 176.18 40 132Z"
 const signetB = "M120 52H200V132H152V98H120Z"
 
-function Signet({ still }: { still: boolean }) {
+function GhostMascot({ still }: { still: boolean }) {
   return (
     <motion.g
       animate={still ? undefined : { y: [0, -6, 0] }}
       transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
     >
-      <g transform="translate(100 56) scale(0.4)" fill="currentColor">
-        <path d={signetA} />
-        <path d={signetB} />
-      </g>
+      <foreignObject x="108" y="48" width="104" height="104">
+        <Mascot paused={still} size={104} />
+      </foreignObject>
     </motion.g>
   )
 }
@@ -203,7 +203,7 @@ function NotFoundScene({ still }: { still: boolean }) {
           )
         })}
       </g>
-      <Signet still={still} />
+      <GhostMascot still={still} />
     </g>
   )
 }
