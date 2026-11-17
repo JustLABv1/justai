@@ -892,9 +892,37 @@ export type TranscriptionSource = {
   silenceStopSeconds?: number
   planFollow?: boolean
   planKey?: string
+  /** "topics" when only selected agenda items are captured. */
+  captureScope?: string
   /** Heads-up about a schedule change, a missed capture or an automatic stop. */
   alert?: string
   signalLevel: number
+}
+
+/** One agenda item of a live session (for example an item of a Bundestag sitting). */
+export type TranscriptionTopic = {
+  id: string
+  sessionId: string
+  sourceId?: string
+  key: string
+  order: number
+  kind: string
+  label: string
+  title: string
+  plannedStartAt?: string
+  plannedEndAt?: string
+  /** The first planned start, set when the published plan moved the item. */
+  originalStartAt?: string
+  planChangedAt?: string
+  status: "planned" | "active" | "done"
+  startedOffsetMs?: number
+  endedOffsetMs?: number
+  detectedBy?: string
+  starred: boolean
+  summary?: string
+  summaryStatus: "none" | "processing" | "completed" | "failed"
+  summaryError?: string
+  updatedAt: string
 }
 
 /** A session announced by the broadcaster, with the watch window derived from it. */

@@ -61,6 +61,7 @@ type TranscriptionManager struct {
 	buffers          map[uuid.UUID]*pcmBuffer
 	streamCancels    map[uuid.UUID]context.CancelFunc
 	lastPlanRefresh  time.Time // owned by the stream scheduler goroutine
+	lastTopicRefresh time.Time
 	rootCtx          context.Context
 	joinMu           sync.Mutex
 	joins            map[string][]time.Time
@@ -346,11 +347,11 @@ func (m *TranscriptionManager) markSource(sessionID, sourceID uuid.UUID, status 
 		       COALESCE(stream.protocol, ''), COALESCE(stream.status, bot.status, ''),
 		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
 		       COALESCE(bot.platform, ''), stream.scheduled_start_at, stream.scheduled_end_at,
-		       COALESCE(stream.start_mode, ''), COALESCE(stream.silence_stop_seconds, 0), COALESCE(stream.plan_follow, FALSE), COALESCE(stream.plan_key, ''), COALESCE(stream.alert, '')
+		       COALESCE(stream.start_mode, ''), COALESCE(stream.silence_stop_seconds, 0), COALESCE(stream.plan_follow, FALSE), COALESCE(stream.plan_key, ''), COALESCE(stream.alert, ''), COALESCE(stream.capture_scope, '')
 		FROM transcription_sources source
 		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
 		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
-		WHERE source.id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt, &source.Protocol, &source.TransportStatus, &source.ReconnectCount, &source.LastError, &source.Platform, &source.ScheduledStartAt, &source.ScheduledEndAt, &source.StartMode, &source.SilenceStopSeconds, &source.PlanFollow, &source.PlanKey, &source.Alert); err == nil {
+		WHERE source.id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt, &source.Protocol, &source.TransportStatus, &source.ReconnectCount, &source.LastError, &source.Platform, &source.ScheduledStartAt, &source.ScheduledEndAt, &source.StartMode, &source.SilenceStopSeconds, &source.PlanFollow, &source.PlanKey, &source.Alert, &source.CaptureScope); err == nil {
 		m.broadcast(sessionID, "transcription.source", ginData{"sourceId": sourceID, "status": source.Status, "lastSeenAt": now, "source": source})
 		return
 	}

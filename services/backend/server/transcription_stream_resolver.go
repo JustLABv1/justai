@@ -39,7 +39,16 @@ func resolveLiveStream(ctx context.Context, raw string, allowPrivate bool) (reso
 		if _, err := relay.Manifest(ctx); err != nil {
 			return resolvedLiveStream{}, err
 		}
-		return resolvedLiveStream{URL: relay.URL, Name: "Stream relay", Kind: "direct"}, nil
+		result := resolvedLiveStream{URL: relay.URL, Name: "Stream relay", Kind: "direct"}
+		if isBundestagPlanURL(raw) {
+			// Best effort: the published session plan lets users pick a session.
+			planCtx, cancelPlan := context.WithTimeout(ctx, 20*time.Second)
+			defer cancelPlan()
+			if plan, planErr := fetchBundestagPlan(planCtx, provider.SafeHTTPClient(15*time.Second, allowPrivate)); planErr == nil {
+				result.Plan = plan
+			}
+		}
+		return result, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()

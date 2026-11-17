@@ -23,6 +23,12 @@ export type VideoTranscriptionLibraryItem = {
   doneAt?: string | null
   createdAt: string
   updatedAt: string
+  /** Live sessions: the first source, a scheduled start and the agenda progress. */
+  sourceKind?: string
+  sourceName?: string
+  scheduledStartAt?: string | null
+  topicsTotal?: number
+  topicsDone?: number
 }
 
 export type VideoTranscriptionLibraryPage = {

@@ -128,6 +128,56 @@ justai_livestream_events_total{event="speech_start|fallback_start|watch_missed|s
 
 Alert on `increase(justai_livestream_events_total{event="watch_missed"}[1h]) > 0`.
 
+### Topics: read one agenda item as soon as it is finished
+
+A Bundestag sitting runs for many hours and covers many items. With **Track topics**
+(chosen together with a Bundestag session) or **Load agenda items** (in the session's
+topics list) JustAI loads the items of that sitting from the Bundestag's published
+planned course ("Geplanter Ablauf der Plenarsitzungen", a PDF read with `pdftotext`).
+Each item has a label ("EPL 15", "TOP II, III"), a title and a planned slot.
+
+While the sitting is captured, every finished transcript segment is checked for the
+chair calling an item up ("Ich rufe den Einzelplan 15 auf", "Wir kommen zu
+Tagesordnungspunkt …"). The match uses the item's number, or its title words when no
+number is spoken. The previous item is finished at that moment and the new one opens,
+so the real boundaries come from the sitting, not from the planned slots, which drift.
+
+A finished item is available immediately, while the sitting continues: open its
+transcript, copy or download it, or have it summarised
+(`GET /api/v1/transcription/topics/:id/transcript`, `POST …/summary`). Mark topics you
+care about with the star to be notified when one finishes. If an announcement was not
+recognised, **Start now** and **Finish** set the boundary by hand. The last open item
+ends when the chair closes the sitting or the capture ends. Items that were already
+finished are never reopened by a repeated mention.
+
+Limits: boundaries are as exact as the chair's announcement is recognised, and a
+topic is finished only when the next one is called up, so there is a short delay. The
+announcement detector works on text patterns and has been tested against typical
+phrasings and the real plan, not yet against a recorded sitting. Check the first live
+sitting and use **Start now** / **Finish** where it differs.
+
+### Recording only selected topics
+
+To save transcription time, choose **Only selected topics** and tick the items you
+need (`captureScope: "topics"`, `topicKeys`, `topicsSessionNo` on stream-source
+creation; the agenda comes from `GET /api/v1/transcription/bundestag/agenda?sitting=N`).
+The schedule is then derived from the agenda instead of the form:
+
+- Capture starts 30 minutes before the first selected item's planned slot.
+- After a selected item is finished (the next one was called up), the capture pauses
+  when the next selected item is at least 20 minutes away. It resumes 30 minutes
+  before that item's planned start, shifted by the delay observed so far (sittings
+  usually run late). Between the windows no audio reaches the provider.
+- After the last selected item the capture ends and the session is completed.
+- If the sitting reaches a selected item before its window began, the item is marked
+  missed with an alert and the capture continues with the remaining items.
+- A hard stop applies 3 hours after the last selected item's planned end.
+
+While paused the source shows as scheduled with an alert naming the resume time.
+Restarted captures continue the source's timeline after the last transcript line, so
+topic boundaries stay consistent across pauses and backend restarts. The eight-hour
+`transcription.max_session_hours` limit counts from the first start, pauses included.
+
 ### Limits of speech detection
 
 Speech is told from music by cheap audio features (no model), calibrated on the

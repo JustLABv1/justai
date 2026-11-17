@@ -473,6 +473,8 @@ type TranscriptionSource struct {
 	SilenceStopSeconds int    `json:"silenceStopSeconds"`
 	PlanFollow         bool   `json:"planFollow"`
 	PlanKey            string `json:"planKey"`
+	// CaptureScope is "topics" when only selected agenda items are captured.
+	CaptureScope string `json:"captureScope"`
 	// Alert is a human-readable heads-up about schedule changes or a missed capture.
 	Alert       string  `json:"alert"`
 	SignalLevel float64 `json:"signalLevel"`
@@ -823,4 +825,31 @@ type SocketEnvelope struct {
 	RequestID string `json:"requestId,omitempty"`
 	Sequence  int64  `json:"sequence,omitempty"`
 	Data      any    `json:"data,omitempty"`
+}
+
+// TranscriptionTopic is one agenda item of a live session. Offsets are milliseconds on
+// the source's timeline, like transcript segments.
+type TranscriptionTopic struct {
+	ID             uuid.UUID  `json:"id"`
+	SessionID      uuid.UUID  `json:"sessionId"`
+	SourceID       *uuid.UUID `json:"sourceId,omitempty"`
+	Key            string     `json:"key"`
+	Order          int        `json:"order"`
+	Kind           string     `json:"kind"`
+	Label          string     `json:"label"`
+	Title          string     `json:"title"`
+	PlannedStartAt *time.Time `json:"plannedStartAt,omitempty"`
+	PlannedEndAt   *time.Time `json:"plannedEndAt,omitempty"`
+	// OriginalStartAt is the first planned start when the published plan moved the item.
+	OriginalStartAt *time.Time `json:"originalStartAt,omitempty"`
+	PlanChangedAt   *time.Time `json:"planChangedAt,omitempty"`
+	Status          string     `json:"status"` // planned, active or done
+	StartedOffsetMs *int64     `json:"startedOffsetMs,omitempty"`
+	EndedOffsetMs   *int64     `json:"endedOffsetMs,omitempty"`
+	DetectedBy      string     `json:"detectedBy,omitempty"`
+	Starred         bool       `json:"starred"`
+	Summary         string     `json:"summary,omitempty"`
+	SummaryStatus   string     `json:"summaryStatus"`
+	SummaryError    string     `json:"summaryError,omitempty"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }

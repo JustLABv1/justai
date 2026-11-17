@@ -13,6 +13,7 @@ import (
 	_ "time/tzdata" // the plan is published in Berlin time; containers may lack tzdata
 
 	"golang.org/x/net/html"
+	"justai-backend/streamrelay"
 )
 
 // The Bundestag publishes its plenary schedule on the live page. Sessions often
@@ -195,6 +196,17 @@ func fetchBundestagPlan(ctx context.Context, client *http.Client) ([]planSession
 		return nil, fmt.Errorf("the Bundestag plan returned HTTP %d", resp.StatusCode)
 	}
 	return parseBundestagPlan(io.LimitReader(resp.Body, 4*1024*1024))
+}
+
+// isBundestagPlanURL reports whether the programme plan applies to this source: the
+// Bundestag live page itself, or a stream relay source whose ID contains "bundestag"
+// (for example https://relay.example.org/v1/sources/bundestag).
+func isBundestagPlanURL(raw string) bool {
+	if isBundestagLiveURL(raw) {
+		return true
+	}
+	id, ok := streamrelay.RelaySourceID(raw)
+	return ok && strings.Contains(strings.ToLower(id), "bundestag")
 }
 
 // isBundestagLiveURL reports whether the URL is the Bundestag live page that publishes the plan.

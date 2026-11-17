@@ -69,6 +69,26 @@ func ForSource(raw string) (*Client, error) {
 	return nil, nil
 }
 
+// RelaySourceID returns the source ID when raw is a source URL of a configured
+// relay. It needs no token, so it can be used to recognise relay links cheaply.
+func RelaySourceID(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", false
+	}
+	for _, e := range endpoints() {
+		b, originErr := e.origin()
+		if originErr != nil || !strings.EqualFold(u.Host, b.Host) || u.Scheme != b.Scheme {
+			continue
+		}
+		id := strings.TrimPrefix(u.Path, "/v1/sources/")
+		if sourceID.MatchString(id) && u.Path == "/v1/sources/"+id && u.RawQuery == "" && u.Fragment == "" && u.User == nil {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 func newClient(e Endpoint, target string) (*Client, error) {
 	token, err := e.readToken()
 	if err != nil || len(strings.TrimSpace(string(token))) < 32 {
