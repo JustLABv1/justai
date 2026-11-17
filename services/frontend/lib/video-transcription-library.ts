@@ -29,6 +29,9 @@ export type VideoTranscriptionLibraryItem = {
   scheduledStartAt?: string | null
   topicsTotal?: number
   topicsDone?: number
+  streamStatus?: string
+  streamEndReason?: string
+  outageCount?: number
 }
 
 export type VideoTranscriptionLibraryPage = {

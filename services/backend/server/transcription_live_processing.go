@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -112,6 +113,10 @@ func (m *TranscriptionManager) processLiveTranscript(ctx context.Context, id uui
 		endpoint.DiarizationModel = firstNonEmptyString(model, endpoint.DiarizationModel)
 		if err = m.diarizeLiveRecordings(ctx, id, endpoint, language); err != nil {
 			return err
+		}
+		// In a Bundestag sitting the chair names every speaker; carry those names over.
+		if nameErr := m.nameSpeakersFromAnnouncements(ctx, id); nameErr != nil {
+			slog.Warn("speakers could not be named from the announcements", "sessionId", id, "error", nameErr)
 		}
 		if _, err = m.DB.ExecContext(ctx, `UPDATE transcription_live_processing SET diarization_status='completed',updated_at=now() WHERE session_id=$1`, id); err != nil {
 			return err

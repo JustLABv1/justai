@@ -221,6 +221,15 @@ export function translateStreamAlert(
       "The Bundestag plan changed: capture now starts at {value0} (Berlin time).",
       { value0: moved[1] }
     )
+  const aborted =
+    /^Capture stopped: the stream did not come back within (\d+) minutes\.$/.exec(
+      alert
+    )
+  if (aborted)
+    return t(
+      "Capture stopped: the stream did not come back within {value0} minutes.",
+      { value0: aborted[1] }
+    )
   const pause =
     /^Paused until (\d{1,2}:\d{2}) \(Berlin time\), shortly before the next selected topic: (.+)\.$/.exec(
       alert

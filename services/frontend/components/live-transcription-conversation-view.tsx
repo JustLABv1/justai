@@ -32,6 +32,8 @@ import type { LiveTranscriptionOrbitProps } from "@/components/live-transcriptio
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
 import { Badge } from "@/components/panelui/badge"
 import { ScheduledCaptureCard } from "@/components/scheduled-capture-card"
+import { StreamHealthNotice } from "@/components/stream-health"
+import { ViewLinkButton } from "@/components/transcription-view-link"
 import type { TranscriptionTopic } from "@/lib/types"
 import { Button } from "@/components/panelui/button"
 import { RealtimeConnectionStatus } from "@/components/realtime-connection-status"
@@ -305,12 +307,15 @@ export function LiveTranscriptionConversationView({
               ? t("{value0} in room", { value0: snapshot.speakers.length || 1 })
               : t("1 source")}
           </Badge>
-          {/* Inviting people only makes sense where they join with their microphone. */}
+          {/* Inviting people only makes sense where they join with their microphone;
+              everywhere else others can follow along with a read-only link. */}
           {isMicRoom ? (
             <Button onClick={onShare} size="sm" variant="outline">
               <Share2 data-icon="inline-start" /> {t("Invite participants")}
             </Button>
-          ) : null}
+          ) : (
+            <ViewLinkButton sessionId={snapshot.session.id} />
+          )}
           {!capturing && mode === "browser-system" && canStartCapture ? (
             <Button onClick={() => void onStartCapture()} size="sm">
               <Play data-icon="inline-start" /> {t("Start source")}
@@ -409,6 +414,7 @@ export function LiveTranscriptionConversationView({
           </DropdownMenu>
         </div>
       </header>
+      <StreamHealthNotice sources={snapshot.sources} />
       {topicsPanel ? (
         <div className="border-b px-5 py-4 sm:px-6">{topicsPanel}</div>
       ) : null}

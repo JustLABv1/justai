@@ -5,7 +5,8 @@ export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const isPublicTranscriptionJoin =
     pathname === "/transcription/join" ||
-    pathname.startsWith("/transcription/join/")
+    pathname.startsWith("/transcription/join/") ||
+    pathname === "/transcription/view"
 
   if (isPublicTranscriptionJoin) {
     return NextResponse.next()

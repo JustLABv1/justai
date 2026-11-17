@@ -21,6 +21,7 @@ import {
   FileVideo,
   Search,
   Upload,
+  WifiOff,
 } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
 import { Alert } from "@/components/panelui/alert"
@@ -37,6 +38,7 @@ import { VideoTranscriptionThumbnail } from "@/components/video-transcription-th
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { workspacePath } from "@/lib/workspace-routes"
+import { TopicSubscriptionsButton } from "@/components/topic-subscriptions"
 import {
   VIDEO_LIBRARY_PAGE_SIZE,
   videoLibraryDuration,
@@ -58,6 +60,37 @@ const liveSourceIcons: Record<string, typeof AudioLines> = {
 }
 
 /** A small tile that says what a live session captures, instead of an empty preview. */
+/** Stream trouble at a glance: down right now, ended early, or dropped on the way. */
+function StreamHealthBadge({ item }: { item: VideoTranscriptionLibraryItem }) {
+  const { t } = useTranslations()
+  if (item.streamStatus === "reconnecting")
+    return (
+      <Badge size="sm" variant="warning">
+        <WifiOff aria-hidden="true" className="size-3" />
+        {t("Stream interrupted")}
+      </Badge>
+    )
+  if (item.streamStatus === "failed" || item.streamEndReason === "aborted")
+    return (
+      <Badge size="sm" variant="destructive">
+        <WifiOff aria-hidden="true" className="size-3" />
+        {item.streamStatus === "failed"
+          ? t("Capture failed")
+          : t("Ended early")}
+      </Badge>
+    )
+  if (item.outageCount)
+    return (
+      <Badge size="sm" variant="outline">
+        <WifiOff aria-hidden="true" className="size-3" />
+        {t(item.outageCount === 1 ? "Dropped once" : "Dropped {value0} times", {
+          value0: item.outageCount,
+        })}
+      </Badge>
+    )
+  return null
+}
+
 function LiveSourceIcon({
   kind,
   status,
@@ -293,14 +326,17 @@ export function VideoTranscriptionLibrary({
     >
       <SectionHeading
         actions={
-          <Button onClick={onCreate}>
-            {kind === "live" ? (
-              <Mic data-icon="inline-start" />
-            ) : (
-              <Upload data-icon="inline-start" />
-            )}
-            {t(kind === "live" ? "New live session" : "Add recording")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {kind === "live" ? <TopicSubscriptionsButton /> : null}
+            <Button onClick={onCreate}>
+              {kind === "live" ? (
+                <Mic data-icon="inline-start" />
+              ) : (
+                <Upload data-icon="inline-start" />
+              )}
+              {t(kind === "live" ? "New live session" : "Add recording")}
+            </Button>
+          </div>
         }
         description={t("Pick up where you left off, or add a new recording.")}
         id="video-library-title"
@@ -647,6 +683,9 @@ export function VideoTranscriptionLibrary({
                           <FileText aria-hidden="true" className="size-3" />
                           {t("With summary")}
                         </Badge>
+                      ) : null}
+                      {kind === "live" ? (
+                        <StreamHealthBadge item={item} />
                       ) : null}
                     </div>
                   </div>

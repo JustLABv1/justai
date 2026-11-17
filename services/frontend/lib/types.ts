@@ -897,6 +897,12 @@ export type TranscriptionSource = {
   /** Heads-up about a schedule change, a missed capture or an automatic stop. */
   alert?: string
   signalLevel: number
+  /** Set while a connected stream is reconnecting. */
+  interruptedAt?: string | null
+  outageCount?: number
+  outageSeconds?: number
+  /** "aborted" when the capture ended because the stream did not come back. */
+  endReason?: string
 }
 
 /** One agenda item of a live session (for example an item of a Bundestag sitting). */
