@@ -1417,8 +1417,14 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
       >
         <Message.Avatar>
           <ChatBrandMark
-            className={cn("size-5 shrink-0", startsWithTool ? "mt-5" : "mt-1")}
+            className={cn(
+              "shrink-0",
+              isLatest
+                ? cn("size-7", startsWithTool ? "mt-4" : "mt-0")
+                : cn("size-5", startsWithTool ? "mt-5" : "mt-1")
+            )}
             isActive={isStreamingMessage}
+            mascot={isLatest}
           />
         </Message.Avatar>
         <Message.Content className="gap-0">
@@ -1974,7 +1980,7 @@ function EmptyThread({
         <ChatAmbient />
         <div className="z-10 flex w-full max-w-3xl flex-col items-center">
           <div className="mb-3 grid w-full grid-cols-[3rem_minmax(0,auto)_3rem] items-center justify-center gap-3">
-            <ChatBrandMark className="size-12 shrink-0" />
+            <ChatBrandMark className="size-12 shrink-0" mascot />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
               {firstName ? t(greeting, { name: firstName }) : t("Hello there")}
             </span>

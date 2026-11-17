@@ -1,4 +1,5 @@
 "use client"
+import { Mascot } from "@/components/mascot"
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
@@ -23,7 +24,6 @@ import {
   FileText,
   FileVideo2,
   Folder,
-  FolderKanban,
   FolderPlus,
   Globe2,
   Link2,
@@ -1856,9 +1856,7 @@ export function KnowledgeWorkspace({
                     ) : visibleItems.length === 0 &&
                       childSpaces.length === 0 ? (
                       <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-[22px] border border-dashed p-8 text-center">
-                        <span className="rounded-full bg-muted p-3 text-muted-foreground">
-                          <FolderKanban aria-hidden="true" className="size-6" />
-                        </span>
+                        <Mascot size={64} />
                         <div className="flex max-w-md flex-col gap-1">
                           <p className="font-medium">
                             {query

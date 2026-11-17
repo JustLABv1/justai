@@ -23,6 +23,7 @@ import type {
   User,
 } from "@/lib/types"
 import { BrandMark } from "@/components/brand-mark"
+import { Mascot } from "@/components/mascot"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
 import { Alert } from "@/components/panelui/alert"
@@ -241,7 +242,10 @@ export function Onboarding() {
             role="img"
             aria-label="JustAI"
           >
-            <BrandMark cropped className="size-12" />
+            <Mascot
+              fallback={<BrandMark cropped className="size-12" />}
+              size={64}
+            />
           </div>
           <div className="hidden flex-col gap-2 md:flex">
             <h2 className="text-lg font-semibold tracking-tight">

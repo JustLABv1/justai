@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/panelui/card"
 import { Tabs } from "@/components/panelui/tabs"
 import { AuroraBackdrop } from "@/components/aurora-backdrop"
 import { BrandMark } from "@/components/brand-mark"
+import { Mascot } from "@/components/mascot"
 import { Button, buttonVariants } from "@/components/panelui/button"
 import { Field, FieldLabel, FieldDescription } from "@/components/panelui/field"
 import { Input } from "@/components/panelui/input"
@@ -146,7 +147,10 @@ export function LoginForm({
                 role="img"
                 aria-label="JustAI"
               >
-                <BrandMark className="size-14" cropped />
+                <Mascot
+                  fallback={<BrandMark className="size-14" cropped />}
+                  size={72}
+                />
               </div>
 
               <div className={styles.authIntro}>

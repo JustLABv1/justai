@@ -1,4 +1,5 @@
 "use client"
+import { Mascot } from "@/components/mascot"
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
@@ -220,9 +221,7 @@ export function TemplatesView() {
       ) : visible.length === 0 ? (
         <Card className="border-dashed">
           <Card.Content className="flex min-h-72 flex-col items-center justify-center gap-4 text-center">
-            <span className="rounded-full bg-muted p-3 text-muted-foreground">
-              <FileText aria-hidden="true" className="size-6" />
-            </span>
+            <Mascot size={64} />
             <div className="flex max-w-md flex-col gap-1">
               <p className="font-medium">
                 {templates.length

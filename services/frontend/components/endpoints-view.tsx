@@ -1,4 +1,5 @@
 "use client"
+import { Mascot } from "@/components/mascot"
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
@@ -6,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CheckCircle2,
   CircleAlert,
-  Cloud,
   LockKeyhole,
   MoreHorizontal,
   Pencil,
@@ -1089,9 +1089,7 @@ function EndpointTable({
       ) : (
         <Card className="border-dashed">
           <Card.Content className="flex min-h-56 flex-col items-center justify-center gap-4 text-center">
-            <span className="rounded-full bg-muted p-3 text-muted-foreground">
-              <Cloud aria-hidden="true" className="size-6" />
-            </span>
+            <Mascot size={64} state={resourceError ? "sleeping" : "default"} />
             <div className="flex max-w-md flex-col gap-1">
               <p className="font-medium">
                 {resourceError && endpoints.length === 0

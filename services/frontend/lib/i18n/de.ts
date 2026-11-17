@@ -814,7 +814,13 @@ export const de = {
   "Platform admin": "Plattformverwaltung",
   Profile: "Profil",
   "Sign out": "Abmelden",
-  "Disable seasons": "Jahreszeiten deaktivieren",
+  Preferences: "Einstellungen",
+  "Seasonal effects": "Jahreszeiten-Effekte",
+  "Show seasonal backdrops and weather in the app. Saved in this browser.":
+    "Jahreszeitliche Hintergründe und Wetter in der App anzeigen. Wird in diesem Browser gespeichert.",
+  Mascot: "Maskottchen",
+  "Show the JustAI ghost in chat, empty states and sign-in. Saved in this browser.":
+    "Das JustAI-Gespenst im Chat, in leeren Ansichten und bei der Anmeldung anzeigen. Wird in diesem Browser gespeichert.",
   "Recent chats": "Letzte Chats",
   "New chat": "Neuer Chat",
   "Your conversations will appear here.":

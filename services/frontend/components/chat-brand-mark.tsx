@@ -5,15 +5,25 @@ import { useEffect, useRef, useState } from "react"
 import { useAuiState } from "@assistant-ui/react"
 
 import { BrandMark } from "@/components/brand-mark"
+import { Mascot, useIdle } from "@/components/mascot"
+import { useMascotDisabled } from "@/lib/mascot-preference"
 import { cn } from "@/lib/utils"
 
 type ChatBrandMarkProps = {
   className?: string
   isActive?: boolean
+  /** Render the animated ghost mascot instead of the signet. */
+  mascot?: boolean
 }
 
 /** The JustAI mark doubles as a quiet, contextual chat-status indicator. */
-export function ChatBrandMark({ className, isActive }: ChatBrandMarkProps) {
+export function ChatBrandMark({
+  className,
+  isActive,
+  mascot: wantsMascot = false,
+}: ChatBrandMarkProps) {
+  const mascotDisabled = useMascotDisabled()
+  const mascot = wantsMascot && !mascotDisabled
   const { t } = useTranslations()
 
   const threadIsRunning = useAuiState((state) => state.thread.isRunning)
@@ -21,6 +31,7 @@ export function ChatBrandMark({ className, isActive }: ChatBrandMarkProps) {
   const wasRunning = useRef(false)
   const timer = useRef<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
+  const idle = useIdle(5 * 60 * 1000, mascot && !active)
 
   useEffect(() => {
     if (timer.current) window.clearTimeout(timer.current)
@@ -46,6 +57,21 @@ export function ChatBrandMark({ className, isActive }: ChatBrandMarkProps) {
       : state === "complete"
         ? t("JustAI response complete")
         : "JustAI"
+
+  if (mascot) {
+    return (
+      <span
+        aria-label={label}
+        className={cn("inline-block flex-none", className)}
+        role="img"
+      >
+        <Mascot
+          size="100%"
+          state={active ? "working" : idle ? "sleeping" : "default"}
+        />
+      </span>
+    )
+  }
 
   return (
     <span

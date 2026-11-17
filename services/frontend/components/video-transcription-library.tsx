@@ -1,5 +1,6 @@
 "use client"
 
+import { Mascot } from "@/components/mascot"
 import { TranscriptionDeleteButton } from "@/components/transcription-delete-button"
 import { Spinner } from "@/components/panelui/spinner"
 import Link from "next/link"
@@ -18,7 +19,6 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  FileVideo,
   Search,
   Upload,
   WifiOff,
@@ -739,13 +739,7 @@ export function VideoTranscriptionLibrary({
       ) : data && !error ? (
         <Card className="border-dashed">
           <Card.Content className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
-            <span className="rounded-full bg-muted p-3 text-muted-foreground">
-              {kind === "live" ? (
-                <Mic aria-hidden="true" className="size-6" />
-              ) : (
-                <FileVideo aria-hidden="true" className="size-6" />
-              )}
-            </span>
+            <Mascot size={64} />
             <div className="flex flex-col gap-1">
               <p className="font-medium">
                 {t(
