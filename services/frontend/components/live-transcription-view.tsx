@@ -805,6 +805,23 @@ export function LiveTranscriptionView({
                         : data.lastSeenAt
                           ? String(data.lastSeenAt)
                           : source.lastSeenAt,
+                    // Outages: when the stream dropped, how often, and why it ended.
+                    interruptedAt:
+                      "interruptedAt" in data
+                        ? (data.interruptedAt as string | null)
+                        : source.interruptedAt,
+                    outageCount:
+                      typeof data.outageCount === "number"
+                        ? data.outageCount
+                        : source.outageCount,
+                    outageSeconds:
+                      typeof data.outageSeconds === "number"
+                        ? data.outageSeconds
+                        : source.outageSeconds,
+                    endReason:
+                      typeof data.endReason === "string"
+                        ? data.endReason
+                        : source.endReason,
                   }
                 }),
               }
@@ -894,11 +911,17 @@ export function LiveTranscriptionView({
         return
       }
       if (event.type === "transcription.speaker") {
+        // Speakers named from the Bundestag chair's announcements arrive as new rows.
+        const added = data.speaker as TranscriptionSpeaker | undefined
         setSnapshot((current) =>
           current
             ? {
                 ...current,
-                speakers: current.speakers.map((speaker) =>
+                speakers: (added &&
+                !current.speakers.some((speaker) => speaker.id === added.id)
+                  ? [...current.speakers, added]
+                  : current.speakers
+                ).map((speaker) =>
                   speaker.id === data.speakerId
                     ? {
                         ...speaker,

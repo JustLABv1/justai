@@ -5,7 +5,6 @@ import {
   BellRing,
   Check,
   Copy,
-  Download,
   FileText,
   ListChecks,
   Play,
@@ -30,10 +29,11 @@ import {
 import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
 import { api } from "@/lib/api"
-import { downloadFile } from "@/lib/download-file"
 import type { TranscriptionTopic } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { topicMoved } from "@/components/scheduled-capture-card"
+import { TopicExportMenu } from "@/components/topic-export-menu"
+import { TopicSubscriptionButton } from "@/components/topic-subscriptions"
 
 function formatOffset(ms?: number) {
   if (ms === undefined) return ""
@@ -171,12 +171,24 @@ export function LiveTranscriptionTopics({
           <ListChecks className="size-4" /> {t("Topics")}
         </h3>
         {topics.length > 0 ? (
-          <span className="text-xs text-muted-foreground">
-            {t("{value0} of {value1} finished", {
-              value0: topics.filter((topic) => topic.status === "done").length,
-              value1: topics.length,
-            })}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {t("{value0} of {value1} finished", {
+                value0: topics.filter((topic) => topic.status === "done")
+                  .length,
+                value1: topics.length,
+              })}
+            </span>
+            <TopicSubscriptionButton sessionId={sessionId} />
+            {topics.some((topic) => topic.startedOffsetMs !== undefined) ? (
+              <TopicExportMenu
+                fileName={t("Topics")}
+                label={t("Export topics")}
+                onError={setError}
+                path={`/api/v1/transcription/sessions/${sessionId}/topics/export`}
+              />
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -524,17 +536,11 @@ function TopicTranscriptDialog({
             )}
             {copied ? t("Copied") : t("Copy")}
           </Button>
-          <Button
-            onClick={() =>
-              void downloadFile(
-                `/api/v1/transcription/topics/${topic.id}/transcript?download=1`,
-                `${topic.label || topic.title}.txt`
-              ).catch(() => setError(t("The download failed.")))
-            }
-            variant="outline"
-          >
-            <Download data-icon="inline-start" /> {t("Download")}
-          </Button>
+          <TopicExportMenu
+            fileName={topic.label || topic.title}
+            onError={setError}
+            path={`/api/v1/transcription/topics/${topic.id}/export`}
+          />
           <Button
             disabled={
               summarizing || topic.summaryStatus === "processing" || loading

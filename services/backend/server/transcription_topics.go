@@ -197,8 +197,7 @@ func (m *TranscriptionManager) switchTopic(ctx context.Context, sessionID, sourc
 	}
 	liveStreamEvents.inc("topic_started")
 	for _, id := range closed {
-		liveStreamEvents.inc("topic_finished")
-		m.broadcastTopic(sessionID, id)
+		m.topicFinished(sessionID, id)
 	}
 	m.broadcastTopic(sessionID, topicID)
 }
@@ -218,8 +217,7 @@ func (m *TranscriptionManager) finishActiveTopics(ctx context.Context, sessionID
 	}
 	_ = rows.Close()
 	for _, id := range ids {
-		liveStreamEvents.inc("topic_finished")
-		m.broadcastTopic(sessionID, id)
+		m.topicFinished(sessionID, id)
 	}
 }
 
@@ -406,8 +404,7 @@ func (a *App) finishTranscriptionTopic(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	liveStreamEvents.inc("topic_finished")
-	a.Live.broadcastTopic(topic.SessionID, topic.ID)
+	a.Live.topicFinished(topic.SessionID, topic.ID)
 	if topic.SourceID != nil {
 		a.Live.applyTopicScope(c, topic.SessionID, *topic.SourceID)
 	}
@@ -487,31 +484,48 @@ func (a *App) summarizeTranscriptionTopic(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := a.topicRows(c, topic)
-	if err != nil || len(rows) == 0 {
-		writeError(c, http.StatusConflict, fmt.Errorf("there is no transcript for this topic yet"))
+	if status, err := a.startTopicSummary(c, topic, 0); err != nil {
+		writeError(c, status, err)
 		return
+	}
+	a.Live.broadcastTopic(topic.SessionID, topic.ID)
+	updated, _ := loadTopic(c, a.DB, topic.ID)
+	c.JSON(http.StatusAccepted, gin.H{"topic": updated})
+}
+
+// startTopicSummary claims the topic and writes its summary in the background. Topics
+// with fewer than minWords transcribed words are skipped. The HTTP status describes
+// why it could not start.
+func (a *App) startTopicSummary(ctx context.Context, topic models.TranscriptionTopic, minWords int) (int, error) {
+	rows, err := a.topicRows(ctx, topic)
+	if err != nil || len(rows) == 0 {
+		return http.StatusConflict, fmt.Errorf("there is no transcript for this topic yet")
+	}
+	if minWords > 0 {
+		words := 0
+		for _, row := range rows {
+			words += len(strings.Fields(row.Text))
+		}
+		if words < minWords {
+			return http.StatusConflict, fmt.Errorf("the topic is too short to summarise")
+		}
 	}
 	var endpointID uuid.NullUUID
 	var grammarModel, title, language string
-	if err := a.DB.QueryRowContext(c, `SELECT grammar_endpoint_id, COALESCE(grammar_model, ''), title, language FROM transcription_sessions WHERE id = $1`, topic.SessionID).Scan(&endpointID, &grammarModel, &title, &language); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+	if err := a.DB.QueryRowContext(ctx, `SELECT grammar_endpoint_id, COALESCE(grammar_model, ''), title, language FROM transcription_sessions WHERE id = $1`, topic.SessionID).Scan(&endpointID, &grammarModel, &title, &language); err != nil {
+		return http.StatusInternalServerError, err
 	}
 	if !endpointID.Valid {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("configure a grammar/chat endpoint before generating summaries"))
-		return
+		return http.StatusBadRequest, fmt.Errorf("configure a grammar/chat endpoint before generating summaries")
 	}
-	endpoint, err := a.providerEndpoint(c, endpointID.UUID)
+	endpoint, err := a.providerEndpoint(ctx, endpointID.UUID)
 	if err != nil || !endpointSupports(endpoint, "chat") {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("the configured grammar endpoint does not support chat"))
-		return
+		return http.StatusBadRequest, fmt.Errorf("the configured grammar endpoint does not support chat")
 	}
 	endpoint.ChatModel = firstNonEmptyString(grammarModel, endpoint.ChatModel)
-	claim, err := a.DB.ExecContext(c, `UPDATE transcription_topics SET summary_status = 'processing', summary_error = '', updated_at = now() WHERE id = $1 AND summary_status <> 'processing'`, topic.ID)
+	claim, err := a.DB.ExecContext(ctx, `UPDATE transcription_topics SET summary_status = 'processing', summary_error = '', updated_at = now() WHERE id = $1 AND summary_status <> 'processing'`, topic.ID)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+		return http.StatusInternalServerError, err
 	}
 	if claimed, _ := claim.RowsAffected(); claimed > 0 {
 		go func() {
@@ -520,10 +534,42 @@ func (a *App) summarizeTranscriptionTopic(c *gin.Context) {
 			a.runTopicSummary(ctx, topic, endpoint, title, language, rows)
 		}()
 	}
-	a.Live.broadcastTopic(topic.SessionID, topic.ID)
-	updated, _ := loadTopic(c, a.DB, topic.ID)
-	c.JSON(http.StatusAccepted, gin.H{"topic": updated})
+	return http.StatusAccepted, nil
 }
+
+// topicAutoSummaryDelay lets the last lines of a topic arrive before it is summarised.
+const topicAutoSummaryDelay = 30 * time.Second
+
+// topicAutoSummaryMinWords skips items that were only called up and closed, such as
+// votes without debate.
+const topicAutoSummaryMinWords = 150
+
+// topicFinished announces a finished topic and, when the session has a chat endpoint,
+// summarises it shortly after, so each agenda item can be read on its own right away.
+func (m *TranscriptionManager) topicFinished(sessionID, topicID uuid.UUID) {
+	liveStreamEvents.inc("topic_finished")
+	m.broadcastTopic(sessionID, topicID)
+	if m.app == nil {
+		return
+	}
+	go func() {
+		time.Sleep(topicAutoSummaryDelay)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		topic, err := loadTopic(ctx, m.DB, topicID)
+		if err != nil || topic.Status != "done" || topic.DetectedBy == "missed" || topic.SummaryStatus == "completed" || topic.SummaryStatus == "processing" {
+			return
+		}
+		if _, err := m.app.startTopicSummary(ctx, topic, topicAutoSummaryMinWords); err == nil {
+			liveStreamEvents.inc("topic_summary_auto")
+			m.broadcastTopic(sessionID, topicID)
+		}
+	}()
+}
+
+// topicDebatePrompt: topics are agenda items of a Bundestag sitting, so the reader wants
+// to know where each parliamentary group stands.
+const topicDebatePrompt = ` This transcript is one agenda item of a German Bundestag sitting. Speaker names may carry their parliamentary group in parentheses. Name each speaker's group when it is known, make clear which position each group takes on the item, and mention the outcome (for example a vote or a referral to committee) when the transcript states it.`
 
 func (a *App) runTopicSummary(ctx context.Context, topic models.TranscriptionTopic, endpoint provider.Endpoint, sessionTitle, language string, rows []transcriptionExportRow) {
 	fail := func(cause error) {
@@ -541,7 +587,7 @@ func (a *App) runTopicSummary(ctx context.Context, topic models.TranscriptionTop
 	analyses := make([]transcriptionInsightChunkAnalysis, 0, len(chunks))
 	for i, chunk := range chunks {
 		response, err := requestTranscriptionInsight(ctx, endpoint,
-			transcriptionInsightChunkSystemPrompt("auto", language, i+1, len(chunks)),
+			transcriptionInsightChunkSystemPrompt("auto", language, i+1, len(chunks))+topicDebatePrompt,
 			buildTranscriptionInsightChunkInput(title, language, chunk, i+1, len(chunks), durationMs))
 		if err != nil {
 			fail(fmt.Errorf("summary failed for transcript window %d/%d: %w", i+1, len(chunks), err))
@@ -553,7 +599,7 @@ func (a *App) runTopicSummary(ctx context.Context, topic models.TranscriptionTop
 	if len(analyses) > 1 {
 		summary = fallbackTranscriptionInsightSummary(analyses)
 		if reduced, err := requestTranscriptionInsight(ctx, endpoint,
-			transcriptionInsightReduceSystemPrompt("auto", language),
+			transcriptionInsightReduceSystemPrompt("auto", language)+topicDebatePrompt,
 			buildTranscriptionInsightReduceInput(title, language, analyses)); err == nil && strings.TrimSpace(reduced.Summary) != "" {
 			summary = strings.TrimSpace(reduced.Summary)
 		}

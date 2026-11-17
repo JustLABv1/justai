@@ -33,6 +33,11 @@ type videoTranscriptionLibraryItem struct {
 	ScheduledStartAt *time.Time `json:"scheduledStartAt,omitempty"`
 	TopicsTotal      int        `json:"topicsTotal,omitempty"`
 	TopicsDone       int        `json:"topicsDone,omitempty"`
+	// Stream health: the transport status ("reconnecting", "failed", ...), "aborted" when
+	// the capture ended because the stream did not come back, and how often it dropped.
+	StreamStatus    string `json:"streamStatus,omitempty"`
+	StreamEndReason string `json:"streamEndReason,omitempty"`
+	OutageCount     int    `json:"outageCount,omitempty"`
 }
 
 func videoLibraryPageValues(c *gin.Context) (int, int, error) {

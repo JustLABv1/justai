@@ -5036,4 +5036,89 @@ export const de = {
   "Pauses between the selected topics and ends after the last one. If the sitting runs late, JustAI waits longer; at the latest it stops at {value0}.":
     "Pausiert zwischen den ausgewählten Themen und endet nach dem letzten. Läuft die Sitzung länger, wartet JustAI mit; spätestens um {value0} ist Schluss.",
   "Invite participants": "Teilnehmende einladen",
+  "Export topics": "Themen exportieren",
+  "Subscribe to topics": "Themen abonnieren",
+  "The subscription could not be saved.":
+    "Das Abo konnte nicht gespeichert werden.",
+  "JustAI checks the Bundestag plan every 30 minutes. For each upcoming sitting with matching agenda items it schedules its own capture of only those items, with the settings and stream of this session.":
+    "JustAI prüft den Ablaufplan des Bundestags alle 30 Minuten. Für jede kommende Sitzung mit passenden Tagesordnungspunkten plant es eine eigene Aufnahme nur dieser Punkte – mit den Einstellungen und dem Stream dieser Sitzung.",
+  "Subscribed. Scheduled captures appear in your live sessions; you can manage subscriptions there.":
+    "Abonniert. Geplante Aufnahmen erscheinen in deinen Live-Sitzungen; dort kannst du die Abos auch verwalten.",
+  Keywords: "Stichwörter",
+  "e.g. Digital, Haushalt, Rente": "z. B. Digital, Haushalt, Rente",
+  "Separate keywords with commas. An agenda item matches when its title contains one of them.":
+    "Stichwörter mit Komma trennen. Ein Tagesordnungspunkt passt, wenn sein Titel eines davon enthält.",
+  "e.g. Bundestag · Digital": "z. B. Bundestag · Digital",
+  "Upcoming matches": "Kommende Treffer",
+  "Checking the Bundestag plan…": "Ablaufplan des Bundestags wird geprüft…",
+  "No agenda item in the published plan matches yet. The subscription keeps checking when new sitting weeks are published.":
+    "Im veröffentlichten Plan passt noch kein Tagesordnungspunkt. Das Abo prüft weiter, sobald neue Sitzungswochen veröffentlicht werden.",
+  "{value0}. sitting": "{value0}. Sitzung",
+  Subscribe: "Abonnieren",
+  "Topic subscriptions": "Themen-Abos",
+  "The subscriptions could not be loaded.":
+    "Die Abos konnten nicht geladen werden.",
+  "Each subscription schedules a capture of the matching agenda items for every upcoming Bundestag sitting. Create one from the topics of a Bundestag session.":
+    "Jedes Abo plant für jede kommende Bundestagssitzung eine Aufnahme der passenden Tagesordnungspunkte. Neue Abos legst du in der Themenliste einer Bundestagssitzung an.",
+  "No subscriptions yet. Open a Bundestag session and choose “Subscribe to topics” in its topic list.":
+    "Noch keine Abos. Öffne eine Bundestagssitzung und wähle in der Themenliste „Themen abonnieren“.",
+  "Subscription active": "Abo aktiv",
+  "Delete subscription": "Abo löschen",
+  "Paused. No new captures are scheduled.":
+    "Pausiert. Es werden keine neuen Aufnahmen geplant.",
+  "Last checked {value0}": "Zuletzt geprüft {value0}",
+  "Not checked yet": "Noch nicht geprüft",
+  "Open session": "Sitzung öffnen",
+  "Session deleted": "Sitzung gelöscht",
+  "Summary only": "Nur Zusammenfassung",
+  "With transcript": "Mit Transkript",
+  "This link is incomplete. Ask for a new read-only link.":
+    "Dieser Link ist unvollständig. Bitte um einen neuen Link zum Mitlesen.",
+  "Read-only view": "Nur zum Mitlesen",
+  "The stream has been interrupted since {value0}. The transcript continues when it is back.":
+    "Der Stream ist seit {value0} unterbrochen. Das Transkript geht weiter, sobald er zurück ist.",
+  "Follow live": "Live folgen",
+  "The capture starts {value0}.": "Die Aufnahme beginnt {value0}.",
+  "The transcript appears here as soon as someone speaks.":
+    "Das Transkript erscheint hier, sobald jemand spricht.",
+  "Agenda items": "Tagesordnungspunkte",
+  "Not recorded": "Nicht aufgenommen",
+  "Running now": "Läuft gerade",
+  "Finished · summary available": "Beendet · Zusammenfassung verfügbar",
+  "planned {value0}": "geplant {value0}",
+  "Connection problem, retrying…": "Verbindungsproblem, neuer Versuch…",
+  "Read-only link": "Link zum Mitlesen",
+  "The link could not be loaded.": "Der Link konnte nicht geladen werden.",
+  "The link could not be created.": "Der Link konnte nicht erstellt werden.",
+  "The link could not be turned off.":
+    "Der Link konnte nicht deaktiviert werden.",
+  "Anyone with this link can follow the transcript, the speakers and the agenda items live, without an account. They cannot change anything.":
+    "Wer diesen Link hat, kann Transkript, Sprecher und Tagesordnungspunkte live mitlesen – ohne Konto. Ändern kann man nichts.",
+  "Created {value0}": "Erstellt {value0}",
+  "There is no read-only link for this session yet.":
+    "Für diese Sitzung gibt es noch keinen Link zum Mitlesen.",
+  "Turn off": "Deaktivieren",
+  "New link": "Neuer Link",
+  "Create link": "Link erstellen",
+  "Stream interrupted since {value0}": "Stream unterbrochen seit {value0}",
+  "JustAI keeps reconnecting. If the stream does not come back within 15 minutes, the capture ends.":
+    "JustAI verbindet sich immer wieder neu. Kommt der Stream nicht innerhalb von 15 Minuten zurück, endet die Aufnahme.",
+  "Capture failed": "Aufnahme fehlgeschlagen",
+  "The stream could not be captured.":
+    "Der Stream konnte nicht aufgenommen werden.",
+  "About {value0} minutes are missing from the transcript where the stream was down.":
+    "Wo der Stream weg war, fehlen im Transkript etwa {value0} Minuten.",
+  "The stream dropped once": "Der Stream war einmal unterbrochen",
+  "The stream dropped {value0} times":
+    "Der Stream war {value0}-mal unterbrochen",
+  "Stream interrupted": "Stream unterbrochen",
+  "Ended early": "Vorzeitig beendet",
+  "Dropped once": "1× unterbrochen",
+  "Dropped {value0} times": "{value0}× unterbrochen",
+  "Capture stopped: the stream did not come back within {value0} minutes.":
+    "Aufnahme beendet: Der Stream kam nicht innerhalb von {value0} Minuten zurück.",
+  "Capture stopped: the livestream page could not be resolved.":
+    "Aufnahme beendet: Die Livestream-Seite konnte nicht aufgelöst werden.",
+  "The Bundestag plan could not be loaded.":
+    "Der Ablaufplan des Bundestags konnte nicht geladen werden.",
 } as const

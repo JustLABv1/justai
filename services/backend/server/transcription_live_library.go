@@ -54,12 +54,12 @@ func (a *App) listLiveTranscriptionLibrary(c *gin.Context) {
 		rows, e := a.DB.QueryContext(c, base+`SELECT id,title,state,stage,language,
  CASE WHEN started_at IS NOT NULL AND ended_at IS NOT NULL THEN GREATEST(0,EXTRACT(EPOCH FROM (ended_at-started_at))*1000)::bigint ELSE 0 END,
  EXISTS(SELECT 1 FROM transcription_insights i WHERE i.session_id=recordings.id AND i.status='completed'),created_at,updated_at,done_at,
- COALESCE(src.kind,''),COALESCE(src.name,''),
+ COALESCE(src.kind,''),COALESCE(src.name,''),COALESCE(src.stream_status,''),COALESCE(src.end_reason,''),COALESCE(src.outage_count,0),
  (SELECT MIN(st.scheduled_start_at) FROM transcription_stream_sources st JOIN transcription_sources ss ON ss.id=st.source_id WHERE ss.session_id=recordings.id AND st.status IN ('scheduled','watching')),
  (SELECT COUNT(*) FROM transcription_topics tp WHERE tp.session_id=recordings.id AND (st_scope.scope<>'topics' OR tp.starred)),
  (SELECT COUNT(*) FROM transcription_topics tp WHERE tp.session_id=recordings.id AND tp.status='done' AND tp.detected_by<>'missed' AND (st_scope.scope<>'topics' OR tp.starred))
  FROM recordings
- LEFT JOIN LATERAL (SELECT kind,name FROM transcription_sources WHERE session_id=recordings.id ORDER BY created_at LIMIT 1) src ON TRUE
+ LEFT JOIN LATERAL (SELECT s2.kind,s2.name,st.status stream_status,st.end_reason,st.outage_count FROM transcription_sources s2 LEFT JOIN transcription_stream_sources st ON st.source_id=s2.id WHERE s2.session_id=recordings.id ORDER BY s2.created_at LIMIT 1) src ON TRUE
  LEFT JOIN LATERAL (SELECT COALESCE(MAX(st.capture_scope),'all') scope FROM transcription_stream_sources st JOIN transcription_sources ss ON ss.id=st.source_id WHERE ss.session_id=recordings.id) st_scope ON TRUE WHERE TRUE`+condition+` ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`, principal.UserID, org, pattern, size, (page-1)*size)
 		if e != nil {
 			writeError(c, 500, e)
@@ -68,7 +68,7 @@ func (a *App) listLiveTranscriptionLibrary(c *gin.Context) {
 		defer rows.Close()
 		for rows.Next() {
 			var item videoTranscriptionLibraryItem
-			if e = rows.Scan(&item.ID, &item.Title, &item.Status, &item.Stage, &item.Language, &item.DurationMs, &item.HasSummary, &item.CreatedAt, &item.UpdatedAt, &item.DoneAt, &item.SourceKind, &item.SourceName, &item.ScheduledStartAt, &item.TopicsTotal, &item.TopicsDone); e != nil {
+			if e = rows.Scan(&item.ID, &item.Title, &item.Status, &item.Stage, &item.Language, &item.DurationMs, &item.HasSummary, &item.CreatedAt, &item.UpdatedAt, &item.DoneAt, &item.SourceKind, &item.SourceName, &item.StreamStatus, &item.StreamEndReason, &item.OutageCount, &item.ScheduledStartAt, &item.TopicsTotal, &item.TopicsDone); e != nil {
 				writeError(c, 500, e)
 				return
 			}

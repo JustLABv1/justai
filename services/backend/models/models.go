@@ -478,6 +478,12 @@ type TranscriptionSource struct {
 	// Alert is a human-readable heads-up about schedule changes or a missed capture.
 	Alert       string  `json:"alert"`
 	SignalLevel float64 `json:"signalLevel"`
+	// Stream outages: InterruptedAt is set while a connected capture reconnects;
+	// EndReason is "aborted" when the capture ended because the stream did not come back.
+	InterruptedAt *time.Time `json:"interruptedAt,omitempty"`
+	OutageCount   int        `json:"outageCount,omitempty"`
+	OutageSeconds int        `json:"outageSeconds,omitempty"`
+	EndReason     string     `json:"endReason,omitempty"`
 }
 
 type TranscriptionStreamSource struct {

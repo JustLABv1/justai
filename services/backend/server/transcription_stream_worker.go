@@ -36,6 +36,9 @@ func (m *TranscriptionManager) streamSourceSchedulerLoop(ctx context.Context) {
 			m.startConfiguredStreamSources(ctx)
 			m.refreshFollowedPlans(ctx)
 			m.refreshTopicPlans(ctx)
+			if m.app != nil {
+				m.app.runTopicSubscriptionsSoon(false)
+			}
 		}
 	}
 }
@@ -283,7 +286,7 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 			m.markSource(sessionID, sourceID, "disconnected")
 			m.setStreamStatus(sessionID, sourceID, "reconnecting", redactTranscriptionStreamError(openErr, streamURL), true)
 			if !time.Now().Before(reconnectDeadline) {
-				m.finishLiveStream(sessionID, sourceID, "stream was unavailable for the reconnect grace period")
+				m.abortLiveStream(sessionID, sourceID, "stream was unavailable for the reconnect grace period", reconnectGraceSeconds)
 				return errTranscriptionStreamStopped
 			}
 			if err := waitTranscriptionStreamReconnect(ctx, m.Config.Transcription.LiveStreamReconnectSeconds); err != nil {
@@ -296,6 +299,7 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 			stream.Close()
 			m.setStreamStatus(sessionID, sourceID, "reconnecting", redactTranscriptionStreamError(resolveErr, streamURL), true)
 			if !time.Now().Before(reconnectDeadline) {
+				m.setStreamAlert(sessionID, sourceID, "capture_aborted", "Capture stopped: the livestream page could not be resolved.")
 				m.setStreamStatus(sessionID, sourceID, "failed", "livestream page could not be resolved at capture time", false)
 				return resolveErr
 			}
@@ -335,7 +339,7 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 		m.markSource(sessionID, sourceID, "disconnected")
 		m.setStreamStatus(sessionID, sourceID, "reconnecting", redactTranscriptionStreamError(attemptErr, streamURL), true)
 		if !time.Now().Before(reconnectDeadline) {
-			m.finishLiveStream(sessionID, sourceID, "stream did not recover within the reconnect grace period")
+			m.abortLiveStream(sessionID, sourceID, "stream did not recover within the reconnect grace period", reconnectGraceSeconds)
 			return errTranscriptionStreamStopped
 		}
 		if err := waitTranscriptionStreamReconnect(ctx, m.Config.Transcription.LiveStreamReconnectSeconds); err != nil {
@@ -391,6 +395,7 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				continue
 			}
 			m.broadcast(sessionID, "transcription.final", ginData{"sourceId": sourceID, "segment": segment})
+			m.observeSpeakers(persistCtx, sessionID, sourceID, segment.ID, textValue)
 			m.observeTopics(persistCtx, sessionID, sourceID, textValue, startOffset)
 		}
 		eventsDone <- eventErr
@@ -544,13 +549,21 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 }
 
 func (m *TranscriptionManager) finishLiveStream(sessionID, sourceID uuid.UUID, reason string) {
+	m.finishLiveStreamWith(sessionID, sourceID, reason, "")
+}
+
+// finishLiveStreamWith stops a capture; endReason "aborted" marks one that ended because
+// the stream failed rather than as planned.
+func (m *TranscriptionManager) finishLiveStreamWith(sessionID, sourceID uuid.UUID, reason, endReason string) {
 	now := time.Now().UTC()
 	m.finishTopicsAtStreamEnd(sessionID, sourceID)
-	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = 'stopped', last_error = '', updated_at = $2 WHERE source_id = $1`, sourceID, now)
+	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = 'stopped', last_error = '', end_reason = $3,
+		outage_seconds = outage_seconds + CASE WHEN interrupted_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM $2 - interrupted_at))::int ELSE 0 END,
+		interrupted_at = NULL, updated_at = $2 WHERE source_id = $1`, sourceID, now, endReason)
 	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = $2 WHERE id = $1`, sourceID, now)
 	result, _ := m.DB.Exec(`UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status IN ('waiting', 'live', 'paused') AND NOT EXISTS (SELECT 1 FROM transcription_sources other WHERE other.session_id = $1 AND other.id <> $3 AND other.status <> 'stopped')`, sessionID, now, sourceID)
 	m.markSource(sessionID, sourceID, "stopped")
-	m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "status": "stopped", "reason": reason})
+	m.broadcastStreamState(sessionID, sourceID, ginData{"reason": reason})
 	if result != nil {
 		completed, _ := result.RowsAffected()
 		if completed > 0 {
@@ -583,18 +596,41 @@ func (m *TranscriptionManager) liveStreamSessionState(ctx context.Context, sessi
 }
 
 func (m *TranscriptionManager) setStreamStatus(sessionID, sourceID uuid.UUID, status, lastError string, incrementReconnect bool) {
-	if incrementReconnect {
-		_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = $2, reconnect_count = LEAST(reconnect_count + 1, 2147480000), last_error = $3, updated_at = now() WHERE source_id = $1 AND (status <> 'stopped' OR $2 = 'stopped')`, sourceID, status, strings.TrimSpace(lastError))
-	} else {
-		_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = $2, last_error = $3, last_seen_at = CASE WHEN $2 = 'connected' THEN now() ELSE last_seen_at END, updated_at = now() WHERE source_id = $1 AND (status <> 'stopped' OR $2 = 'stopped')`, sourceID, status, strings.TrimSpace(lastError))
+	// An outage starts when a connected capture begins to reconnect and ends when it is
+	// connected again; the total tells the user where the transcript has gaps.
+	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = $2, last_error = $3,
+		reconnect_count = CASE WHEN $4 THEN LEAST(reconnect_count + 1, 2147480000) ELSE reconnect_count END,
+		last_seen_at = CASE WHEN $2 = 'connected' THEN now() ELSE last_seen_at END,
+		outage_count = outage_count + CASE WHEN $2 = 'reconnecting' AND interrupted_at IS NULL AND status = 'connected' THEN 1 ELSE 0 END,
+		outage_seconds = outage_seconds + CASE WHEN $2 IN ('connected', 'stopped', 'failed') AND interrupted_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM now() - interrupted_at))::int ELSE 0 END,
+		interrupted_at = CASE WHEN $2 = 'reconnecting' THEN COALESCE(interrupted_at, CASE WHEN status = 'connected' THEN now() END)
+			WHEN $2 IN ('connected', 'stopped', 'failed', 'scheduled', 'watching') THEN NULL ELSE interrupted_at END,
+		updated_at = now()
+		WHERE source_id = $1 AND (status <> 'stopped' OR $2 = 'stopped')`, sourceID, status, strings.TrimSpace(lastError), incrementReconnect)
+	m.broadcastStreamState(sessionID, sourceID, nil)
+}
+
+// broadcastStreamState sends the stored transport state of a stream source, merged with extra.
+func (m *TranscriptionManager) broadcastStreamState(sessionID, sourceID uuid.UUID, extra ginData) {
+	var reconnectCount, outageCount, outageSeconds int
+	var lastSeenAt, interruptedAt *time.Time
+	var currentStatus, currentError, endReason string
+	if err := m.DB.QueryRow(`SELECT status, reconnect_count, last_seen_at, last_error, interrupted_at, outage_count, outage_seconds, end_reason FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&currentStatus, &reconnectCount, &lastSeenAt, &currentError, &interruptedAt, &outageCount, &outageSeconds, &endReason); err != nil {
+		return
 	}
-	var reconnectCount int
-	var lastSeenAt *time.Time
-	var currentStatus string
-	var currentError string
-	if err := m.DB.QueryRow(`SELECT status, reconnect_count, last_seen_at, last_error FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&currentStatus, &reconnectCount, &lastSeenAt, &currentError); err == nil {
-		m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "status": currentStatus, "lastError": currentError, "reconnectCount": reconnectCount, "lastSeenAt": lastSeenAt})
+	data := ginData{"sourceId": sourceID, "status": currentStatus, "lastError": currentError, "reconnectCount": reconnectCount, "lastSeenAt": lastSeenAt,
+		"interruptedAt": interruptedAt, "outageCount": outageCount, "outageSeconds": outageSeconds, "endReason": endReason}
+	for key, value := range extra {
+		data[key] = value
 	}
+	m.broadcast(sessionID, "transcription.stream", data)
+}
+
+// abortLiveStream ends a capture whose stream did not come back, and says so where the
+// user looks: on the session and in the library.
+func (m *TranscriptionManager) abortLiveStream(sessionID, sourceID uuid.UUID, reason string, graceSeconds int) {
+	m.setStreamAlert(sessionID, sourceID, "capture_aborted", fmt.Sprintf("Capture stopped: the stream did not come back within %d minutes.", max(1, graceSeconds/60)))
+	m.finishLiveStreamWith(sessionID, sourceID, reason, "aborted")
 }
 
 func waitTranscriptionStreamReconnect(ctx context.Context, seconds int) error {
