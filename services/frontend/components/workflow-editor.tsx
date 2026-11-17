@@ -161,8 +161,8 @@ export function WorkflowEditor({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1 basis-64">
           <Button
             className="-ms-2 mb-1"
             onClick={onClose}
@@ -179,12 +179,13 @@ export function WorkflowEditor({
             </h2>
             {isNew && <Badge variant="secondary">{t("Draft")}</Badge>}
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {description ||
-              t("Design the flow, configure each step, then validate and run.")}
-          </p>
+          {description && (
+            <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
+              {description}
+            </p>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="ms-auto flex shrink-0 items-center gap-2">
           {canDelete && (
             <Menu>
               <Menu.Trigger
@@ -214,7 +215,9 @@ export function WorkflowEditor({
             variant="outline"
           >
             {validating ? <Spinner /> : <CheckCircle2 />}
-            {validating ? t("Validating…") : t("Validate")}
+            <span className="max-sm:sr-only">
+              {validating ? t("Validating…") : t("Validate")}
+            </span>
           </Button>
           <Button
             disabled={disabled || saving}
@@ -223,7 +226,9 @@ export function WorkflowEditor({
             variant="outline"
           >
             {saving ? <Spinner /> : <Save />}
-            {saving ? t("Saving…") : t("Save")}
+            <span className="max-sm:sr-only">
+              {saving ? t("Saving…") : t("Save")}
+            </span>
           </Button>
           <Button disabled={disabled} onClick={onRun} type="button">
             <Play />
@@ -259,8 +264,8 @@ export function WorkflowEditor({
 
       <Workbench
         compactBelow={640}
-        inspectorWidth={440}
-        className="h-[max(36rem,calc(100dvh-14rem))]"
+        inspectorWidth={380}
+        className="h-[max(32rem,calc(100dvh-11rem))]"
       >
         <InspectorAutoOpen
           selectedId={nodes.find((node) => node.selected)?.id ?? ""}
@@ -283,14 +288,17 @@ export function WorkflowEditor({
             </Toolbar.Button>
             <Toolbar.Separator />
             <FocusButton />
-            <Workbench.InspectorTrigger className="w-auto gap-1.5 px-3 text-sm font-medium">
+            <Workbench.InspectorTrigger
+              aria-label={t("Open inspector")}
+              className="w-auto gap-1.5 px-3 text-sm font-medium"
+            >
               <SlidersHorizontal />
               {t("Inspector")}
             </Workbench.InspectorTrigger>
           </Toolbar>
         </Workbench.Bar>
 
-        <Workbench.Canvas className="p-0!">
+        <Workbench.Canvas className="bg-none! p-0!">
           <div className="absolute inset-0">
             <Flow
               className="h-full w-full rounded-none border-0 bg-transparent"
@@ -357,7 +365,16 @@ export function WorkflowEditor({
                   <Flow.Handle id="out" position="bottom" />
                 </Flow.Node>
               ))}
-              <Flow.Controls position="bottom-left" />
+              <Flow.Controls
+                labels={{
+                  group: t("Canvas controls"),
+                  zoomIn: t("Zoom in"),
+                  zoomOut: t("Zoom out"),
+                  fit: t("Fit everything in view"),
+                  lock: t("Lock the canvas"),
+                }}
+                position="bottom-left"
+              />
             </Flow>
           </div>
         </Workbench.Canvas>
@@ -502,7 +519,16 @@ export function WorkflowRunGraph({
           <Flow.Handle id="out" position="bottom" />
         </Flow.Node>
       ))}
-      <Flow.Controls position="bottom-left" />
+      <Flow.Controls
+        labels={{
+          group: t("Canvas controls"),
+          zoomIn: t("Zoom in"),
+          zoomOut: t("Zoom out"),
+          fit: t("Fit everything in view"),
+          lock: t("Lock the canvas"),
+        }}
+        position="bottom-left"
+      />
     </Flow>
   )
 }

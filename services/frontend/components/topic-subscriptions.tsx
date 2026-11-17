@@ -1,6 +1,7 @@
 "use client"
 
-import { BellPlus, ListChecks, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
+import { TopicIcon, TopicSubscribeIcon } from "@/components/topic-icons"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 
@@ -105,7 +106,7 @@ export function TopicSubscriptionButton({ sessionId }: { sessionId: string }) {
   return (
     <>
       <Button onClick={() => setOpen(true)} size="sm" variant="outline">
-        <BellPlus data-icon="inline-start" /> {t("Subscribe to topics")}
+        <TopicSubscribeIcon data-icon="inline-start" /> {t("Subscribe to topics")}
       </Button>
       {open ? (
         <TopicSubscriptionDialog
@@ -270,7 +271,7 @@ function TopicSubscriptionDialog({
                 {saving ? (
                   <Spinner data-icon="inline-start" />
                 ) : (
-                  <BellPlus data-icon="inline-start" />
+                  <TopicSubscribeIcon data-icon="inline-start" />
                 )}
                 {t("Subscribe")}
               </Button>
@@ -289,7 +290,7 @@ export function TopicSubscriptionsButton() {
   return (
     <>
       <Button onClick={() => setOpen(true)} variant="outline">
-        <ListChecks data-icon="inline-start" /> {t("Topic subscriptions")}
+        <TopicIcon data-icon="inline-start" /> {t("Topic subscriptions")}
       </Button>
       {open ? (
         <TopicSubscriptionsDialog onClose={() => setOpen(false)} />
