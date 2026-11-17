@@ -16,6 +16,7 @@ import {
 
 import { useTranslations } from "@/components/locale-provider"
 import { Alert } from "@/components/panelui/alert"
+import { AgentAvatar } from "@/components/agent-avatar"
 import { Avatar } from "@/components/panelui/avatar"
 import { Badge, type BadgeProps } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
@@ -163,11 +164,7 @@ export function AgentsPanel({
                 <Card as="article" className="h-full" key={agent.id}>
                   <Card.Header>
                     <div className="flex items-start gap-3">
-                      <Avatar
-                        fallback={<Bot aria-hidden="true" />}
-                        name={agent.name}
-                        shape="square"
-                      />
+                      <AgentAvatar seedKey={agent.id} />
                       <div className="min-w-0 flex-1">
                         <Card.Title className="truncate">
                           {agent.name}
