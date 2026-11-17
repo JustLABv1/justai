@@ -6,6 +6,7 @@ import { useAuiState } from "@assistant-ui/react"
 
 import { BrandMark } from "@/components/brand-mark"
 import { Mascot, useIdle } from "@/components/mascot"
+import { useMascotDisabled } from "@/lib/mascot-preference"
 import { cn } from "@/lib/utils"
 
 type ChatBrandMarkProps = {
@@ -16,7 +17,13 @@ type ChatBrandMarkProps = {
 }
 
 /** The JustAI mark doubles as a quiet, contextual chat-status indicator. */
-export function ChatBrandMark({ className, isActive, mascot = false }: ChatBrandMarkProps) {
+export function ChatBrandMark({
+  className,
+  isActive,
+  mascot: wantsMascot = false,
+}: ChatBrandMarkProps) {
+  const mascotDisabled = useMascotDisabled()
+  const mascot = wantsMascot && !mascotDisabled
   const { t } = useTranslations()
 
   const threadIsRunning = useAuiState((state) => state.thread.isRunning)

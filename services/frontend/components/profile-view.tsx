@@ -37,6 +37,9 @@ import type {
   User,
 } from "@/lib/types"
 import { Tabs } from "@/components/panelui/tabs"
+import { Switch } from "@/components/panelui/switch"
+import { setMascotDisabled, useMascotDisabled } from "@/lib/mascot-preference"
+import { setSeasonsDisabled, useSeasonsDisabled } from "@/lib/season-preference"
 import { Frame } from "@/components/panelui/frame"
 import { DayGrid } from "@/components/panelui/day-grid"
 import { buildProfileDays } from "@/lib/profile-day-grid"
@@ -210,6 +213,8 @@ export function ProfileView({
   onUserChange,
 }: ProfileViewProps) {
   const { t, locale, setLocale } = useTranslations()
+  const seasonsDisabled = useSeasonsDisabled()
+  const mascotDisabled = useMascotDisabled()
   const dayFormatter = new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
@@ -713,6 +718,7 @@ export function ProfileView({
         <Tabs.List aria-label={t("Profile sections")}>
           <Tabs.Trigger value="activity">{t("Activity")}</Tabs.Trigger>
           <Tabs.Trigger value="usage">{t("Usage")}</Tabs.Trigger>
+          <Tabs.Trigger value="preferences">{t("Preferences")}</Tabs.Trigger>
           <Tabs.Trigger value="account">{t("Account")}</Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="activity" className="flex flex-col gap-5">
@@ -822,6 +828,50 @@ export function ProfileView({
         </Tabs.Content>
         <Tabs.Content value="usage" className="flex flex-col gap-5">
           <ProfileUsageSection />
+        </Tabs.Content>
+        <Tabs.Content value="preferences" className="flex flex-col gap-5">
+          <Frame>
+            <Frame.Panel>
+              <Frame.Row className="flex-wrap gap-3">
+                <Frame.Content>
+                  <Frame.Title as="p">{t("Seasonal effects")}</Frame.Title>
+                  <Frame.Description>
+                    {t(
+                      "Show seasonal backdrops and weather in the app. Saved in this browser."
+                    )}
+                  </Frame.Description>
+                </Frame.Content>
+                <Frame.Actions>
+                  <Switch
+                    checked={!seasonsDisabled}
+                    label={t("Seasonal effects")}
+                    onCheckedChange={(checked) =>
+                      setSeasonsDisabled(!checked)
+                    }
+                  />
+                </Frame.Actions>
+              </Frame.Row>
+              <Frame.Row className="flex-wrap gap-3">
+                <Frame.Content>
+                  <Frame.Title as="p">{t("Mascot")}</Frame.Title>
+                  <Frame.Description>
+                    {t(
+                      "Show the JustAI ghost in chat, empty states and sign-in. Saved in this browser."
+                    )}
+                  </Frame.Description>
+                </Frame.Content>
+                <Frame.Actions>
+                  <Switch
+                    checked={!mascotDisabled}
+                    label={t("Mascot")}
+                    onCheckedChange={(checked) =>
+                      setMascotDisabled(!checked)
+                    }
+                  />
+                </Frame.Actions>
+              </Frame.Row>
+            </Frame.Panel>
+          </Frame>
         </Tabs.Content>
         <Tabs.Content value="account" className="flex flex-col gap-5">
           <Frame>

@@ -1,8 +1,14 @@
 "use client"
 
 import { BotAvatar } from "bot-avatars"
-import { useEffect, useState, type ComponentProps } from "react"
+import {
+  useEffect,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react"
 
+import { useMascotDisabled } from "@/lib/mascot-preference"
 import { cn } from "@/lib/utils"
 
 type MascotProps = Omit<ComponentProps<typeof BotAvatar>, "type" | "size"> & {
@@ -11,6 +17,8 @@ type MascotProps = Omit<ComponentProps<typeof BotAvatar>, "type" | "size"> & {
   className?: string
   /** Accessible label; omit for a purely decorative mascot. */
   label?: string
+  /** Rendered instead of the mascot when the user has turned it off. */
+  fallback?: ReactNode
 }
 
 /** JustAI's ghost mascot. */
@@ -19,8 +27,11 @@ export function Mascot({
   className,
   label,
   face = "mouth",
+  fallback = null,
   ...props
 }: MascotProps) {
+  const disabled = useMascotDisabled()
+  if (disabled) return <>{fallback}</>
   return (
     <span
       aria-hidden={label ? undefined : true}

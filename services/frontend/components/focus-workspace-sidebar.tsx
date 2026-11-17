@@ -2,7 +2,6 @@
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
-import { setSeasonsDisabled, useSeasonsDisabled } from "@/lib/season-preference"
 import { useMemo, useState, type ComponentType, type SVGProps } from "react"
 import {
   Archive,
@@ -10,7 +9,6 @@ import {
   ChevronRight,
   LogOut,
   MoreHorizontal,
-  Leaf,
   Plus,
   RotateCcw,
   Trash2,
@@ -72,7 +70,6 @@ import {
 import {
   Menu as DropdownMenu,
   MenuContent as DropdownMenuContent,
-  MenuCheckboxItem as DropdownMenuCheckboxItem,
   MenuGroup as DropdownMenuGroup,
   MenuItem as DropdownMenuItem,
   MenuGroupLabel as DropdownMenuLabel,
@@ -246,7 +243,6 @@ export function FocusWorkspaceSidebar({
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const { t } = useTranslations()
-  const seasonsDisabled = useSeasonsDisabled()
 
   const [historyQuery, setHistoryQuery] = useState("")
   const [sessionQuery, setSessionQuery] = useState("")
@@ -708,15 +704,6 @@ export function FocusWorkspaceSidebar({
                 <DropdownMenuSeparator />
                 <LanguageMenu />
                 <ThemeMenu />
-                <DropdownMenuGroup>
-                  <DropdownMenuCheckboxItem
-                    checked={seasonsDisabled}
-                    onCheckedChange={setSeasonsDisabled}
-                  >
-                    <Leaf data-icon="inline-start" />
-                    {t("Disable seasons")}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => onNavigate("profile")}>
                   <UserRound data-icon="inline-start" />

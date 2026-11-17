@@ -5,6 +5,7 @@ import Link from "next/link"
 import { motion, useReducedMotion, type Variants } from "motion/react"
 
 import { Mascot } from "@/components/mascot"
+import { useMascotDisabled } from "@/lib/mascot-preference"
 import { Button } from "@/components/panelui/button"
 import { useOptionalTranslations } from "@/components/locale-provider"
 import { API_URL } from "@/lib/api"
@@ -95,14 +96,22 @@ const signetA =
 const signetB = "M120 52H200V132H152V98H120Z"
 
 function GhostMascot({ still }: { still: boolean }) {
+  const disabled = useMascotDisabled()
   return (
     <motion.g
       animate={still ? undefined : { y: [0, -6, 0] }}
       transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
     >
-      <foreignObject x="108" y="48" width="104" height="104">
-        <Mascot paused={still} size={104} />
-      </foreignObject>
+      {disabled ? (
+        <g transform="translate(100 56) scale(0.4)" fill="currentColor">
+          <path d={signetA} />
+          <path d={signetB} />
+        </g>
+      ) : (
+        <foreignObject x="108" y="48" width="104" height="104">
+          <Mascot paused={still} size={104} />
+        </foreignObject>
+      )}
     </motion.g>
   )
 }
