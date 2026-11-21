@@ -1,5 +1,6 @@
 "use client"
 
+import { TopicIcon } from "@/components/topic-icons"
 import { Mascot } from "@/components/mascot"
 import { TranscriptionDeleteButton } from "@/components/transcription-delete-button"
 import { Spinner } from "@/components/panelui/spinner"
@@ -624,7 +625,7 @@ export function VideoTranscriptionLibrary({
                       <div className="flex flex-col gap-1.5">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span className="flex items-center gap-1.5">
-                            <ListChecks
+                            <TopicIcon
                               aria-hidden="true"
                               className="size-3.5"
                             />

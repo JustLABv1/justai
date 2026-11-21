@@ -166,31 +166,61 @@ export function workflowInputNames(definition: AgentWorkflowDefinition) {
   return [...names]
 }
 
-export function workflowScheduleDescription(schedule: AgentSchedule) {
+type Translate = (
+  message: string,
+  values?: Record<string, string | number>
+) => string
+
+/** English fallback that only fills `{placeholders}`. */
+const english: Translate = (message, values) =>
+  message.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+    values && name in values ? String(values[name]) : placeholder
+  )
+
+export function workflowScheduleDescription(
+  schedule: AgentSchedule,
+  t: Translate = english
+) {
   const kind = schedule.kind || "manual"
-  if (kind === "manual") return "Manual only"
+  if (kind === "manual") return t("Manual only")
   const interval = schedule.interval || 1
   const time = schedule.time || "09:00"
-  const unit = kind === "daily" ? "day" : kind === "weekly" ? "week" : "month"
-  const count = interval === 1 ? unit : `${unit}s`
   if (kind === "weekly") {
-    return `Every ${interval} ${count} on ${weekdayLabel(schedule.weekday)} at ${time}`
+    const weekday = t(weekdayLabel(schedule.weekday))
+    return interval === 1
+      ? t("Every week on {weekday} at {time}", { weekday, time })
+      : t("Every {interval} weeks on {weekday} at {time}", {
+          interval,
+          weekday,
+          time,
+        })
   }
   if (kind === "monthly") {
-    return `Every ${interval} ${count} on day ${schedule.weekday || 1} at ${time}`
+    const day = schedule.weekday || 1
+    return interval === 1
+      ? t("Every month on day {day} at {time}", { day, time })
+      : t("Every {interval} months on day {day} at {time}", {
+          interval,
+          day,
+          time,
+        })
   }
-  return `Every ${interval} ${count} at ${time}`
+  return interval === 1
+    ? t("Every day at {time}", { time })
+    : t("Every {interval} days at {time}", { interval, time })
 }
 
 export function formatWorkflowNextRun(
   value: string | null | undefined,
-  timezone: string
+  timezone: string,
+  t: Translate = english,
+  locale?: string
 ) {
-  if (!value) return "Save this workflow to calculate its next run."
+  if (!value) return t("Save this workflow to calculate its next run.")
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(locale, {
       dateStyle: "medium",
       timeStyle: "short",
       timeZone: timezone,

@@ -422,17 +422,49 @@ func (e *AgentEngine) discoverNativeMCPTools(ctx context.Context, userID, organi
 	return definitions, bindings, nil
 }
 
+// agentMCPToolSelected reports whether a node may use a server's tool.
+// Plain tool names filter every granted server. Names qualified with a server
+// ID ("<id>:<tool>") only narrow that server, so a server with no qualified
+// entries keeps all of its tools.
 func agentMCPToolSelected(selected []string, serverID uuid.UUID, toolName string) bool {
 	if len(selected) == 0 {
 		return true
 	}
+	prefix := serverID.String()
+	hasPlain, serverNarrowed := false, false
 	for _, value := range selected {
 		value = strings.TrimSpace(value)
-		if value == toolName || value == serverID.String()+":"+toolName || value == serverID.String()+"/"+toolName || value == serverID.String()+"."+toolName {
+		if value == "" {
+			continue
+		}
+		if value == prefix+":"+toolName || value == prefix+"/"+toolName || value == prefix+"."+toolName {
+			return true
+		}
+		if strings.HasPrefix(value, prefix+":") || strings.HasPrefix(value, prefix+"/") || strings.HasPrefix(value, prefix+".") {
+			serverNarrowed = true
+			continue
+		}
+		if agentMCPToolQualified(value) {
+			continue
+		}
+		hasPlain = true
+		if value == toolName {
 			return true
 		}
 	}
-	return false
+	return !hasPlain && !serverNarrowed
+}
+
+// agentMCPToolQualified reports whether a selection names a server by ID.
+func agentMCPToolQualified(value string) bool {
+	if len(value) <= 37 {
+		return false
+	}
+	if separator := value[36]; separator != ':' && separator != '/' && separator != '.' {
+		return false
+	}
+	_, err := uuid.Parse(value[:36])
+	return err == nil
 }
 
 func (e *AgentEngine) nativeScopeRequiresApproval(ctx context.Context, userID, organizationID uuid.UUID, scope models.AgentContextScope) bool {

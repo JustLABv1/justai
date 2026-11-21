@@ -1215,6 +1215,8 @@ export interface FlowControlsProps extends Omit<ComponentProps<'div'>, 'children
   step?: number;
   /** Which corner of the canvas they sit in. */
   position?: FlowCorner;
+  /** Accessible names for the group and its buttons, for a translated UI. */
+  labels?: Partial<Record<'group' | 'zoomIn' | 'zoomOut' | 'fit' | 'lock', string>>;
 }
 
 const icon = (path: ReactNode) => (
@@ -1238,6 +1240,7 @@ function FlowControls({
   lock = true,
   step = 1.3,
   position = 'bottom-right',
+  labels,
   className,
   ...props
 }: FlowControlsProps) {
@@ -1246,26 +1249,26 @@ function FlowControls({
   if (!flow.overlay) return null;
 
   return createPortal(
-    <div role="group" aria-label="Canvas controls" className={slots.controls({ className })} {...props}>
+    <div role="group" aria-label={labels?.group ?? 'Canvas controls'} className={slots.controls({ className })} {...props}>
       {zoom ? (
         <>
-          <button type="button" aria-label="Zoom in" className={slots.control()} onClick={() => flow.zoomBy(step)}>
+          <button type="button" aria-label={labels?.zoomIn ?? 'Zoom in'} className={slots.control()} onClick={() => flow.zoomBy(step)}>
             {icon(<path d="M12 5v14M5 12h14" />)}
           </button>
-          <button type="button" aria-label="Zoom out" className={slots.control()} onClick={() => flow.zoomBy(1 / step)}>
+          <button type="button" aria-label={labels?.zoomOut ?? 'Zoom out'} className={slots.control()} onClick={() => flow.zoomBy(1 / step)}>
             {icon(<path d="M5 12h14" />)}
           </button>
         </>
       ) : null}
       {fit ? (
-        <button type="button" aria-label="Fit everything in view" className={slots.control()} onClick={flow.fit}>
+        <button type="button" aria-label={labels?.fit ?? 'Fit everything in view'} className={slots.control()} onClick={flow.fit}>
           {icon(<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />)}
         </button>
       ) : null}
       {lock ? (
         <button
           type="button"
-          aria-label="Lock the canvas"
+          aria-label={labels?.lock ?? 'Lock the canvas'}
           aria-pressed={flow.locked}
           className={slots.control()}
           onClick={() => flow.setLocked(!flow.locked)}

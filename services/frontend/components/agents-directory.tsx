@@ -3,13 +3,11 @@
 import { useMemo, useState } from "react"
 import {
   CircleAlert,
-  KeyRound,
   MoreHorizontal,
   Link2,
   Plus,
   RefreshCw,
   Search,
-  ShieldCheck,
   Trash2,
 } from "lucide-react"
 
@@ -187,10 +185,6 @@ export function AgentsPanel({
                           <MoreHorizontal />
                         </Menu.Trigger>
                         <Menu.Content align="end">
-                          <Menu.Item onClick={() => onEdit(agent)}>
-                            {t("Configure")}
-                          </Menu.Item>
-                          <Menu.Separator />
                           <Menu.Item
                             onClick={() => onDelete(agent)}
                             variant="destructive"
@@ -205,35 +199,15 @@ export function AgentsPanel({
                   <Card.Content className="flex flex-col gap-3">
                     <div className="flex flex-wrap gap-1.5">
                       <Badge variant={statusBadge(agent.status)} dot>
-                        {statusText(agent.status)}
+                        {t(statusText(agent.status))}
                       </Badge>
                       <Badge variant="outline">
                         {remote ? "A2A" : t("Native")}
                       </Badge>
-                      {remote ? (
-                        agent.credentialConfigured ? (
-                          <Badge variant="outline">
-                            <KeyRound />
-                            {t("Credential saved")}
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive">
-                            {t("Credential missing")}
-                          </Badge>
-                        )
-                      ) : (
-                        <>
-                          <Badge variant="outline">
-                            <ShieldCheck />
-                            {t("JustAI runtime")}
-                          </Badge>
-                          {agent.useMemory && (
-                            <Badge variant="outline">{t("Memory")}</Badge>
-                          )}
-                          {agent.deepContext && (
-                            <Badge variant="outline">{t("Deep context")}</Badge>
-                          )}
-                        </>
+                      {remote && !agent.credentialConfigured && (
+                        <Badge variant="destructive">
+                          {t("Credential missing")}
+                        </Badge>
                       )}
                     </div>
                     {remote && connection?.lastError && (
@@ -246,15 +220,17 @@ export function AgentsPanel({
                         </Alert.Description>
                       </Alert>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      {agent.delegationAgentIds?.length
-                        ? `${t("Can delegate to")} ${agent.delegationAgentIds.length} ${t(
-                            "allowlisted agent"
-                          )}${agent.delegationAgentIds.length === 1 ? "" : "s"}.`
-                        : t("No delegation targets configured.")}
-                    </p>
                   </Card.Content>
-                  <Card.Footer className="justify-end" variant="panel">
+                  <Card.Footer className="justify-between gap-3" variant="panel">
+                    <p className="truncate text-xs text-muted-foreground">
+                      {!agent.delegationAgentIds?.length
+                        ? t("No delegation")
+                        : agent.delegationAgentIds.length === 1
+                          ? t("Delegates to 1 agent")
+                          : t("Delegates to {count} agents", {
+                              count: agent.delegationAgentIds.length,
+                            })}
+                    </p>
                     <Button
                       disabled={disabled}
                       onClick={() => onEdit(agent)}

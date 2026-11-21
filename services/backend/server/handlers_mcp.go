@@ -340,6 +340,10 @@ func (a *App) testMCPServer(c *gin.Context) {
 }
 
 func (a *App) listMCPTools(c *gin.Context) {
+	if c.Query("cached") == "1" {
+		a.listCachedMCPTools(c)
+		return
+	}
 	if err := a.authorizeMCPServerManage(c, c.Param("id")); err != nil {
 		writeError(c, http.StatusForbidden, err)
 		return
@@ -364,6 +368,44 @@ func (a *App) listMCPTools(c *gin.Context) {
 	}
 	_, _ = a.DB.ExecContext(c, `UPDATE mcp_servers SET last_error = NULL, updated_at = now() WHERE id = $1`, serverID)
 	c.JSON(http.StatusOK, gin.H{"tools": tools})
+}
+
+// listCachedMCPTools serves the tools a member may grant, for pickers. It needs
+// only use access and reuses the discovery cache instead of resetting the
+// connection, and it leaves out tools the server's own policy blocks.
+func (a *App) listCachedMCPTools(c *gin.Context) {
+	if err := a.authorizeMCPServer(c, c.Param("id")); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	server, err := a.loadMCPServer(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	serverID := serverIDFromParam(c.Param("id"))
+	tools, cached, err := a.cachedMCPTools(c, serverID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !cached {
+		fresh, refreshErr := a.refreshMCPTools(c, server, serverID)
+		if refreshErr != nil && len(tools) == 0 {
+			writeError(c, http.StatusBadGateway, refreshErr)
+			return
+		}
+		if refreshErr == nil {
+			tools, _ = mcpToolsAfterRefresh(tools, fresh)
+		}
+	}
+	allowed := make([]mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if server.ToolAllowed(tool.Name) {
+			allowed = append(allowed, tool)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"tools": allowed})
 }
 
 func (a *App) listMCPResources(c *gin.Context) {
