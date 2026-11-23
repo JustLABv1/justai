@@ -15,7 +15,7 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/richardlehane/mscfb v1.0.9
-	github.com/signintech/gopdf v0.38.4
+	github.com/signintech/gopdf v0.38.6
 	golang.org/x/crypto v0.59.0
 	golang.org/x/image v0.48.0
 	golang.org/x/net v0.63.0
