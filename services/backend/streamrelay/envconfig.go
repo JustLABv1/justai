@@ -13,7 +13,7 @@ func ParseSources(raw string) (Config, error) {
 		id, u, ok := strings.Cut(strings.TrimSpace(entry), "=")
 		id, u = strings.TrimSpace(id), strings.TrimSpace(u)
 		if !ok || id == "" || u == "" {
-			return Config{}, fmt.Errorf("RELAY_SOURCES entries must look like id=https://host/stream.mp3")
+			return Config{}, fmt.Errorf("RELAY_SOURCES entries must look like id=https://host/stream.mp3 or id=https://host/playlist.m3u8")
 		}
 		if !strings.HasPrefix(u, "https://") {
 			if name, rest, found := strings.Cut(u, "|"); found {

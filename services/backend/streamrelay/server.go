@@ -86,7 +86,7 @@ type Relay struct {
 	log            *slog.Logger
 }
 
-var errBadUpstream = errors.New("upstream must return audio/mpeg with HTTP 200; redirects are forbidden")
+var errBadUpstream = errors.New("upstream must return audio/mpeg or an HLS audio playlist with HTTP 200; redirects are forbidden")
 
 func New(cfg Config, token string) (*Relay, error) { return NewWithTokens(cfg, []string{token}) }
 
@@ -124,7 +124,7 @@ func NewWithTokens(cfg Config, tokens []string) (*Relay, error) {
 	for id, raw := range cfg.Sources {
 		u, err := url.Parse(raw)
 		if !sourceID.MatchString(id) || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
-			return nil, fmt.Errorf("source %q requires a direct HTTPS MP3 URL on port 443 without credentials", id)
+			return nil, fmt.Errorf("source %q requires a direct HTTPS MP3 or HLS URL on port 443 without credentials", id)
 		}
 		if ip := net.ParseIP(u.Hostname()); ip != nil && !publicIP(ip) {
 			return nil, fmt.Errorf("source %q has a forbidden address", id)
@@ -523,11 +523,38 @@ func captureWithClient(ctx context.Context, raw string, emit func([]byte), clien
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 || strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])) != "audio/mpeg" {
+	if resp.StatusCode != 200 {
 		return errBadUpstream
 	}
-	// Only MP3 bytes enter FFmpeg. It cannot open networks, playlists or local files.
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "pipe", "-threads", "1", "-f", "mp3", "-i", "pipe:0", "-map", "0:a:0", "-threads", "1", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	switch {
+	case contentType == "audio/mpeg":
+		return decodePCM(ctx, "mp3", func(feedCtx context.Context, w io.Writer) error {
+			// Unblock a pending body read as soon as decoding stops.
+			stop := context.AfterFunc(feedCtx, func() { _ = resp.Body.Close() })
+			defer stop()
+			_, err := io.Copy(w, resp.Body)
+			return err
+		}, emit, segBytes)
+	case isHLSContentType(contentType):
+		base := resp.Request.URL
+		playlist, err := readPlaylist(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return err
+		}
+		return captureHLS(ctx, client, base, playlist, emit, segBytes)
+	default:
+		return errBadUpstream
+	}
+}
+
+// decodePCM feeds audio bytes of one container format into FFmpeg via stdin.
+// FFmpeg only ever reads the pipe: it cannot open networks, playlists or files.
+func decodePCM(ctx context.Context, format string, feed func(context.Context, io.Writer) error, emit func([]byte), segBytes int) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "pipe", "-threads", "1", "-f", format, "-i", "pipe:0", "-map", "0:a:0", "-threads", "1", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -539,19 +566,27 @@ func captureWithClient(ctx context.Context, raw string, emit func([]byte), clien
 	if err = cmd.Start(); err != nil {
 		return err
 	}
-	copied := make(chan struct{})
-	go func() { defer close(copied); _, _ = io.Copy(input, resp.Body); _ = input.Close() }()
+	feedErr := make(chan error, 1)
+	go func() { feedErr <- feed(ctx, input); _ = input.Close() }()
 	defer func() {
 		cancel()
-		_ = resp.Body.Close()
 		_ = input.Close()
 		_ = output.Close()
 		_ = cmd.Wait()
-		<-copied
+		<-feedErr
 	}()
 	for {
 		buf := make([]byte, segBytes)
 		if _, err = io.ReadFull(output, buf); err != nil {
+			// Prefer the feeder's reason (e.g. a stale playlist) over FFmpeg's EOF.
+			select {
+			case fe := <-feedErr:
+				feedErr <- fe
+				if fe != nil && !errors.Is(fe, io.ErrClosedPipe) {
+					return fe
+				}
+			default:
+			}
 			return err
 		}
 		emit(buf)

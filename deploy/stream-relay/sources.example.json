@@ -1,5 +1,10 @@
 {
   "sources": {
-    "bundestag": "https://c13014-l.i.core.cdn.streamfarm.net/13014bundestag/live/3777parlamentsradio/live_de_128.mp3"
+    "bundestag": "https://c13014-l.i.core.cdn.streamfarm.net/13014bundestag/live/3777parlamentsradio/live_de_128.mp3",
+    "bundestag-hk7": "https://bttv-live-z.r53.cdn.tv1.eu/13014bundestag-hk7/live_or_128/playlist_dvr.m3u8"
+  },
+  "names": {
+    "bundestag": "Bundestag Plenum (Radio)",
+    "bundestag-hk7": "Bundestag Kanal 7"
   }
 }

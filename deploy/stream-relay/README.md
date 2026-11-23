@@ -7,10 +7,24 @@ is a completed WAV segment with an explicit `Content-Length` (five seconds by de
 through the corporate proxy. Expect roughly one segment length plus a second of extra latency (5–6 s by default) plus
 proxy inspection, transport and transcription time.
 
-This first version supports **direct HTTPS MP3 sources with `audio/mpeg`**, including
-the parliamentary radio URL in `sources.example.json`. It deliberately rejects
-redirects, webpages, HLS, DASH, RTMP and arbitrary user-supplied upstream URLs.
-The existing direct capture mode remains available for those other protocols.
+The relay supports two kinds of operator-configured HTTPS sources:
+
+- **Direct MP3 streams** answering with `audio/mpeg`, such as the parliamentary radio
+  (plenary sessions only) in `sources.example.json`.
+- **HLS playlists** (`application/vnd.apple.mpegurl`), master or media playlist, with
+  packed AAC/MP3 or MPEG-TS segments, such as the Bundestag TV channels. The relay
+  fetches playlists and segments itself, starts three segments behind the live edge
+  and feeds only segment bytes to FFmpeg. Every playlist and segment URL must be
+  HTTPS on port 443 without credentials, and connections to non-public addresses are
+  refused. Encrypted HLS, fMP4 (`EXT-X-MAP`) and byte-range playlists are rejected.
+
+It deliberately rejects redirects, webpages, DASH, RTMP and arbitrary user-supplied
+upstream URLs. The existing direct capture mode remains available for those.
+
+Bundestag TV channel *N* has its audio at
+`https://bttv-live-z.r53.cdn.tv1.eu/13014bundestag-hkN/live_or_128/playlist_dvr.m3u8`.
+The parliamentary radio carries only plenary sessions; committee hearings run on the
+other channels (the schedule at bundestag.de/mediathek/live names the channel).
 
 ## Quick start (official image, environment variables only)
 
@@ -20,7 +34,7 @@ need only `compose.env.yaml` from this directory:
 
 ```sh
 cat > .env <<EOT
-RELAY_SOURCES=bundestag=https://c13014-l.i.core.cdn.streamfarm.net/13014bundestag/live/3777parlamentsradio/live_de_128.mp3
+RELAY_SOURCES=bundestag=https://c13014-l.i.core.cdn.streamfarm.net/13014bundestag/live/3777parlamentsradio/live_de_128.mp3,bundestag-hk7=Bundestag Kanal 7|https://bttv-live-z.r53.cdn.tv1.eu/13014bundestag-hk7/live_or_128/playlist_dvr.m3u8
 RELAY_TOKEN=$(openssl rand -hex 32)
 RELAY_IMAGE=ghcr.io/justlabv1/justai:relay-latest   # pin a version in production
 EOT
