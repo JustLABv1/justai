@@ -5051,6 +5051,24 @@ export const de = {
   Sitting: "Sitzung",
   "Choose a sitting": "Sitzung auswählen",
   "Channel {value0}": "Kanal {value0}",
+  Bundestag: "Bundestag",
+  "Channels {value0} · matched to the sitting":
+    "Kanäle {value0} · passend zur Sitzung",
+  "JustAI picks the broadcast channel from the sitting you choose in the next step.":
+    "JustAI wählt den Übertragungskanal anhand der Sitzung, die du im nächsten Schritt auswählst.",
+  "On air now: {value0} (channel {value1}).":
+    "Gerade läuft: {value0} (Kanal {value1}).",
+  "Several sittings are on air now: {value0}.":
+    "Gerade laufen mehrere Sitzungen: {value0}.",
+  "No sitting is on air right now.": "Gerade läuft keine Sitzung.",
+  "JustAI records {value0} on channel {value1}, the sitting on air now.":
+    "JustAI nimmt {value0} auf Kanal {value1} auf, die Sitzung, die gerade läuft.",
+  "Several sittings are on air now, so JustAI cannot tell which one you mean. Choose “Bundestag sitting” to pick one.":
+    "Gerade laufen mehrere Sitzungen, JustAI weiß daher nicht, welche gemeint ist. Wähle „Bundestagssitzung“, um eine auszuwählen.",
+  "No sitting is on air right now. Choose “Bundestag sitting” to record one when it starts.":
+    "Gerade läuft keine Sitzung. Wähle „Bundestagssitzung“, um eine ab ihrem Beginn aufzunehmen.",
+  "{value0} is on air on channel {value1}, which the stream relay does not provide. Add the relay source bundestag-hk{value1} or choose a sitting.":
+    "{value0} läuft auf Kanal {value1}, den das Stream-Relay nicht anbietet. Richte die Relay-Quelle bundestag-hk{value1} ein oder wähle eine Sitzung.",
   "not on this relay": "nicht im Relay",
   "This sitting is broadcast on channel {value0}, which the stream relay does not provide. Add the relay source bundestag-hk{value0} or choose another sitting.":
     "Diese Sitzung läuft auf Kanal {value0}, den das Stream-Relay nicht anbietet. Richte die Relay-Quelle bundestag-hk{value0} ein oder wähle eine andere Sitzung.",

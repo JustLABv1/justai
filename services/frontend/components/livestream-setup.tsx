@@ -59,6 +59,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { api } from "@/lib/api"
+import {
+  type RelayChoice,
+  type RelaySource,
+  relayChoiceForURL,
+  relayChoices,
+  runningPlanSession,
+  sessionsOnAir,
+} from "@/lib/bundestag-sources"
 import type { StreamPlanSession, TranscriptionSource } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -410,7 +418,15 @@ export function streamScheduleProblem(
   plan: StreamPlanSession[],
   t: Translate
 ) {
-  if (schedule.when === "now") return ""
+  if (schedule.when === "now") {
+    const running = runningPlanSession(plan)
+    return running && planSessionUnavailable(running)
+      ? t(
+          "{value0} is on air on channel {value1}, which the stream relay does not provide. Add the relay source bundestag-hk{value1} or choose a sitting.",
+          { value0: running.title, value1: running.channel ?? 0 }
+        )
+      : ""
+  }
   if (schedule.when === "sitting") {
     const session = plan.find((item) => item.key === schedule.planKey)
     if (!session) return t("Choose a sitting.")
@@ -479,6 +495,60 @@ export function streamSchedulePayload(schedule: StreamSchedule) {
   }
 }
 
+/**
+ * What the Bundestag source captures: the channel follows the chosen sitting, and
+ * "Start now" takes the session on air.
+ */
+export function describeBundestagChannels(
+  plan: StreamPlanSession[],
+  t: Translate
+) {
+  const parts = [
+    t(
+      "JustAI picks the broadcast channel from the sitting you choose in the next step."
+    ),
+  ]
+  const running = runningPlanSession(plan)
+  if (running?.channel)
+    parts.push(
+      t("On air now: {value0} (channel {value1}).", {
+        value0: running.title,
+        value1: running.channel,
+      })
+    )
+  else if (sessionsOnAir(plan).length > 1)
+    parts.push(
+      t("Several sittings are on air now: {value0}.", {
+        value0: sessionsOnAir(plan)
+          .map((session) => `${session.title} (${session.channel})`)
+          .join(", "),
+      })
+    )
+  else parts.push(t("No sitting is on air right now."))
+  return parts.join(" ")
+}
+
+/** What "Start now" records on a Bundestag source; "" for other sources. */
+function describeImmediateBundestagCapture(
+  plan: StreamPlanSession[],
+  t: Translate
+) {
+  if (plan.length === 0) return ""
+  const running = runningPlanSession(plan)
+  if (running?.channel)
+    return t(
+      "JustAI records {value0} on channel {value1}, the sitting on air now.",
+      { value0: running.title, value1: running.channel }
+    )
+  if (sessionsOnAir(plan).length > 1)
+    return t(
+      "Several sittings are on air now, so JustAI cannot tell which one you mean. Choose “Bundestag sitting” to pick one."
+    )
+  return t(
+    "No sitting is on air right now. Choose “Bundestag sitting” to record one when it starts."
+  )
+}
+
 /** One or two sentences that say what JustAI is going to do. */
 export function describeStreamSchedule(
   schedule: StreamSchedule,
@@ -486,7 +556,13 @@ export function describeStreamSchedule(
   t: Translate,
   locale: string
 ) {
-  if (schedule.when === "now") return t("Capture starts right away.")
+  if (schedule.when === "now")
+    return [
+      t("Capture starts right away."),
+      describeImmediateBundestagCapture(plan, t),
+    ]
+      .filter(Boolean)
+      .join(" ")
   if (streamTopicsOnly(schedule))
     return t(
       schedule.topicKeys.length === 1
@@ -545,13 +621,7 @@ export function describeStreamSchedule(
 // Which stream
 // ---------------------------------------------------------------------------
 
-export type RelaySource = {
-  id: string
-  name: string
-  url: string
-  relay: string
-  status: "live" | "idle" | "offline"
-}
+export type { RelaySource }
 
 /** Relay IDs ("bundestag") make poor names: capitalise them at least. */
 export function relaySourceDisplayName(source: RelaySource) {
@@ -571,7 +641,8 @@ export function StreamSourcePicker({
 }: {
   url: string
   onURLChange: (url: string) => void
-  onRelayPick: (source: RelaySource) => void
+  /** name is the display name of the picked card. */
+  onRelayPick: (source: RelaySource, name: string) => void
 }) {
   const { t } = useTranslations()
   const [relays, setRelays] = useState<{
@@ -609,9 +680,14 @@ export function StreamSourcePicker({
   }, [])
 
   const sources = relays?.sources ?? []
-  const picked = sources.find((source) => source.url === url.trim())
+  const choices = relayChoices(sources)
+  const picked = relayChoiceForURL(choices, url)
   const showLink = sources.length === 0 || ownLink || (!picked && Boolean(url))
   const multipleRelays = new Set(sources.map((source) => source.relay)).size > 1
+  const choiceName = (choice: RelayChoice) =>
+    choice.kind === "bundestag"
+      ? t("Bundestag")
+      : relaySourceDisplayName(choice.source)
   const statusLabel = (status: RelaySource["status"]) =>
     status === "live"
       ? t("Live")
@@ -668,48 +744,53 @@ export function StreamSourcePicker({
             if (picked) onURLChange("")
             return
           }
-          const source = sources.find(
-            (item) => `${item.relay}/${item.id}` === value
-          )
-          if (!source) return
+          const choice = choices.find((item) => item.key === value)
+          if (!choice) return
           setOwnLink(false)
-          onRelayPick(source)
+          onRelayPick(choice.source, choiceName(choice))
         }}
-        value={
-          picked ? `${picked.relay}/${picked.id}` : showLink ? "own-link" : ""
-        }
+        value={picked ? picked.key : showLink ? "own-link" : ""}
       >
-        {sources.map((source) => (
-          <ChoiceCards.Item
-            key={`${source.relay}/${source.id}`}
-            value={`${source.relay}/${source.id}`}
-          >
-            <ChoiceCards.Media>
-              <Radio aria-hidden="true" className="size-6" />
-            </ChoiceCards.Media>
-            <ChoiceCards.Label>
-              {multipleRelays
-                ? `${relaySourceDisplayName(source)} · ${source.relay}`
-                : relaySourceDisplayName(source)}
-            </ChoiceCards.Label>
-            <ChoiceCards.Description>
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  aria-hidden
-                  className={cn(
-                    "inline-block size-2 rounded-full",
-                    source.status === "live"
-                      ? "bg-emerald-500"
-                      : source.status === "idle"
-                        ? "bg-amber-500"
-                        : "bg-muted-foreground/50"
-                  )}
-                />
-                {t("Stream relay")} · {statusLabel(source.status)}
-              </span>
-            </ChoiceCards.Description>
-          </ChoiceCards.Item>
-        ))}
+        {choices.map((choice) => {
+          const status =
+            choice.kind === "bundestag" ? choice.status : choice.source.status
+          return (
+            <ChoiceCards.Item key={choice.key} value={choice.key}>
+              <ChoiceCards.Media>
+                {choice.kind === "bundestag" ? (
+                  <Landmark aria-hidden="true" className="size-6" />
+                ) : (
+                  <Radio aria-hidden="true" className="size-6" />
+                )}
+              </ChoiceCards.Media>
+              <ChoiceCards.Label>
+                {multipleRelays
+                  ? `${choiceName(choice)} · ${choice.source.relay}`
+                  : choiceName(choice)}
+              </ChoiceCards.Label>
+              <ChoiceCards.Description>
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "inline-block size-2 rounded-full",
+                      status === "live"
+                        ? "bg-emerald-500"
+                        : status === "idle"
+                          ? "bg-amber-500"
+                          : "bg-muted-foreground/50"
+                    )}
+                  />
+                  {choice.kind === "bundestag"
+                    ? t("Channels {value0} · matched to the sitting", {
+                        value0: choice.channels.join(", "),
+                      })
+                    : `${t("Stream relay")} · ${statusLabel(status)}`}
+                </span>
+              </ChoiceCards.Description>
+            </ChoiceCards.Item>
+          )
+        })}
         <ChoiceCards.Item value="own-link">
           <ChoiceCards.Media>
             <Link2 aria-hidden="true" className="size-6" />
@@ -1103,7 +1184,10 @@ export function StreamWhenFields({
         </div>
       ) : null}
 
-      {problem && schedule.when !== "now" ? (
+      {schedule.when === "now" && hasPlan && summary ? (
+        <PlanSummary>{summary}</PlanSummary>
+      ) : null}
+      {problem ? (
         <p className="text-sm leading-5 text-destructive" role="alert">
           {problem}
         </p>
