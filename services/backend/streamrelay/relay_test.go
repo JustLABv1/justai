@@ -349,9 +349,31 @@ func TestOnDemandWakesAndIdlesWithFreshEpoch(t *testing.T) {
 	}
 	s.append(make([]byte, r.segBytes))
 	old := s.manifest.Epoch
+	s.setWanted(true)
 	s.idleStopped(r.log, time.Now(), 0)
 	if s.manifest.Epoch == old || s.manifest.Latest != 0 || len(s.segments) != 0 || s.status(true) != "idle" {
 		t.Fatalf("idle stop did not reset: %+v", s.manifest)
+	}
+	if r.metrics.gauge("relay_upstream_wanted", "source", "radio") != 0 || r.metrics.gauge("relay_upstream_up", "source", "radio") != 0 {
+		t.Fatal("an idle source must not count as wanted or up")
+	}
+}
+
+func TestEverySourceExportsUpAndWanted(t *testing.T) {
+	for _, onDemand := range []bool{false, true} {
+		r, err := New(Config{Sources: map[string]string{"radio": "https://radio.example/live.mp3"}, OnDemand: onDemand}, testToken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		r.metrics.write(&out)
+		wanted := `relay_upstream_wanted{source="radio"} 1`
+		if onDemand {
+			wanted = `relay_upstream_wanted{source="radio"} 0`
+		}
+		if !strings.Contains(out.String(), `relay_upstream_up{source="radio"} 0`) || !strings.Contains(out.String(), wanted) {
+			t.Fatalf("on-demand=%v: missing initial source metrics:\n%s", onDemand, out.String())
+		}
 	}
 }
 
