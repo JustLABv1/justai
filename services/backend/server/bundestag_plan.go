@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	_ "time/tzdata" // the plan is published in Berlin time; containers may lack tzdata
 
@@ -35,6 +36,10 @@ type planSession struct {
 	WindowStartAt time.Time `json:"windowStartAt"`
 	WindowEndAt   time.Time `json:"windowEndAt"`
 	FallbackAt    time.Time `json:"fallbackAt"`
+	// Channel is the Parlamentsfernsehen channel that broadcasts the session (1 = plenary).
+	Channel int `json:"channel,omitempty"`
+	// ChannelAvailable says whether the source being set up can reach Channel; nil when unknown.
+	ChannelAvailable *bool `json:"channelAvailable,omitempty"`
 }
 
 func newPlanSession(key, title string, start, end time.Time) planSession {
@@ -172,13 +177,39 @@ func parseBundestagPlan(r io.Reader) ([]planSession, error) {
 				continue
 			}
 			seen[key] = true
-			out = append(out, newPlanSession(key, title, start.UTC(), end.UTC()))
+			session := newPlanSession(key, title, start.UTC(), end.UTC())
+			if channel, convErr := strconv.Atoi(nodeAttr(row, "data-channelnumber")); convErr == nil && channel > 0 && channel <= maxBundestagChannel {
+				session.Channel = channel
+			}
+			out = append(out, session)
 		}
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no sessions found in the Bundestag plan")
 	}
 	return out, nil
+}
+
+var bundestagPlanCache struct {
+	sync.Mutex
+	at   time.Time
+	plan []planSession
+}
+
+// cachedBundestagPlan serves the plan for a few minutes so reconnecting captures do
+// not refetch the live page each time.
+func cachedBundestagPlan(ctx context.Context, client *http.Client) ([]planSession, error) {
+	bundestagPlanCache.Lock()
+	defer bundestagPlanCache.Unlock()
+	if !bundestagPlanCache.at.IsZero() && time.Since(bundestagPlanCache.at) < 5*time.Minute {
+		return bundestagPlanCache.plan, nil
+	}
+	plan, err := fetchBundestagPlan(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	bundestagPlanCache.plan, bundestagPlanCache.at = plan, time.Now()
+	return plan, nil
 }
 
 func fetchBundestagPlan(ctx context.Context, client *http.Client) ([]planSession, error) {

@@ -5050,6 +5050,10 @@ export const de = {
     "Suche nach einem veröffentlichten Sitzungsplan…",
   Sitting: "Sitzung",
   "Choose a sitting": "Sitzung auswählen",
+  "Channel {value0}": "Kanal {value0}",
+  "not on this relay": "nicht im Relay",
+  "This sitting is broadcast on channel {value0}, which the stream relay does not provide. Add the relay source bundestag-hk{value0} or choose another sitting.":
+    "Diese Sitzung läuft auf Kanal {value0}, den das Stream-Relay nicht anbietet. Richte die Relay-Quelle bundestag-hk{value0} ein oder wähle eine andere Sitzung.",
   "What should be captured?": "Was soll aufgenommen werden?",
   Adjust: "Anpassen",
   "If nothing is heard you get a warning on the session. Disconnects are retried for 15 minutes; the eight-hour session limit is the final safeguard.":

@@ -142,6 +142,16 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, watchErr)
 		return
 	}
+	if watch.PlanKey == "" && scheduledStartAt == nil && captureScope == "all" && isBundestagPlanURL(streamURL) {
+		// Started right away: capture the channel of the session that is on air now.
+		if session, found := a.runningBundestagSessionFor(c, streamURL); found {
+			if err := checkPlanChannel(c, streamURL, session); err != nil {
+				writeError(c, http.StatusBadRequest, err)
+				return
+			}
+			watch.PlanKey = session.Key
+		}
+	}
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		name = "Live stream"

@@ -313,7 +313,16 @@ export function sittingNumber(planKey: string) {
   return match ? Number(match[1]) : 0
 }
 
-export function formatPlanSession(session: StreamPlanSession, locale: string) {
+/** Sessions the chosen source cannot capture: their channel is not on the relay. */
+export function planSessionUnavailable(session: StreamPlanSession) {
+  return session.channelAvailable === false
+}
+
+export function formatPlanSession(
+  session: StreamPlanSession,
+  locale: string,
+  t?: Translate
+) {
   const start = new Date(session.startAt)
   const end = new Date(session.endAt)
   const day = new Intl.DateTimeFormat(locale, {
@@ -325,7 +334,9 @@ export function formatPlanSession(session: StreamPlanSession, locale: string) {
     hour: "2-digit",
     minute: "2-digit",
   })
-  return `${session.title} · ${day} ${time.format(start)}–${time.format(end)}`
+  const label = `${session.title} · ${day} ${time.format(start)}–${time.format(end)}`
+  if (!t || !session.channel) return label
+  return `${label} · ${t("Channel {value0}", { value0: session.channel })}`
 }
 
 /** Watch a sitting from shortly before its announced start until well after its end. */
@@ -356,7 +367,8 @@ export function chooseStreamWhen(
 ): StreamSchedule {
   if (when === "sitting") {
     const current = plan.find((session) => session.key === schedule.planKey)
-    const next = current ?? plan[0]
+    const next =
+      current ?? plan.find((session) => !planSessionUnavailable(session))
     return next ? withSitting(schedule, next) : { ...schedule, when }
   }
   if (when === "custom")
@@ -400,8 +412,13 @@ export function streamScheduleProblem(
 ) {
   if (schedule.when === "now") return ""
   if (schedule.when === "sitting") {
-    if (!plan.some((session) => session.key === schedule.planKey))
-      return t("Choose a sitting.")
+    const session = plan.find((item) => item.key === schedule.planKey)
+    if (!session) return t("Choose a sitting.")
+    if (planSessionUnavailable(session))
+      return t(
+        "This sitting is broadcast on channel {value0}, which the stream relay does not provide. Add the relay source bundestag-hk{value0} or choose another sitting.",
+        { value0: session.channel ?? 0 }
+      )
     if (streamTopicsOnly(schedule))
       return schedule.topicKeys.length ? "" : t("Choose at least one topic.")
   }
@@ -452,7 +469,11 @@ export function streamSchedulePayload(schedule: StreamSchedule) {
     startMode: schedule.startMode,
     silenceStopSeconds: live && silenceSeconds > 0 ? silenceSeconds : undefined,
     planFollow: followPlan ? true : undefined,
-    planKey: followPlan ? schedule.planKey : undefined,
+    // The chosen sitting also tells JustAI which broadcast channel to capture.
+    planKey:
+      schedule.when === "sitting" && schedule.planKey
+        ? schedule.planKey
+        : undefined,
     topicsSessionNo:
       schedule.when === "sitting" && sitting ? sitting : undefined,
   }
@@ -978,7 +999,7 @@ export function StreamWhenFields({
                   {(value: string | null) => {
                     const session = plan.find((item) => item.key === value)
                     return session
-                      ? formatPlanSession(session, locale)
+                      ? formatPlanSession(session, locale, t)
                       : t("Choose a sitting")
                   }}
                 </SelectValue>
@@ -986,8 +1007,15 @@ export function StreamWhenFields({
               <SelectContent>
                 <SelectGroup>
                   {plan.map((session) => (
-                    <SelectItem key={session.key} value={session.key}>
-                      {formatPlanSession(session, locale)}
+                    <SelectItem
+                      disabled={planSessionUnavailable(session)}
+                      key={session.key}
+                      value={session.key}
+                    >
+                      {formatPlanSession(session, locale, t)}
+                      {planSessionUnavailable(session)
+                        ? ` · ${t("not on this relay")}`
+                        : ""}
                     </SelectItem>
                   ))}
                 </SelectGroup>
