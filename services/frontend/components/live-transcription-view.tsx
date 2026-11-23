@@ -38,9 +38,9 @@ import {
   StreamScheduleEditDialog,
   StreamSourcePicker,
   StreamWhenFields,
+  describeBundestagChannels,
   describeStreamSchedule,
   initialStreamSchedule,
-  relaySourceDisplayName,
   sittingNumber,
   streamScheduleProblem,
   streamSchedulePayload as buildStreamSchedulePayload,
@@ -423,14 +423,17 @@ export function LiveTranscriptionView({
             "{value0} · Stream found. JustAI captures it on the server; your browser can be closed.",
             { value0: streamRelayName || streamCheck.name }
           )}
+      {streamPlan.length > 0 ? (
+        <> {describeBundestagChannels(streamPlan, t)}</>
+      ) : null}
     </p>
   ) : null
   const streamSourceFields = (
     <>
       <StreamSourcePicker
-        onRelayPick={(source) => {
+        onRelayPick={(source, name) => {
           setStreamURL(source.url)
-          setStreamRelayName(relaySourceDisplayName(source))
+          setStreamRelayName(name)
         }}
         onURLChange={pickStreamURL}
         url={streamURL}
