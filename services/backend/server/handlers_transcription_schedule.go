@@ -48,10 +48,10 @@ func (a *App) prepareStreamWatch(ctx context.Context, streamURL, mode string, si
 			return opts, fmt.Errorf("a watch window can be at most 48 hours long")
 		}
 	}
-	if !planFollow {
+	if !planFollow && planKey == "" {
 		return opts, nil
 	}
-	if mode != "when_live" {
+	if planFollow && mode != "when_live" {
 		return opts, fmt.Errorf("following the programme plan requires starting when the stream goes live")
 	}
 	if planKey == "" || len(planKey) > 200 {
@@ -60,6 +60,7 @@ func (a *App) prepareStreamWatch(ctx context.Context, streamURL, mode string, si
 	if !isBundestagPlanURL(streamURL) {
 		return opts, fmt.Errorf("a programme plan is only available for the Bundestag live page or a relay source named bundestag")
 	}
+	// A session chosen without following the plan still selects the channel to capture.
 	fetchCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	plan, err := fetchBundestagPlan(fetchCtx, provider.SafeHTTPClient(15*time.Second, a.Config.AllowPrivate))
@@ -68,8 +69,14 @@ func (a *App) prepareStreamWatch(ctx context.Context, streamURL, mode string, si
 	}
 	for i := range plan {
 		if plan[i].Key == planKey {
-			fallback := plan[i].FallbackAt
-			opts.PlanFollow, opts.PlanKey, opts.FallbackAt = true, planKey, &fallback
+			if err := checkPlanChannel(ctx, streamURL, plan[i]); err != nil {
+				return opts, err
+			}
+			opts.PlanKey = planKey
+			if planFollow {
+				fallback := plan[i].FallbackAt
+				opts.PlanFollow, opts.FallbackAt = true, &fallback
+			}
 			return opts, nil
 		}
 	}

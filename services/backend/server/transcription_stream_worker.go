@@ -189,6 +189,12 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 		m.setStreamStatus(sessionID, sourceID, "failed", "live stream URL could not be decrypted", false)
 		return fmt.Errorf("live stream URL could not be decrypted")
 	}
+	if routed, routeErr := m.routeBundestagChannel(ctx, sourceID, streamURL); routeErr != nil {
+		m.setStreamStatus(sessionID, sourceID, "failed", routeErr.Error(), false)
+		return routeErr
+	} else {
+		streamURL = routed
+	}
 	relay, relayErr := streamrelay.ForSource(streamURL)
 	if relayErr != nil {
 		return relayErr

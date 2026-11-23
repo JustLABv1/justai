@@ -45,6 +45,7 @@ func resolveLiveStream(ctx context.Context, raw string, allowPrivate bool) (reso
 			planCtx, cancelPlan := context.WithTimeout(ctx, 20*time.Second)
 			defer cancelPlan()
 			if plan, planErr := fetchBundestagPlan(planCtx, provider.SafeHTTPClient(15*time.Second, allowPrivate)); planErr == nil {
+				annotatePlanChannels(planCtx, raw, plan)
 				result.Plan = plan
 			}
 		}
@@ -79,6 +80,7 @@ func resolveLiveStreamWithClient(ctx context.Context, raw string, allowPrivate b
 		result.Kind = "website"
 		// The published session plan lets users pick a session; failures are not fatal.
 		if plan, planErr := fetchBundestagPlan(ctx, client); planErr == nil {
+			annotatePlanChannels(ctx, raw, plan)
 			result.Plan = plan
 		}
 		return result, nil

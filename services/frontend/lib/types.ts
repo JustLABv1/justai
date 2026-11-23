@@ -940,6 +940,10 @@ export type StreamPlanSession = {
   windowStartAt: string
   windowEndAt: string
   fallbackAt: string
+  /** Parlamentsfernsehen channel that broadcasts the session (1 = plenary). */
+  channel?: number
+  /** Whether the chosen source can reach that channel; absent when unknown. */
+  channelAvailable?: boolean
 }
 
 export type TranscriptionSpeaker = {
