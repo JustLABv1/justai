@@ -65,6 +65,37 @@ RUN apk add --no-cache \
     && /opt/ffmpeg/bin/ffmpeg -version \
     && /opt/ffmpeg/bin/ffprobe -version
 
+# Debian trixie still ships libssl3t64 3.5.9, which is affected by
+# CVE-2026-95691 (QUIC client use-after-free), and upstream has not released
+# 3.5.10 yet. Build the checksum-verified 3.5.9 release with the upstream fix
+# commit f6244675 (openssl-3.5 branch) applied. The resulting libssl.so.3 and
+# libcrypto.so.3 replace Debian's copies via /usr/local/lib. Drop this stage once
+# Debian ships a fixed libssl3t64.
+FROM python:3.14.9-slim-trixie AS openssl-builder
+
+ARG OPENSSL_VERSION=3.5.9
+ARG OPENSSL_SHA256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+
+COPY patches/openssl-3.5-CVE-2026-95691.patch /tmp/openssl-CVE-2026-95691.patch
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make patch perl \
+    && curl --fail --location --silent --show-error \
+      --output /tmp/openssl.tar.gz \
+      "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+    && echo "${OPENSSL_SHA256}  /tmp/openssl.tar.gz" | sha256sum -c - \
+    && mkdir -p /tmp/openssl-source \
+    && tar -xzf /tmp/openssl.tar.gz -C /tmp/openssl-source --strip-components=1 \
+    && cd /tmp/openssl-source \
+    && patch -p1 --forward < /tmp/openssl-CVE-2026-95691.patch \
+    && ./config shared no-tests no-docs no-apps \
+      --prefix=/usr/local --libdir="lib/$(gcc -print-multiarch)" --openssldir=/usr/lib/ssl \
+    && make -j"$(getconf _NPROCESSORS_ONLN)" \
+    && make DESTDIR=/tmp/openssl-root install_sw \
+    && mv /tmp/openssl-root/usr/local/lib /opt/openssl-runtime \
+    && rm -rf /opt/openssl-runtime/*/pkgconfig /opt/openssl-runtime/*/cmake \
+    && find /opt/openssl-runtime \( -name '*.a' -o -name 'libssl.so' -o -name 'libcrypto.so' \) -delete
+
 FROM python:3.14.9-slim-trixie AS builder
 
 USER root
@@ -131,6 +162,18 @@ RUN apt-get update \
     && find /usr/local/lib -name '*.a' -delete \
     && groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /tmp app
+
+# /usr/local/lib/<multiarch> precedes the Debian multiarch directories in
+# ld.so.conf, so CPython's _ssl and _hashlib load the patched OpenSSL.
+# prepare_runtime.py rejects any remaining dependency on Debian's libssl3t64.
+COPY --from=openssl-builder /opt/openssl-runtime/ /usr/local/lib/
+RUN ldconfig \
+    && ldd /usr/local/lib/python3.14/lib-dynload/_ssl.*.so > /tmp/ssl-deps \
+    && grep -E 'libssl\.so\.3 => /usr/local/lib/' /tmp/ssl-deps \
+    && grep -E 'libcrypto\.so\.3 => /usr/local/lib/' /tmp/ssl-deps \
+    && ldd /usr/local/lib/python3.14/lib-dynload/_hashlib.*.so | grep -E 'libcrypto\.so\.3 => /usr/local/lib/' \
+    && rm /tmp/ssl-deps \
+    && python -c 'import hashlib, ssl; print(ssl.OPENSSL_VERSION); ssl.create_default_context(); hashlib.sha256(b"")'
 
 COPY prepare_runtime.py /tmp/prepare_runtime.py
 RUN python /tmp/prepare_runtime.py

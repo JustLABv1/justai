@@ -44,6 +44,9 @@ for elf in elfs:
     if not str(elf).startswith('/usr/local/'):
         libraries.add(str(elf))
 for library in sorted(libraries):
+    # OpenSSL comes from the patched build in /usr/local/lib (CVE-2026-95691).
+    if re.search(r'/lib(ssl|crypto)\.so', library) and not library.startswith('/usr/local/'):
+        raise RuntimeError(f'Debian OpenSSL library resolved instead of patched build: {library}')
     copy(library)
     if not library.startswith('/usr/local/'):
         # Debian uses merged /usr; ownership is recorded under the resolved path.
