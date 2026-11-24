@@ -30,10 +30,13 @@ type Config struct {
 	CookieSameSite      string
 	CookieDomain        string
 	RepositoryMaxFiles  int
-	Transcription       TranscriptionConfig
-	CodeRunner          CodeRunnerConfig
-	StreamRelay         StreamRelayConfig
-	StreamRelays        []StreamRelayConfig
+	// BackupStagingPath holds uploaded instance backups until they are
+	// restored. Empty means a directory below the OS temp directory.
+	BackupStagingPath string
+	Transcription     TranscriptionConfig
+	CodeRunner        CodeRunnerConfig
+	StreamRelay       StreamRelayConfig
+	StreamRelays      []StreamRelayConfig
 }
 
 // StreamRelayConfig points at an external livestream relay. For the single
@@ -105,6 +108,7 @@ type fileConfig struct {
 	CookieSameSite      string                  `yaml:"cookie_same_site"`
 	CookieDomain        string                  `yaml:"cookie_domain"`
 	RepositoryMaxFiles  int                     `yaml:"repository_max_files"`
+	BackupStagingPath   string                  `yaml:"backup_staging_path"`
 	Transcription       fileTranscriptionConfig `yaml:"transcription"`
 	CodeRunner          fileCodeRunnerConfig    `yaml:"code_runner"`
 	StreamRelay         fileStreamRelayConfig   `yaml:"stream_relay"`
@@ -242,6 +246,7 @@ func Load(configPath string) (Config, error) {
 		CookieSameSite:      cookieSameSite,
 		CookieDomain:        getenvOrFile("JUSTAI_COOKIE_DOMAIN", fileValues.CookieDomain, ""),
 		RepositoryMaxFiles:  repositoryMaxFiles,
+		BackupStagingPath:   getenvOrFile("JUSTAI_BACKUP_STAGING_PATH", fileValues.BackupStagingPath, ""),
 		Transcription:       transcriptionConfig(fileValues.Transcription),
 		CodeRunner:          codeRunner,
 		StreamRelay:         streamRelayConfig(fileValues.StreamRelay),

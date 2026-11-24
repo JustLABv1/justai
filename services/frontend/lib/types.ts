@@ -37,6 +37,7 @@ export type AdminTab =
   | "health"
   | "analytics"
   | "audit"
+  | "backup"
 
 export type AgentTab = "agents" | "workflows" | "runs"
 

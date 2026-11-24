@@ -5208,4 +5208,97 @@ export const de = {
     "Aufnahme beendet: Die Livestream-Seite konnte nicht aufgelöst werden.",
   "The Bundestag plan could not be loaded.":
     "Der Ablaufplan des Bundestags konnte nicht geladen werden.",
+  Backup: "Backup",
+  "All data on this instance is deleted and replaced by the backup. Everyone is signed out, including you. Stop transcriptions and agent runs first.":
+    "Alle Daten dieser Instanz werden gelöscht und durch das Backup ersetzt. Alle werden abgemeldet, auch du. Beende vorher laufende Transkriptionen und Agentenläufe.",
+  "Always included": "Immer enthalten",
+  "Backup information could not be loaded.":
+    "Die Backup-Informationen konnten nicht geladen werden.",
+  "Backup information unavailable": "Backup-Informationen nicht verfügbar",
+  "Before you restore": "Vor der Wiederherstellung",
+  "Checking every table and file in the backup. Large backups take a few minutes.":
+    "Jede Tabelle und Datei im Backup wird geprüft. Große Backups brauchen einige Minuten.",
+  "Checking relationships": "Verknüpfungen werden geprüft",
+  Checking: "Wird geprüft",
+  "Choose a JustAI backup archive (.zip).":
+    "Wähle ein JustAI-Backup-Archiv (.zip) aus.",
+  "Copying stored files": "Gespeicherte Dateien werden kopiert",
+  "Create backup": "Backup erstellen",
+  Created: "Erstellt",
+  "Download backup": "Backup herunterladen",
+  "Download the whole instance as one ZIP archive: every workspace, user, chat, knowledge source, transcript, and setting.":
+    "Lade die gesamte Instanz als ZIP-Archiv herunter: alle Workspaces, Benutzer, Chats, Wissensquellen, Transkripte und Einstellungen.",
+  "Every current workspace, user, and chat is replaced":
+    "Alle aktuellen Workspaces, Benutzer und Chats werden ersetzt",
+  "Go to sign-in": "Zur Anmeldung",
+  "Include stored files": "Gespeicherte Dateien einschließen",
+  Invalid: "Ungültig",
+  "Keep this page open. Your session ends when the database is replaced; progress stays visible here.":
+    "Lass diese Seite geöffnet. Deine Sitzung endet, sobald die Datenbank ersetzt wird; der Fortschritt bleibt hier sichtbar.",
+  "Not included": "Nicht enthalten",
+  "Older JustAI version": "Ältere JustAI-Version",
+  "Ready to restore": "Bereit zur Wiederherstellung",
+  "Recordings and uploaded videos.": "Aufnahmen und hochgeladene Videos.",
+  "Recordings and uploaded videos: {count} files, {size}. Turn this off for a small database-only backup when the file storage is backed up separately.":
+    "Aufnahmen und hochgeladene Videos: {count} Dateien, {size}. Schalte dies aus für ein kleines Backup nur der Datenbank, wenn der Dateispeicher separat gesichert wird.",
+  "Replace all data on this instance with a backup. The backup is uploaded and checked first; nothing changes until you confirm.":
+    "Ersetze alle Daten dieser Instanz durch ein Backup. Das Backup wird zuerst hochgeladen und geprüft; bis zu deiner Bestätigung ändert sich nichts.",
+  "Restart the JustAI backend so background workers load the restored data, then sign in with an account from the backup.":
+    "Starte das JustAI-Backend neu, damit die Hintergrunddienste die wiederhergestellten Daten laden, und melde dich dann mit einem Konto aus dem Backup an.",
+  "Restore backup": "Backup wiederherstellen",
+  "Restore complete": "Wiederherstellung abgeschlossen",
+  "Restore failed": "Wiederherstellung fehlgeschlagen",
+  "Restore progress": "Fortschritt der Wiederherstellung",
+  Restored: "Wiederhergestellt",
+  "Restoring database": "Datenbank wird wiederhergestellt",
+  Restoring: "Wird wiederhergestellt",
+  "Same as this instance": "Wie diese Instanz",
+  "Sessions and one-time sign-in tokens are left out. Credentials stay encrypted: restoring needs the same JUSTAI_ENCRYPTION_KEY.":
+    "Sitzungen und einmalige Anmelde-Tokens werden nicht gesichert. Zugangsdaten bleiben verschlüsselt: Für die Wiederherstellung wird derselbe JUSTAI_ENCRYPTION_KEY benötigt.",
+  "Some stored files could not be listed. Check the storage configuration before relying on this backup.":
+    "Einige gespeicherte Dateien konnten nicht aufgelistet werden. Prüfe die Speicherkonfiguration, bevor du dich auf dieses Backup verlässt.",
+  "Stored files": "Gespeicherte Dateien",
+  "Table {table} no longer exists; its {rows} rows are skipped.":
+    "Die Tabelle {table} existiert nicht mehr; ihre {rows} Zeilen werden übersprungen.",
+  "Table {table}: columns {columns} no longer exist and are skipped.":
+    "Tabelle {table}: Die Spalten {columns} existieren nicht mehr und werden übersprungen.",
+  "The backup check could not be followed.":
+    "Die Prüfung des Backups konnte nicht verfolgt werden.",
+  "The backup contains no stored files. Recordings and uploaded videos must already exist in this instance's storage, or they will be missing.":
+    "Das Backup enthält keine gespeicherten Dateien. Aufnahmen und hochgeladene Videos müssen bereits im Speicher dieser Instanz vorhanden sein, sonst fehlen sie.",
+  "The backup could not be uploaded.":
+    "Das Backup konnte nicht hochgeladen werden.",
+  "The backup was created by an older JustAI version ({count} newer migrations here). Columns added since then get their defaults; data conversions from those upgrades are not repeated.":
+    "Das Backup wurde mit einer älteren JustAI-Version erstellt (hier {count} neuere Migrationen). Seitdem hinzugekommene Spalten erhalten ihre Standardwerte; Datenumwandlungen aus diesen Updates werden nicht wiederholt.",
+  "The last attempt failed": "Der letzte Versuch ist fehlgeschlagen",
+  "The restore could not be started.":
+    "Die Wiederherstellung konnte nicht gestartet werden.",
+  "The staged backup could not be discarded.":
+    "Das hochgeladene Backup konnte nicht verworfen werden.",
+  "This backup cannot be restored":
+    "Dieses Backup kann nicht wiederhergestellt werden",
+  "This instance uses a different encryption key. Stored provider credentials, MCP secrets, and recordings from the backup cannot be decrypted until JUSTAI_ENCRYPTION_KEY matches the original instance.":
+    "Diese Instanz verwendet einen anderen Verschlüsselungsschlüssel. Gespeicherte Provider-Zugangsdaten, MCP-Geheimnisse und Aufnahmen aus dem Backup lassen sich erst entschlüsseln, wenn JUSTAI_ENCRYPTION_KEY mit der ursprünglichen Instanz übereinstimmt.",
+  "Type {word} to confirm": "Zur Bestätigung {word} eingeben",
+  "Upload backup": "Backup hochladen",
+  "Upload progress": "Upload-Fortschritt",
+  "Uploading {done} of {total}": "{done} von {total} hochgeladen",
+  Uploading: "Wird hochgeladen",
+  "{count} files, {size}": "{count} Dateien, {size}",
+  "{done} of {total} files ({size})": "{done} von {total} Dateien ({size})",
+  "{done} of {total} rows": "{done} von {total} Zeilen",
+  "{size} in {tables} tables, about {rows} rows":
+    "{size} in {tables} Tabellen, etwa {rows} Zeilen",
+  "{tables} tables, {rows} rows": "{tables} Tabellen, {rows} Zeilen",
+  "This is a different file. Choose {name} ({size}) to continue, or discard the paused upload.":
+    "Das ist eine andere Datei. Wähle {name} ({size}) aus, um fortzufahren, oder verwirf den pausierten Upload.",
+  "The paused upload no longer exists. Upload the backup again.":
+    "Der pausierte Upload existiert nicht mehr. Lade das Backup erneut hoch.",
+  "The backend no longer has the uploaded part. Upload the backup again.":
+    "Das Backend hat den hochgeladenen Teil nicht mehr. Lade das Backup erneut hoch.",
+  "The upload paused at {done} of {total}: {reason} Choose the same file to continue.":
+    "Der Upload wurde bei {done} von {total} angehalten: {reason} Wähle dieselbe Datei aus, um fortzufahren.",
+  "Continue upload": "Upload fortsetzen",
+  "Paused at {done} of {total}. Choose the same file to continue; the uploaded part is kept for 24 hours.":
+    "Bei {done} von {total} pausiert. Wähle dieselbe Datei aus, um fortzufahren; der hochgeladene Teil bleibt 24 Stunden erhalten.",
 } as const

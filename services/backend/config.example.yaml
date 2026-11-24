@@ -28,6 +28,11 @@ dev_seed: true
 # Maximum text files retained in one repository snapshot (default: 200).
 repository_max_files: 200
 
+# Where uploaded instance backups wait until they are restored. Needs free
+# space for the largest backup. Defaults to a directory in the OS temp dir.
+# Environment variable JUSTAI_BACKUP_STAGING_PATH takes precedence.
+# backup_staging_path: /app/data/backup-staging
+
 # Optional isolated service that runs Python for the run_code chat tool. Leave
 # the url empty to keep the tool off. Environment variables JUSTAI_CODE_RUNNER_URL
 # and JUSTAI_CODE_RUNNER_TOKEN take precedence. See services/code-runner/README.md.

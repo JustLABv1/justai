@@ -164,6 +164,10 @@ func (a *App) Router() *gin.Engine {
 	transcriptionPublic.POST("/capture-tickets", a.platformFeature("transcription"), a.createCaptureStreamTicket)
 	transcriptionPublic.POST("/bot-sources/:id/tickets", a.platformFeature("transcription"), a.createTranscriptionBotStreamTicket)
 
+	// A restore replaces the administrator's session; progress stays readable
+	// with the token returned when the restore started.
+	router.GET("/api/v1/backup-restores/:id/status", a.getBackupRestoreStatus)
+
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
 	protected.GET("/auth/me", a.me)
@@ -237,6 +241,13 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/admin/audit/options", a.listPlatformAuditOptions)
 	protected.GET("/admin/audit", a.listPlatformAudit)
 	protected.GET("/admin/health", a.getPlatformHealth)
+	protected.GET("/admin/backup", a.getBackupOverview)
+	protected.GET("/admin/backup/export", a.exportBackup)
+	protected.POST("/admin/backup/restores", a.createBackupRestore)
+	protected.GET("/admin/backup/restores/:id", a.getBackupRestore)
+	protected.PUT("/admin/backup/restores/:id/chunks", a.uploadBackupRestoreChunk)
+	protected.POST("/admin/backup/restores/:id/start", a.startBackupRestore)
+	protected.DELETE("/admin/backup/restores/:id", a.deleteBackupRestore)
 
 	org := protected.Group("")
 	org.Use(middleware.RequireOrg(a.DB))
