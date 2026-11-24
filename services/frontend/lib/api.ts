@@ -275,8 +275,14 @@ export const api = {
       body: body === undefined ? undefined : JSON.stringify(body),
       headers: { Authorization: `Bearer ${token}` },
     }),
-  binary: <T>(path: string, body: Blob, method: "PUT" | "POST" = "PUT") =>
+  binary: <T>(
+    path: string,
+    body: Blob,
+    method: "PUT" | "POST" = "PUT",
+    init?: Pick<APIRequestInit, "signal" | "timeoutMs">
+  ) =>
     request<T>(path, {
+      ...init,
       method,
       body,
       headers: { "Content-Type": body.type || "application/octet-stream" },

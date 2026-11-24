@@ -43,6 +43,7 @@ export function parseJustAIAction(value: unknown) {
       "health",
       "analytics",
       "audit",
+      "backup",
     ],
   }
   if (

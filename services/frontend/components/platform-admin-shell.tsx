@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useState } from "react"
 import {
   Activity,
+  Archive,
   BarChart3,
   Database,
   Globe2,
@@ -41,6 +42,7 @@ import { PlatformWorkspacesView } from "@/components/platform-workspaces-view"
 import { PlatformUsersView } from "@/components/platform-users-view"
 import { PlatformAuditView } from "@/components/platform-audit-view"
 import { PlatformHealthView } from "@/components/platform-health-view"
+import { PlatformBackupView } from "@/components/platform-backup-view"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
 import { MCPView } from "@/components/mcp-view"
 import { EndpointsView } from "@/components/endpoints-view"
@@ -67,6 +69,7 @@ const tabsMessages: Array<{
   { id: "health", label: "Health", icon: Database },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "audit", label: "Audit", icon: KeyRound },
+  { id: "backup", label: "Backup", icon: Archive },
 ]
 
 function settingLabel(key: string) {
@@ -548,6 +551,7 @@ export function PlatformAdminShell({
               />
             </div>
           )}
+          {activeTab === "backup" && <PlatformBackupView />}
           {activeTab === "audit" && (
             <PlatformAuditView
               events={audit}

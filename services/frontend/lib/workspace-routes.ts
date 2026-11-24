@@ -55,6 +55,7 @@ const adminTabs: AdminTab[] = [
   "health",
   "analytics",
   "audit",
+  "backup",
 ]
 
 const agentTabs: AgentTab[] = ["agents", "workflows", "runs"]

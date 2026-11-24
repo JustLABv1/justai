@@ -23,6 +23,7 @@ export const adminBreadcrumbLabels: Record<AdminTab, string> = {
   health: "Health",
   analytics: "Analytics",
   audit: "Audit",
+  backup: "Backup",
 }
 const pages: Record<ViewId, { label: string; href: string; group?: string }> = {
   chat: { label: "Chat", href: "/", group: "Create" },
