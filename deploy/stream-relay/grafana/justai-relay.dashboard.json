@@ -75,7 +75,7 @@
         "iconColor": "red",
         "step": "60s",
         "titleFormat": "Source down",
-        "expr": "relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} == 0 and relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} offset 1m == 1",
+        "expr": "relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} == 0 and relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} offset 1m == 1 and ((relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1)) == 1)",
         "textFormat": "{{source}}"
       }
     ]
@@ -185,7 +185,7 @@
       "id": 2,
       "type": "stat",
       "title": "Sources streaming",
-      "description": "Share of configured sources that currently deliver audio (relay_upstream_up).",
+      "description": "Share of the sources the relay should capture right now that deliver audio. On-demand sources only count while JustAI requests them; \"Idle\" means nothing is requested.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -203,7 +203,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"}) / count(relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"})",
+          "expr": "sum(relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"}) / (sum((relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1))) > 0)",
           "legendFormat": "",
           "refId": "A",
           "range": true,
@@ -234,7 +234,8 @@
             "mode": "thresholds"
           },
           "mappings": [],
-          "decimals": 0
+          "decimals": 0,
+          "noValue": "Idle"
         },
         "overrides": []
       },
@@ -681,7 +682,7 @@
       "id": 10,
       "type": "state-timeline",
       "title": "Source state",
-      "description": "Per source: Streaming while audio is flowing, Down while the upstream session is not producing segments.",
+      "description": "Per source: Streaming while audio is flowing, Down while the relay should capture but receives no audio, Idle while an on-demand source is not requested.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -699,7 +700,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "max by (source) (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"})",
+          "expr": "max by (source) (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 2 + (relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1)))",
           "legendFormat": "{{source}}",
           "refId": "A",
           "range": true,
@@ -712,15 +713,27 @@
             {
               "type": "value",
               "options": {
-                "1": {
-                  "text": "Streaming",
-                  "color": "green",
+                "0": {
+                  "text": "Idle",
+                  "color": "text",
                   "index": 0
                 },
-                "0": {
+                "1": {
                   "text": "Down",
                   "color": "red",
                   "index": 1
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 2,
+                "to": 3,
+                "result": {
+                  "text": "Streaming",
+                  "color": "green",
+                  "index": 2
                 }
               }
             }
@@ -729,12 +742,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "text",
                 "value": null
               },
               {
-                "color": "green",
+                "color": "red",
                 "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
               }
             ]
           },
@@ -767,7 +784,7 @@
       "id": 11,
       "type": "bargauge",
       "title": "Time since last segment",
-      "description": "Age of the newest 5s segment per source. Green < 15s, orange 15-30s, red > 30s (matches the RelayUpstreamStale alert).",
+      "description": "Age of the newest segment per source that should be capturing (idle on-demand sources are hidden). Green < 15s, orange 15-30s, red > 30s (matches the RelayUpstreamStale alert).",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -785,7 +802,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "min by (source) (time() - relay_upstream_last_segment_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"})",
+          "expr": "min by (source) ((time() - relay_upstream_last_segment_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"}) and ((relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1)) == 1))",
           "legendFormat": "{{source}}",
           "refId": "A",
           "range": true,
@@ -842,7 +859,7 @@
       "id": 12,
       "type": "status-history",
       "title": "Segment freshness",
-      "description": "Stale if at least one moment within the cell had no segment newer than 30s, otherwise Fresh. The query is aggregated per cell, so short gaps stay visible at any zoom level.",
+      "description": "Stale if at least one moment within the cell had no segment newer than 30s while the source should be capturing, otherwise Fresh. Empty cells: on-demand source idle. The query is aggregated per source.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -860,7 +877,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "max by (source) (max_over_time(((time() - relay_upstream_last_segment_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"}) > bool 30)[$__interval:15s]))",
+          "expr": "max by (source) (max_over_time((((time() - relay_upstream_last_segment_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"}) > bool 30) and ((relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1)) == 1))[$__interval:15s]))",
           "legendFormat": "{{source}}",
           "refId": "A",
           "range": true,
@@ -1013,7 +1030,7 @@
       "id": 14,
       "type": "timeseries",
       "title": "Upstream session endings",
-      "description": "Why upstream capture sessions ended: eof (stream closed), rejected (not audio/mpeg or redirect), idle_timeout, error. Frequent bars mean a flapping source.",
+      "description": "Why upstream capture sessions ended: eof (stream closed), rejected (not MP3/HLS audio, redirect, or unsupported HLS such as encryption), stale (HLS playlist stopped advancing), restarted (HLS playlist restarted), idle_timeout (no data for 20s), idle_stop (on-demand source no longer requested; expected), error (anything else).",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1094,7 +1111,7 @@
       "id": 15,
       "type": "table",
       "title": "Sources",
-      "description": "Current state per source. Session length counts since the current upstream session began producing audio.",
+      "description": "Current state per source (Idle = on-demand source not requested). Session length counts since the current upstream session began producing audio.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1112,7 +1129,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "max by (source) (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"})",
+          "expr": "max by (source) (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 2 + (relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1)))",
           "legendFormat": "",
           "refId": "A",
           "range": false,
@@ -1125,7 +1142,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "min by (source) (time() - relay_upstream_last_segment_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"})",
+          "expr": "min by (source) ((time() - relay_upstream_last_segment_timestamp_seconds{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"}) and ((relay_upstream_wanted{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} or (relay_upstream_up{job=~\"$job\", instance=~\"$instance\", source=~\"$source\"} * 0 + 1)) == 1))",
           "legendFormat": "",
           "refId": "B",
           "range": false,
@@ -1204,15 +1221,27 @@
                   {
                     "type": "value",
                     "options": {
-                      "1": {
-                        "text": "Streaming",
-                        "color": "green",
+                      "0": {
+                        "text": "Idle",
+                        "color": "text",
                         "index": 0
                       },
-                      "0": {
+                      "1": {
                         "text": "Down",
                         "color": "red",
                         "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 2,
+                      "to": 3,
+                      "result": {
+                        "text": "Streaming",
+                        "color": "green",
+                        "index": 2
                       }
                     }
                   }

@@ -88,6 +88,7 @@ var help = map[string][2]string{
 	"relay_upstream_segments_total":                  {"counter", "Five-second segments produced per source."},
 	"relay_upstream_sessions_total":                  {"counter", "Upstream capture sessions ended per source and reason."},
 	"relay_upstream_up":                              {"gauge", "1 while audio is being received from the upstream source."},
+	"relay_upstream_wanted":                          {"gauge", "1 while the relay should capture the source (always unless on-demand; on-demand while requested)."},
 	"relay_upstream_latest_sequence":                 {"gauge", "Latest segment sequence per source."},
 	"relay_upstream_last_segment_timestamp_seconds":  {"gauge", "Unix time of the last segment per source."},
 	"relay_upstream_session_start_timestamp_seconds": {"gauge", "Unix time the current upstream session began producing audio."},

@@ -64,8 +64,10 @@ containers on the host. If both are set, `RELAY_TOKEN` and `RELAY_SOURCES` win.
 
 With `RELAY_ON_DEMAND`, an idle source reports status `idle` in the source list and
 starts capturing on its first manifest or segment request. A fresh epoch starts after
-each idle stop, so a reader never gets stale audio. Metric:
-`relay_upstream_sessions_total{reason="idle_stop"}`.
+each idle stop, so a reader never gets stale audio. Metrics:
+`relay_upstream_sessions_total{reason="idle_stop"}`, and `relay_upstream_wanted` (0 while
+a source is idle), which the Grafana dashboard uses to show idle sources as *Idle*
+instead of *Down*.
 
 ### Build the image yourself
 
@@ -313,14 +315,18 @@ scrape_configs:
 | `relay_http_requests_total{source,endpoint,code}` | Requests; `source="none"` for auth failures and unknown sources |
 | `relay_http_request_duration_seconds{endpoint}` | Latency histogram |
 | `relay_http_inflight_requests` | In-flight requests (503 `busy` above 32) |
-| `relay_upstream_up{source}` | 1 while audio is flowing |
+| `relay_upstream_up{source}` | 1 while audio is flowing (exported for every source from startup) |
+| `relay_upstream_wanted{source}` | 1 while the relay should capture: always without on-demand, otherwise while JustAI requests the source |
 | `relay_upstream_segments_total{source}` | Segments produced |
-| `relay_upstream_sessions_total{source,reason}` | Upstream sessions ended, by reason |
+| `relay_upstream_sessions_total{source,reason}` | Upstream sessions ended, by reason: `eof`, `rejected`, `stale` / `restarted` (HLS), `idle_timeout`, `idle_stop`, `error` |
 | `relay_upstream_last_segment_timestamp_seconds{source}` | Alert on `time() - x > 30` |
 | `relay_upstream_latest_sequence{source}` | Latest segment number |
 
-Useful alerts: `relay_upstream_up == 0`, a rising `code="401"` rate,
-`code="503"` (busy) or `reason="rejected"` sessions.
+Useful alerts: `relay_upstream_up == 0 and relay_upstream_wanted == 1` (a needed source
+delivers no audio; plain `relay_upstream_up == 0` would also fire for idle on-demand
+sources), a rising `code="401"` rate, `code="503"` (busy) or `reason="rejected"` sessions.
+For the staleness alert, likewise use
+`time() - relay_upstream_last_segment_timestamp_seconds > 30 and relay_upstream_wanted == 1`.
 
 ### Backend metrics
 

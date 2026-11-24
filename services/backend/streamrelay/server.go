@@ -136,6 +136,9 @@ func NewWithTokens(cfg Config, tokens []string) (*Relay, error) {
 			r.names[id] = name
 		}
 		r.sources[id] = &source{id: id, metrics: r.metrics, segments: make(map[uint64][]byte), manifest: Manifest{Epoch: randomEpoch(), SegmentSeconds: segSeconds}, retained: r.retained, segSeconds: segSeconds, wake: make(chan struct{}, 1)}
+		// Export every source from the start, so idle on-demand sources are listed too.
+		r.metrics.set("relay_upstream_up", 0, "source", id)
+		r.sources[id].setWanted(!r.onDemand)
 	}
 	return r, nil
 }
@@ -348,8 +351,14 @@ func (r *Relay) Run(ctx context.Context, cfg Config) {
 
 func (r *Relay) runSource(ctx context.Context, s *source, raw string) {
 	for ctx.Err() == nil {
-		if r.onDemand && !s.waitDemand(ctx, r.idle) {
-			return
+		if r.onDemand {
+			if !s.demanded(r.idle) {
+				s.setWanted(false) // e.g. a failing capture nobody requests any more
+			}
+			if !s.waitDemand(ctx, r.idle) {
+				return
+			}
+			s.setWanted(true)
 		}
 		capCtx, cancel := context.WithCancel(ctx)
 		var idled atomic.Bool
@@ -400,10 +409,26 @@ func (s *source) setCapturing(v bool) {
 	s.Unlock()
 }
 
+// setWanted exports whether the relay should be capturing this source: always
+// without on-demand, otherwise while the backend requests it. Dashboards use it to
+// tell an idle source from one that fails while it is needed.
+func (s *source) setWanted(v bool) {
+	value := 0.0
+	if v {
+		value = 1
+	}
+	s.metrics.set("relay_upstream_wanted", value, "source", s.id)
+}
+
+func (s *source) demanded(idle time.Duration) bool {
+	at := s.lastRequestAt()
+	return !at.IsZero() && time.Since(at) < idle
+}
+
 // waitDemand blocks until the backend has requested this source recently.
 func (s *source) waitDemand(ctx context.Context, idle time.Duration) bool {
 	for {
-		if at := s.lastRequestAt(); !at.IsZero() && time.Since(at) < idle {
+		if s.demanded(idle) {
 			return true
 		}
 		select {
@@ -435,6 +460,7 @@ func (s *source) watchIdle(ctx context.Context, cancel context.CancelFunc, idle 
 // reader never receives stale audio.
 func (s *source) idleStopped(log *slog.Logger, began time.Time, segs0 uint64) {
 	s.metrics.set("relay_upstream_up", 0, "source", s.id)
+	s.setWanted(false)
 	s.metrics.add("relay_upstream_sessions_total", 1, "source", s.id, "reason", "idle_stop")
 	log.Info("on-demand capture stopped (no requests)", "source", s.id, "duration", time.Since(began), "segments", s.segmentCount()-segs0)
 	s.Lock()
@@ -604,8 +630,12 @@ func (s *source) segmentCount() uint64 {
 func (s *source) sessionEnded(log *slog.Logger, err error, began time.Time, segs0 uint64) {
 	reason := "error"
 	switch {
-	case errors.Is(err, errBadUpstream):
+	case errors.Is(err, errBadUpstream), errors.Is(err, errHLSUnsupported):
 		reason = "rejected"
+	case errors.Is(err, errHLSStale):
+		reason = "stale"
+	case errors.Is(err, errHLSRestarted):
+		reason = "restarted"
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		reason = "eof"
 	case errors.Is(err, os.ErrDeadlineExceeded):
