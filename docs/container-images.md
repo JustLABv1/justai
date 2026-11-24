@@ -27,6 +27,14 @@ JustAI follows the JustScan/JustCD multi-stage pattern:
   shipped. Scanners therefore do not report this OpenSSL version. Remove the
   stage and the patch once Debian ships a fixed libssl3t64 or OpenSSL 3.5.10 is
   released.
+- Pyannote SQLite: Debian trixie's libsqlite3-0 3.46.1 is affected by
+  CVE-2026-119373, CVE-2026-119374 and CVE-2026-119379, which Debian marks
+  no-DSA for trixie. optuna (via pyannote.audio) imports `sqlite3` at import
+  time, so `_sqlite3` cannot be removed. The `sqlite-builder` stage builds the
+  SHA3-256-verified upstream SQLite 3.54.1 amalgamation with Debian's feature
+  set (FTS3/4/5, R*Tree, session, dbstat, column metadata) and installs it the
+  same way as OpenSSL. libsqlite3-0 is therefore no longer shipped or reported
+  by scanners. Bump `SQLITE_VERSION` for upstream SQLite security releases.
 - FFmpeg: unchanged source-verified static 9.0.1/OpenSSL 3.5.9 artifact; CI passes
   its digest-pinned image through the named `ffmpeg-builder` build context.
 - Code runner: official CPython 3.13 slim image with pandas, numpy and
