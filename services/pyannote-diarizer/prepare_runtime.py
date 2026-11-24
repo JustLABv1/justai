@@ -44,6 +44,10 @@ for elf in elfs:
     if not str(elf).startswith('/usr/local/'):
         libraries.add(str(elf))
 for library in sorted(libraries):
+    # OpenSSL and SQLite come from the patched builds in /usr/local/lib
+    # (CVE-2026-95691, CVE-2026-119373/119374/119379).
+    if re.search(r'/lib(ssl|crypto|sqlite3)\.so', library) and not library.startswith('/usr/local/'):
+        raise RuntimeError(f'Debian library resolved instead of patched build: {library}')
     copy(library)
     if not library.startswith('/usr/local/'):
         # Debian uses merged /usr; ownership is recorded under the resolved path.

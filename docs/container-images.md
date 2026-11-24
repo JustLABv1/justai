@@ -16,6 +16,25 @@ JustAI follows the JustScan/JustCD multi-stage pattern:
   It includes the glibc compatibility sonames required by manylinux wheels.
   No shell, OS package manager, pip, setuptools, bootstrap wheels, Python headers
   or static archives are shipped. filelock 4.2.1 fixes CVE-2026-112940.
+- Pyannote OpenSSL: Debian trixie's libssl3t64 3.5.9 is affected by
+  CVE-2026-95691 (QUIC client use-after-free), and upstream 3.5.10 has not been
+  released yet. The `openssl-builder` stage builds the checksum-verified 3.5.9
+  release with the upstream fix commit `f6244675` applied
+  (`services/pyannote-diarizer/patches/`). Its shared libraries are installed in
+  `/usr/local/lib/<multiarch>`, which the dynamic linker searches before Debian's
+  copies. `prepare_runtime.py` fails if CPython still resolves Debian's
+  libssl/libcrypto, so the libssl3t64 files and its dpkg record are no longer
+  shipped. Scanners therefore do not report this OpenSSL version. Remove the
+  stage and the patch once Debian ships a fixed libssl3t64 or OpenSSL 3.5.10 is
+  released.
+- Pyannote SQLite: Debian trixie's libsqlite3-0 3.46.1 is affected by
+  CVE-2026-119373, CVE-2026-119374 and CVE-2026-119379, which Debian marks
+  no-DSA for trixie. optuna (via pyannote.audio) imports `sqlite3` at import
+  time, so `_sqlite3` cannot be removed. The `sqlite-builder` stage builds the
+  SHA3-256-verified upstream SQLite 3.54.1 amalgamation with Debian's feature
+  set (FTS3/4/5, R*Tree, session, dbstat, column metadata) and installs it the
+  same way as OpenSSL. libsqlite3-0 is therefore no longer shipped or reported
+  by scanners. Bump `SQLITE_VERSION` for upstream SQLite security releases.
 - FFmpeg: unchanged source-verified static 9.0.1/OpenSSL 3.5.9 artifact; CI passes
   its digest-pinned image through the named `ffmpeg-builder` build context.
 - Code runner: official CPython 3.13 slim image with pandas, numpy and

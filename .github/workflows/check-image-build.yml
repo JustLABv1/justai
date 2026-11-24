@@ -59,6 +59,7 @@ jobs:
               - 'services/pyannote-diarizer/Dockerfile'
               - 'services/pyannote-diarizer/requirements.txt'
               - 'services/pyannote-diarizer/prepare_runtime.py'
+              - 'services/pyannote-diarizer/patches/**'
               - 'services/pyannote-diarizer/app.py'
               - 'services/pyannote-diarizer/model_sync.py'
               - 'services/pyannote-diarizer/tests/**'
