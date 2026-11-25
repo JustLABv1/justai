@@ -55,7 +55,7 @@ for library in sorted(libraries):
         packages.update(line.split(': ')[0].split(':')[0] for line in owners.splitlines())
 
 for path in ('/etc/ssl', '/usr/lib/ssl', '/usr/share/zoneinfo', '/etc/passwd',
-             '/etc/group', '/etc/debian_version', '/etc/nsswitch.conf', '/etc/ld.so.cache', '/etc/os-release'):
+             '/etc/group', '/etc/debian_version', '/etc/nsswitch.conf', '/etc/os-release'):
     copy(path)
 status = pathlib.Path('/var/lib/dpkg/status').read_text()
 records = [record for record in status.split('\n\n')

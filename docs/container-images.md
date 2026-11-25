@@ -21,9 +21,10 @@ JustAI follows the JustScan/JustCD multi-stage pattern:
   released yet. The `openssl-builder` stage builds the checksum-verified 3.5.9
   release with the upstream fix commit `f6244675` applied
   (`services/pyannote-diarizer/patches/`). Its shared libraries are installed in
-  `/usr/local/lib/<multiarch>`, which the dynamic linker searches before Debian's
-  copies. `prepare_runtime.py` fails if CPython still resolves Debian's
-  libssl/libcrypto, so the libssl3t64 files and its dpkg record are no longer
+  `/usr/local/lib`, which the dynamic linker searches first through
+  `LD_LIBRARY_PATH` in both the preparation stage and the scratch image.
+  `prepare_runtime.py` fails if CPython still resolves Debian's libssl/libcrypto,
+  so the libssl3t64 files and its dpkg record are no longer
   shipped. Scanners therefore do not report this OpenSSL version. Remove the
   stage and the patch once Debian ships a fixed libssl3t64 or OpenSSL 3.5.10 is
   released.
