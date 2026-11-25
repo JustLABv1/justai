@@ -300,16 +300,21 @@ func TestSpeakerCaptionSamplingCoversFirstShortAndLaterTurns(t *testing.T) {
 	}
 }
 
-func TestSpeakerCaptionRetriesUseViewsThenNearbyAndStayBounded(t *testing.T) {
+func TestSpeakerCaptionRetriesMoveLaterWhenNoCaptionIsVisible(t *testing.T) {
 	id := uuid.New()
-	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}}
-	first := speakerCaptionFrame{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 20000}
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 32000}}
+	first := speakerCaptionFrame{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 32000}
 	frames := []speakerCaptionFrame{first}
 	frame := first
-	for _, view := range []string{"sharp", "full", "", "full"} {
+	// Captions often fade in after the first seconds: walk forward through
+	// the turn, then fall back to a full frame once the turn is exhausted.
+	for _, want := range []struct {
+		offset int64
+		view   string
+	}{{14000, ""}, {22000, ""}, {30000, ""}, {30000, "full"}} {
 		next, ok := nextSpeakerCaptionRetry(frame, speakerCaptionObservation{Reason: "no_caption"}, frames, segments)
-		if !ok || next.View != view || !captionFrameMatchesSpeaker(next, segments) {
-			t.Fatalf("invalid retry: %+v %v", next, ok)
+		if !ok || next.View != want.view || next.OffsetMs != want.offset || !captionFrameMatchesSpeaker(next, segments) {
+			t.Fatalf("invalid retry: %+v %v, want %+v", next, ok, want)
 		}
 		frames = append(frames, next)
 		frame = next
@@ -322,6 +327,30 @@ func TestSpeakerCaptionRetriesUseViewsThenNearbyAndStayBounded(t *testing.T) {
 	}
 	if _, ok := nextSpeakerCaptionRetry(first, speakerCaptionObservation{Error: "provider failed"}, nil, segments); ok {
 		t.Fatal("provider failure retried as missing caption")
+	}
+}
+
+func TestSpeakerCaptionRetriesLookCloserAtUnreadableCaptions(t *testing.T) {
+	id := uuid.New()
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 20000}}
+	frame := speakerCaptionFrame{SpeakerID: id, OffsetMs: 6000, TurnStartMs: 0, TurnEndMs: 20000}
+	frames := []speakerCaptionFrame{frame}
+	for _, view := range []string{"sharp", "full"} {
+		next, ok := nextSpeakerCaptionRetry(frame, speakerCaptionObservation{Reason: "uncertain_text"}, frames, segments)
+		if !ok || next.View != view || next.OffsetMs != 6000 {
+			t.Fatalf("invalid retry: %+v %v", next, ok)
+		}
+		frames = append(frames, next)
+		frame = next
+	}
+}
+
+func TestSpeakerCaptionFirstSampleTargetsCaptionWindow(t *testing.T) {
+	id := uuid.New()
+	segments := []models.TranscriptionSegment{{SpeakerID: &id, StartOffsetMs: 100000, EndOffsetMs: 400000}}
+	frames := planSpeakerCaptionFrames(segments, []models.TranscriptionSpeaker{{ID: id, Label: "A"}}, 3)
+	if len(frames) != 3 || frames[0].OffsetMs != 115000 || frames[1].OffsetMs != 125000 {
+		t.Fatalf("caption window not sampled first: %+v", frames)
 	}
 }
 
@@ -353,7 +382,7 @@ func TestSpeakerCaptionManualPositionRequiresExclusiveUnprotectedSpeaker(t *test
 	if err != nil || frame.OffsetMs != 8000 || !frame.Manual {
 		t.Fatalf("manual scan: %+v %v", frame, err)
 	}
-	for _, offset := range []int64{-1, 22000} {
+	for _, offset := range []int64{-1, 24000} {
 		if _, err := planManualSpeakerCaptionFrame(offset, segments, speakers); err == nil {
 			t.Fatal("invalid timestamp accepted")
 		}
@@ -366,6 +395,35 @@ func TestSpeakerCaptionManualPositionRequiresExclusiveUnprotectedSpeaker(t *test
 	speakers[0].NameSource = "manual"
 	if _, err := planManualSpeakerCaptionFrame(8000, segments, speakers); err == nil {
 		t.Fatal("manual name overwritten")
+	}
+}
+
+func TestSpeakerCaptionManualPositionToleratesPausesAndUnassignedAudio(t *testing.T) {
+	id := uuid.New()
+	speakers := []models.TranscriptionSpeaker{{ID: id, Label: "A"}}
+	// A speech split into segments with a pause and an applause marker.
+	segments := []models.TranscriptionSegment{
+		{SpeakerID: &id, StartOffsetMs: 0, EndOffsetMs: 9000},
+		{StartOffsetMs: 9200, EndOffsetMs: 10500},
+		{SpeakerID: &id, StartOffsetMs: 11000, EndOffsetMs: 40000},
+	}
+	for _, offset := range []int64{9800, 10000, 41500} {
+		frame, err := planManualSpeakerCaptionFrame(offset, segments, speakers)
+		if err != nil || frame.SpeakerID != id || frame.TurnStartMs != 0 || frame.TurnEndMs < 40000 {
+			t.Fatalf("manual scan at %d: %+v %v", offset, frame, err)
+		}
+		frames := []speakerCaptionFrame{frame}
+		observations := []speakerCaptionObservation{{FrameIndex: 0, Name: "Anna Beispiel", Caption: "Anna Beispiel", Confidence: .95}}
+		results := resolveSpeakerCaptionResults(frames, observations, speakers, segments, false)
+		if len(results) != 1 || results[0].Name != "Anna Beispiel" || results[0].Confidence < 0.8 {
+			t.Fatalf("manual reading dropped at %d: %+v", offset, results)
+		}
+	}
+	// Retries move forward inside the merged turn instead of stopping at the pause.
+	frame, _ := planManualSpeakerCaptionFrame(5000, segments, speakers)
+	next, ok := nextSpeakerCaptionRetry(frame, speakerCaptionObservation{Reason: "no_caption"}, []speakerCaptionFrame{frame}, segments)
+	if !ok || next.OffsetMs != 13000 {
+		t.Fatalf("manual retry: %+v %v", next, ok)
 	}
 }
 
@@ -423,7 +481,7 @@ func TestSpeakerCaptionAdaptiveQueueResumesAndHonorsTotalBudget(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || calls != 12 || checkpoints != 11 || !views["sharp"] || !views["full"] {
+	if err != nil || calls != 12 || checkpoints != 11 || !views[""] {
 		t.Fatalf("adaptive queue: calls=%d checkpoints=%d views=%v err=%v", calls, checkpoints, views, err)
 	}
 }

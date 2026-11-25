@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { api, APIError } from "../lib/api.ts"
 import {
   backupChunkRanges,
   backupConflictOffset,
@@ -11,6 +12,30 @@ import {
   formatBackupBytes,
   parseStoredBackupRestore,
 } from "../lib/platform-backup.ts"
+
+test("backup upload reports unexpected proxy responses as API errors", async (t) => {
+  const fetchMock = t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response("<html>Proxy error</html>", { status: 200 })
+  )
+  const upload = () =>
+    api.binary("/api/v1/admin/backup/restores/job/chunks?offset=0", new Blob())
+
+  await assert.rejects(
+    upload,
+    (error) => error instanceof APIError && error.code === "invalid_response"
+  )
+
+  fetchMock.mock.mockImplementation(
+    async () => new Response(null, { status: 413 })
+  )
+  await assert.rejects(upload, {
+    name: "APIError",
+    status: 413,
+    message: "HTTP 413",
+  })
+})
 
 test("chunk ranges cover the file exactly once in order", () => {
   assert.deepEqual(backupChunkRanges(10, 4), [

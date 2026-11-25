@@ -863,23 +863,16 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported insight language %q", request.Language))
 		return
 	}
-	var endpointID uuid.NullUUID
-	var grammarModel string
 	var title, language string
-	if err := a.DB.QueryRowContext(c, `SELECT grammar_endpoint_id, COALESCE(grammar_model, ''), title, language FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&endpointID, &grammarModel, &title, &language); err != nil {
+	if err := a.DB.QueryRowContext(c, `SELECT title, language FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&title, &language); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !endpointID.Valid {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("configure a grammar/chat endpoint before generating AI insights"))
+	endpoint, status, err := a.transcriptionChatEndpoint(c, sessionID)
+	if err != nil {
+		writeError(c, status, err)
 		return
 	}
-	endpoint, err := a.providerEndpoint(c, endpointID.UUID)
-	if err != nil || !endpointSupports(endpoint, "chat") {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("the configured grammar endpoint does not support chat"))
-		return
-	}
-	endpoint.ChatModel = firstNonEmptyString(grammarModel, endpoint.ChatModel)
 	segments, err := loadTranscriptionSegments(c, a.DB, sessionID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)

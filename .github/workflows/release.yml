@@ -22,16 +22,93 @@ env:
   HELM_CHART_PATH: charts/justai
   HELM_REGISTRY: ghcr.io/justlabv1/charts
 
+# Order:
+#   1. ffmpeg            Resolve the shared FFmpeg artifact. It only changes with
+#                        docker/ffmpeg, so an image built from the same sources is
+#                        reused instead of compiling FFmpeg again.
+#   2. core images       frontend and code-runner start immediately; backend and
+#                        stream-relay start as soon as the FFmpeg digest is known.
+#   3. remaining images  combined and pyannote (CPU/GPU in parallel) only start once
+#                        every core image is published, so a broken core build does
+#                        not burn the slowest builds.
+#   4. helm chart        published after every image it references exists.
+#   5. GitHub release
 jobs:
+  # ── Stage 1: shared FFmpeg artifact ─────────────────────────────────────
+
   build-ffmpeg:
-    name: Build & Push Shared FFmpeg Image
+    name: Resolve Shared FFmpeg Image
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      digest: ${{ steps.result.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Fingerprint FFmpeg sources
+        id: source
+        # Git's tree hash changes with any file below docker/ffmpeg.
+        run: echo "tag=src-$(git rev-parse --short=16 HEAD:docker/ffmpeg)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reuse FFmpeg image built from identical sources
+        id: existing
+        env:
+          REF: ${{ env.FFMPEG_IMAGE }}:${{ steps.source.outputs.tag }}
+        run: |
+          if digest="$(docker buildx imagetools inspect "$REF" --format '{{.Manifest.Digest}}' 2>/dev/null)" && [[ "$digest" == sha256:* ]]; then
+            echo "Reusing $REF ($digest)"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          else
+            echo "No FFmpeg image for these sources yet; building it."
+          fi
+
+      - name: Build and push shared FFmpeg artifact
+        id: build
+        if: steps.existing.outputs.digest == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: docker/ffmpeg
+          file: docker/ffmpeg/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FFMPEG_IMAGE }}:${{ env.FFMPEG_TAG }}
+            ${{ env.FFMPEG_IMAGE }}:${{ steps.source.outputs.tag }}
+          cache-from: type=gha,scope=ffmpeg
+          cache-to: type=gha,scope=ffmpeg,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Publish digest
+        id: result
+        env:
+          DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
+        run: |
+          if [[ "$DIGEST" != sha256:* ]]; then
+            echo "Could not resolve the FFmpeg image digest" >&2
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+  # ── Stage 2: core images ────────────────────────────────────────────────
+
+  build-frontend:
+    name: Build & Push Frontend
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -43,16 +120,65 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push shared FFmpeg artifact
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta
         with:
-          context: docker/ffmpeg
-          file: docker/ffmpeg/Dockerfile
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},prefix=frontend-
+            type=raw,value=frontend-beta,enable=${{ contains(github.ref_name, '-beta.') }}
+            type=raw,value=frontend-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: services/frontend
+          file: services/frontend/Dockerfile
           push: true
-          tags: ${{ env.FFMPEG_IMAGE }}:${{ env.FFMPEG_TAG }}
-          cache-from: type=gha,scope=ffmpeg
-          cache-to: type=gha,scope=ffmpeg,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          # NEXT_PUBLIC_API_URL is intentionally empty so API calls use relative paths (/api/v1/...).
+          # nginx routes /api/* to the backend — works on any domain without rebuilding.
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+  build-code-runner:
+    name: Build & Push Code Runner Image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},prefix=code-runner-
+            type=raw,value=code-runner-beta,enable=${{ contains(github.ref_name, '-beta.') }}
+            type=raw,value=code-runner-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: services/code-runner
+          file: services/code-runner/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=code-runner
+          cache-to: type=gha,scope=code-runner,mode=max
           provenance: mode=max
           sbom: true
 
@@ -141,51 +267,12 @@ jobs:
           provenance: mode=max
           sbom: true
 
-  build-frontend:
-    name: Build & Push Frontend
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
-        id: meta
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}},prefix=frontend-
-            type=raw,value=frontend-beta,enable=${{ contains(github.ref_name, '-beta.') }}
-            type=raw,value=frontend-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
-
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: services/frontend
-          file: services/frontend/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.meta.outputs.version }}
-          # NEXT_PUBLIC_API_URL is intentionally empty so API calls use relative paths (/api/v1/...).
-          # nginx routes /api/* to the backend — works on any domain without rebuilding.
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,scope=frontend,mode=max
+  # ── Stage 3: remaining images ───────────────────────────────────────────
 
   build-combined:
     name: Build & Push Combined Image
     if: github.event_name == 'push'
-    needs: build-ffmpeg
+    needs: [build-ffmpeg, build-frontend, build-code-runner, build-backend, build-stream-relay]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -225,13 +312,24 @@ jobs:
           cache-to: type=gha,scope=combined,mode=max
 
   build-pyannote:
-    name: Build & Push Pyannote Image
+    name: Build & Push Pyannote Image (${{ matrix.variant }})
     if: github.event_name == 'push'
-    needs: build-ffmpeg
+    needs: [build-ffmpeg, build-frontend, build-code-runner, build-backend, build-stream-relay]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      # CPU and GPU images are independent; build them side by side.
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            prefix: pyannote
+            torch_index_url: https://download.pytorch.org/whl/cpu
+          - variant: gpu
+            prefix: pyannote-gpu
+            torch_index_url: https://download.pytorch.org/whl/cu130
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -248,9 +346,9 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=semver,pattern={{version}},prefix=pyannote-
-            type=raw,value=pyannote-beta,enable=${{ contains(github.ref_name, '-beta.') }}
-            type=raw,value=pyannote-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
+            type=semver,pattern={{version}},prefix=${{ matrix.prefix }}-
+            type=raw,value=${{ matrix.prefix }}-beta,enable=${{ contains(github.ref_name, '-beta.') }}
+            type=raw,value=${{ matrix.prefix }}-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
 
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
@@ -261,76 +359,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
+            TORCH_INDEX_URL=${{ matrix.torch_index_url }}
           build-contexts: |
             ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
-          cache-from: type=gha,scope=pyannote
-          cache-to: type=gha,scope=pyannote,mode=max
+          cache-from: type=gha,scope=${{ matrix.prefix }}
+          cache-to: type=gha,scope=${{ matrix.prefix }},mode=max
 
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
-        id: meta-gpu
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}},prefix=pyannote-gpu-
-            type=raw,value=pyannote-gpu-beta,enable=${{ contains(github.ref_name, '-beta.') }}
-            type=raw,value=pyannote-gpu-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
-
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: services/pyannote-diarizer
-          file: services/pyannote-diarizer/Dockerfile
-          push: true
-          tags: ${{ steps.meta-gpu.outputs.tags }}
-          labels: ${{ steps.meta-gpu.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.meta-gpu.outputs.version }}
-            TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
-          build-contexts: |
-            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
-          cache-from: type=gha,scope=pyannote-gpu
-          cache-to: type=gha,scope=pyannote-gpu,mode=max
-
-  build-code-runner:
-    name: Build & Push Code Runner Image
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
-        id: meta
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}},prefix=code-runner-
-            type=raw,value=code-runner-beta,enable=${{ contains(github.ref_name, '-beta.') }}
-            type=raw,value=code-runner-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
-
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: services/code-runner
-          file: services/code-runner/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=code-runner
-          cache-to: type=gha,scope=code-runner,mode=max
-          provenance: mode=max
-          sbom: true
-
+  # ── Stage 4: chart, once every image it references exists ──────────────
+  # On workflow_dispatch the image jobs are skipped and the chart is published
+  # on its own; on a tag push any failed image build stops it.
   release-helm-chart:
     name: Package & Push Helm Chart
+    needs: [build-frontend, build-code-runner, build-backend, build-stream-relay, build-combined, build-pyannote]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       is_beta: ${{ steps.vars.outputs.is_beta }}
@@ -404,7 +445,7 @@ jobs:
     name: Create GitHub Release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: [build-backend, build-frontend, build-combined, build-pyannote, build-code-runner, release-helm-chart]
+    needs: [build-frontend, build-code-runner, build-backend, build-stream-relay, build-combined, build-pyannote, release-helm-chart]
     permissions:
       contents: write
     steps:

@@ -357,9 +357,17 @@ export function PlatformBackupView() {
               {
                 done: bytes(offset),
                 total: bytes(file.size),
-                reason: t(
-                  feedbackMessage(caught, "The backup could not be uploaded.")
-                ),
+                reason:
+                  caught instanceof APIError && caught.status === 413
+                    ? t(
+                        "The server rejected the upload because the chunk is too large. Allow at least 16 MB per request in the reverse proxy."
+                      )
+                    : t(
+                        feedbackMessage(
+                          caught,
+                          "The backup could not be uploaded."
+                        )
+                      ),
               }
             )
           )

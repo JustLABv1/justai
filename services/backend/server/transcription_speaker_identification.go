@@ -296,23 +296,17 @@ func (a *App) identifyTranscriptionSpeakers(c *gin.Context) {
 	}
 	autoApply := request.AutoApply == nil || *request.AutoApply
 
-	var endpointID uuid.NullUUID
-	var grammarModel, title string
+	var title string
 	var storedParticipants []byte
-	if err := a.DB.QueryRowContext(c, `SELECT grammar_endpoint_id, COALESCE(grammar_model, ''), title, participants FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&endpointID, &grammarModel, &title, &storedParticipants); err != nil {
+	if err := a.DB.QueryRowContext(c, `SELECT title, participants FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&title, &storedParticipants); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !endpointID.Valid {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("configure a grammar/chat endpoint before identifying speakers"))
+	endpoint, status, err := a.transcriptionChatEndpoint(c, sessionID)
+	if err != nil {
+		writeError(c, status, err)
 		return
 	}
-	endpoint, err := a.providerEndpoint(c, endpointID.UUID)
-	if err != nil || !endpointSupports(endpoint, "chat") {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("the configured grammar endpoint does not support chat"))
-		return
-	}
-	endpoint.ChatModel = firstNonEmptyString(grammarModel, endpoint.ChatModel)
 
 	var participants []speakerParticipant
 	if request.Participants != nil {

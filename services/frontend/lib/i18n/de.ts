@@ -5296,9 +5296,29 @@ export const de = {
     "Der pausierte Upload existiert nicht mehr. Lade das Backup erneut hoch.",
   "The backend no longer has the uploaded part. Upload the backup again.":
     "Das Backend hat den hochgeladenen Teil nicht mehr. Lade das Backup erneut hoch.",
+  "The server returned an unexpected response. Check the reverse proxy configuration.":
+    "Der Server hat eine unerwartete Antwort gesendet. Prüfe die Konfiguration des Reverse-Proxys.",
+  "The server rejected the upload because the chunk is too large. Allow at least 16 MB per request in the reverse proxy.":
+    "Der Server hat den Upload abgelehnt, weil das Teilstück zu groß ist. Erlaube im Reverse-Proxy mindestens 16 MB pro Anfrage.",
   "The upload paused at {done} of {total}: {reason} Choose the same file to continue.":
     "Der Upload wurde bei {done} von {total} angehalten: {reason} Wähle dieselbe Datei aus, um fortzufahren.",
   "Continue upload": "Upload fortsetzen",
   "Paused at {done} of {total}. Choose the same file to continue; the uploaded part is kept for 24 hours.":
     "Bei {done} von {total} pausiert. Wähle dieselbe Datei aus, um fortzufahren; der hochgeladene Teil bleibt 24 Stunden erhalten.",
+  Applied: "Übernommen",
+  "Read name at {value0}": "Namen bei {value0} lesen",
+  "Reads the printed name caption at this moment and a few seconds after it.":
+    "Liest die eingeblendete Namenszeile an dieser Stelle und wenige Sekunden danach.",
+  "Search the whole video instead": "Stattdessen das ganze Video durchsuchen",
+  "Caption: “{value0}”": "Einblendung: „{value0}“",
+  "A single readable caption stays a suggestion for you to confirm. Names are applied automatically only after several matching captions.":
+    "Eine einzelne lesbare Einblendung bleibt ein Vorschlag zum Bestätigen. Automatisch übernommen werden Namen erst nach mehreren übereinstimmenden Einblendungen.",
+  "configure an enabled chat endpoint in Settings → Endpoints to use AI features":
+    "Richte unter Einstellungen → Endpunkte einen aktiven Chat-Endpunkt ein, um KI-Funktionen zu nutzen.",
+  "several speakers overlap at this position; choose a moment where only one person speaks":
+    "An dieser Stelle sprechen mehrere Personen gleichzeitig. Wähle einen Moment, in dem nur eine Person spricht.",
+  "no speech assigned to a speaker at this position; choose a moment while the person is speaking":
+    "An dieser Stelle ist keine Rede einem Sprecher zugeordnet. Wähle einen Moment, in dem die Person spricht.",
+  "this speaker already has a manually assigned name; rename them in the speaker list instead":
+    "Dieser Sprecher hat bereits einen manuell vergebenen Namen. Ändere ihn stattdessen in der Sprecherliste.",
 } as const

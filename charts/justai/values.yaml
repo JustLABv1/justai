@@ -343,6 +343,7 @@ ingress:
   # preserve that affinity when the backend is scaled horizontally.
   annotations:
     nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
     nginx.ingress.kubernetes.io/session-cookie-name: justai-stream-affinity
     nginx.ingress.kubernetes.io/session-cookie-samesite: Lax
   hosts:
