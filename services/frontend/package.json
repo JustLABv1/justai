@@ -15,10 +15,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/react": "^4.0.183",
-    "@assistant-ui/react": "^0.15.37",
-    "@assistant-ui/react-ai-sdk": "^1.4.24",
-    "@assistant-ui/react-lexical": "^0.2.24",
+    "@ai-sdk/react": "^4.0.184",
+    "@assistant-ui/react": "^0.15.38",
+    "@assistant-ui/react-ai-sdk": "^1.4.25",
+    "@assistant-ui/react-lexical": "^0.2.25",
     "@assistant-ui/react-markdown": "^0.14.26",
     "@base-ui/react": "^1.9.0",
     "@hugeicons/core-free-icons": "^4.4.0",
