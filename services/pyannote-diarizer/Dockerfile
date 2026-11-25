@@ -89,11 +89,11 @@ RUN apt-get update \
     && cd /tmp/openssl-source \
     && patch -p1 --forward < /tmp/openssl-CVE-2026-95691.patch \
     && ./config shared no-tests no-docs no-apps \
-      --prefix=/usr/local --libdir="lib/$(gcc -print-multiarch)" --openssldir=/usr/lib/ssl \
+      --prefix=/usr/local --libdir=lib --openssldir=/usr/lib/ssl \
     && make -j"$(getconf _NPROCESSORS_ONLN)" \
     && make DESTDIR=/tmp/openssl-root install_sw \
     && mv /tmp/openssl-root/usr/local/lib /opt/openssl-runtime \
-    && rm -rf /opt/openssl-runtime/*/pkgconfig /opt/openssl-runtime/*/cmake \
+    && rm -rf /opt/openssl-runtime/pkgconfig /opt/openssl-runtime/cmake \
     && find /opt/openssl-runtime \( -name '*.a' -o -name 'libssl.so' -o -name 'libcrypto.so' \) -delete
 
 # Debian trixie's libsqlite3-0 3.46.1 is affected by CVE-2026-119373,
@@ -121,14 +121,14 @@ RUN apt-get update \
     && CFLAGS="-O2 -DSQLITE_SECURE_DELETE -DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_FTS3_TOKENIZER \
       -DSQLITE_SOUNDEX=1 -DSQLITE_ENABLE_UNLOCK_NOTIFY -DSQLITE_ENABLE_STMTVTAB -DSQLITE_USE_URI=1 \
       -DSQLITE_LIKE_DOESNT_MATCH_BLOBS -DSQLITE_MAX_SCHEMA_RETRY=25 -DSQLITE_MAX_VARIABLE_NUMBER=250000" \
-      ./configure --prefix=/usr/local --libdir="/usr/local/lib/$(gcc -print-multiarch)" \
+      ./configure --prefix=/usr/local --libdir=/usr/local/lib \
         --soname=legacy --disable-static \
         --fts3 --fts4 --fts5 --rtree --session --dbstat --column-metadata \
     && make -j"$(getconf _NPROCESSORS_ONLN)" \
     && make DESTDIR=/tmp/sqlite-root install \
-    && mkdir -p "/opt/sqlite-runtime/$(gcc -print-multiarch)" \
-    && cp -a /tmp/sqlite-root/usr/local/lib/"$(gcc -print-multiarch)"/libsqlite3.so.* \
-      "/opt/sqlite-runtime/$(gcc -print-multiarch)/"
+    && mkdir -p /opt/sqlite-runtime \
+    && cp -a /tmp/sqlite-root/usr/local/lib/libsqlite3.so.* \
+      /opt/sqlite-runtime/
 
 FROM python:3.14.9-slim-trixie AS builder
 
@@ -197,14 +197,12 @@ RUN apt-get update \
     && groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /tmp app
 
-# /usr/local/lib/<multiarch> precedes the Debian multiarch directories in
-# ld.so.conf, so CPython's _ssl, _hashlib and _sqlite3 load the patched OpenSSL
-# and SQLite. prepare_runtime.py rejects any remaining dependency on Debian's
-# libssl3t64 or libsqlite3-0.
+# Use the same library search path in the Debian preparation stage and in
+# scratch. The scratch filesystem does not carry Debian's loader cache.
+ENV LD_LIBRARY_PATH=/usr/local/lib
 COPY --from=openssl-builder /opt/openssl-runtime/ /usr/local/lib/
 COPY --from=sqlite-builder /opt/sqlite-runtime/ /usr/local/lib/
-RUN ldconfig \
-    && ldd /usr/local/lib/python3.14/lib-dynload/_ssl.*.so > /tmp/ssl-deps \
+RUN ldd /usr/local/lib/python3.14/lib-dynload/_ssl.*.so > /tmp/ssl-deps \
     && grep -E 'libssl\.so\.3 => /usr/local/lib/' /tmp/ssl-deps \
     && grep -E 'libcrypto\.so\.3 => /usr/local/lib/' /tmp/ssl-deps \
     && ldd /usr/local/lib/python3.14/lib-dynload/_hashlib.*.so | grep -E 'libcrypto\.so\.3 => /usr/local/lib/' \
@@ -219,6 +217,11 @@ RUN python /tmp/prepare_runtime.py
 FROM scratch AS runtime-base
 
 COPY --from=runtime-base-prepared /runtime/ /
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
+# Exercise the dynamic loader in scratch before adding the application.
+USER 1000:1000
+RUN ["/usr/local/bin/python3.14", "-c", "import hashlib, sqlite3, ssl; ssl.create_default_context(); hashlib.sha256(b''); assert sqlite3.sqlite_version == '3.54.1'"]
 
 FROM runtime-base AS runtime
 
@@ -248,10 +251,11 @@ COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
 COPY --from=builder /app/model_sync.py /app/model_sync.py
 
-# Validate as the runtime user so imports cannot create root-owned caches.
-USER 1000:1000
+# Validate as the inherited runtime user so imports cannot create root-owned caches.
 
 RUN ["/opt/venv/bin/python", "-c", "import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path('/opt/venv/bin').glob('pip*')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
+
+RUN ["/opt/venv/bin/uvicorn", "--version"]
 
 EXPOSE 8000
 
