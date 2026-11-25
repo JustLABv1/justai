@@ -84,6 +84,7 @@ import {
 } from "@/components/panelui/select"
 import { Textarea } from "@/components/panelui/textarea"
 import { Checkbox } from "@/components/panelui/checkbox"
+import { seekMedia } from "@/lib/media-seek"
 import { api } from "@/lib/api"
 import { TranscriptionExportDialog } from "@/components/transcription-export-dialog"
 import {
@@ -1388,13 +1389,10 @@ export function TranscriptWorkspace({
     const offset = raw ? Number(raw) : NaN
     const media = mediaKind === "audio" ? audioRef.current : videoRef.current
     if (!Number.isFinite(offset) || offset < 0 || !media) return
-    const seek = () => {
-      media.currentTime = offset / 1000
-      onCurrentTimeChange(offset)
-    }
-    seek()
-    media.addEventListener("loadedmetadata", seek)
-    return () => media.removeEventListener("loadedmetadata", seek)
+    // Apply a shared timestamp link once per media source; seekMedia waits
+    // for metadata itself, so a later reload does not jump back to it.
+    void seekMedia(media, offset, false)
+    onCurrentTimeChange(offset)
   }, [
     audioSourceURL,
     mediaKind,
@@ -1418,9 +1416,8 @@ export function TranscriptWorkspace({
         knownDurationMs > 0
           ? Math.min(safeOffsetMs, knownDurationMs)
           : safeOffsetMs
-      media.currentTime = boundedOffsetMs / 1000
       onCurrentTimeChange(boundedOffsetMs)
-      if (play) void media.play().catch(() => undefined)
+      void seekMedia(media, boundedOffsetMs, play).catch(() => undefined)
     },
     [displayDurationMs, mediaKind, onCurrentTimeChange, videoRef]
   )
@@ -1435,13 +1432,14 @@ export function TranscriptWorkspace({
         return
       }
       if (summary.sampleStartMs === null || summary.sampleEndMs === null) return
-      media.currentTime = summary.sampleStartMs / 1000
       onCurrentTimeChange(summary.sampleStartMs)
       setSpeakerSample({
         speakerId: summary.speaker.id,
         endOffsetMs: summary.sampleEndMs,
       })
-      void media.play().catch(() => setSpeakerSample(null))
+      void seekMedia(media, summary.sampleStartMs, true).catch(() =>
+        setSpeakerSample(null)
+      )
     },
     [
       canSeek,
@@ -3256,9 +3254,15 @@ export function TranscriptWorkspace({
                                       event.currentTarget.currentTime * 1000
                                     )
                                     onCurrentTimeChange(current)
+                                    // Ignore updates from before the sample
+                                    // seek landed: the old position may lie
+                                    // past the sample end.
                                     if (
                                       speakerSample &&
-                                      current >= speakerSample.endOffsetMs
+                                      !event.currentTarget.seeking &&
+                                      current >= speakerSample.endOffsetMs &&
+                                      current <=
+                                        speakerSample.endOffsetMs + 3000
                                     ) {
                                       event.currentTarget.pause()
                                       setSpeakerSample(null)
@@ -3386,9 +3390,15 @@ export function TranscriptWorkspace({
                                       event.currentTarget.currentTime * 1000
                                     )
                                     onCurrentTimeChange(current)
+                                    // Ignore updates from before the sample
+                                    // seek landed: the old position may lie
+                                    // past the sample end.
                                     if (
                                       speakerSample &&
-                                      current >= speakerSample.endOffsetMs
+                                      !event.currentTarget.seeking &&
+                                      current >= speakerSample.endOffsetMs &&
+                                      current <=
+                                        speakerSample.endOffsetMs + 3000
                                     ) {
                                       event.currentTarget.pause()
                                       setSpeakerSample(null)
