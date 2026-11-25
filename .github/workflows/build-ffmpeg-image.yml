@@ -26,6 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Fingerprint FFmpeg sources
+        id: source
+        # Release builds reuse the image tagged with this source fingerprint.
+        run: echo "tag=src-$(git rev-parse --short=16 HEAD:docker/ffmpeg)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
@@ -43,6 +48,7 @@ jobs:
           tags: |
             ${{ env.FFMPEG_IMAGE }}:${{ env.FFMPEG_TAG }}
             ${{ env.FFMPEG_IMAGE }}:latest
+            ${{ env.FFMPEG_IMAGE }}:${{ steps.source.outputs.tag }}
           cache-from: type=gha,scope=ffmpeg
           cache-to: type=gha,scope=ffmpeg,mode=max
           provenance: mode=max
