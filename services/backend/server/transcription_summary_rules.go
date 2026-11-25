@@ -263,22 +263,11 @@ func (a *App) proposeTranscriptionSummaryRule(c *gin.Context) {
 		return
 	}
 	request.Language = transcriptionInsightLanguageLabel(language)
-	var endpointID uuid.NullUUID
-	var grammarModel string
-	if err = a.DB.QueryRowContext(c, `SELECT grammar_endpoint_id,COALESCE(grammar_model,'') FROM transcription_sessions WHERE id=$1`, sessionID).Scan(&endpointID, &grammarModel); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
+	endpoint, status, err := a.transcriptionChatEndpoint(c, sessionID)
+	if err != nil {
+		writeError(c, status, err)
 		return
 	}
-	if !endpointID.Valid {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("configure a grammar/chat endpoint first"))
-		return
-	}
-	endpoint, err := a.providerEndpoint(c, endpointID.UUID)
-	if err != nil || !endpointSupports(endpoint, "chat") {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("the grammar endpoint does not support chat"))
-		return
-	}
-	endpoint.ChatModel = firstNonEmptyString(grammarModel, endpoint.ChatModel)
 	input, _ := json.Marshal(request)
 	var proposal struct {
 		Rule string `json:"rule"`

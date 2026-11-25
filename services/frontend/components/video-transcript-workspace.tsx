@@ -3548,16 +3548,9 @@ export function TranscriptWorkspace({
                               ref={setCaptionActionSlot}
                             />
                             <Button
-                              disabled={!snapshot.session.grammarEndpointId}
                               onClick={() => setIdentifyOpen(true)}
                               size="icon-sm"
-                              title={
-                                snapshot.session.grammarEndpointId
-                                  ? t("Identify speaker names with AI")
-                                  : t(
-                                      "Configure a grammar/chat endpoint to identify speakers"
-                                    )
-                              }
+                              title={t("Identify speaker names with AI")}
                               variant="outline"
                             >
                               <Sparkles />

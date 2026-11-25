@@ -40,6 +40,7 @@ export type CaptionRun = {
     label: string
     offsetMs: number
     view?: string
+    manual?: boolean
   }[]
   observations: {
     frameIndex: number
@@ -89,6 +90,33 @@ function timestamp(ms: number) {
     .map((n) => String(n).padStart(2, "0"))
     .join(":")
 }
+const captionSettingsKey = "justai.speakerCaptions.endpoint"
+
+function readCaptionSettings(): { endpointId: string; model: string } {
+  try {
+    const value = JSON.parse(
+      window.localStorage.getItem(captionSettingsKey) ?? "{}"
+    ) as { endpointId?: unknown; model?: unknown }
+    return {
+      endpointId: typeof value.endpointId === "string" ? value.endpointId : "",
+      model: typeof value.model === "string" ? value.model : "",
+    }
+  } catch {
+    return { endpointId: "", model: "" }
+  }
+}
+
+function saveCaptionSettings(endpointId: string, model: string) {
+  try {
+    window.localStorage.setItem(
+      captionSettingsKey,
+      JSON.stringify({ endpointId, model })
+    )
+  } catch {
+    // Remembering the endpoint is a convenience only.
+  }
+}
+
 function message(error: unknown) {
   return error instanceof Error
     ? error.message
@@ -141,6 +169,8 @@ export function SpeakerVideoCaptions({
   const [budget, setBudget] = useState("24")
   const [manualAt, setManualAt] = useState<number | null>(null)
   const [autoApply, setAutoApply] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [resolving, setResolving] = useState("")
   const [busy, setBusy] = useState(false)
   const [loadingEndpoints, setLoadingEndpoints] = useState(false)
   const [error, setError] = useState("")
@@ -240,11 +270,19 @@ export function SpeakerVideoCaptions({
             (endpoint.capabilities.vision || endpoint.capabilities.multimodal)
         )
         setEndpoints(options)
+        const remembered = readCaptionSettings()
+        const rememberedAvailable = options.some(
+          (endpoint) => endpoint.id === remembered.endpointId
+        )
         setEndpointId((current) =>
           options.some((endpoint) => endpoint.id === current)
             ? current
-            : (options[0]?.id ?? "")
+            : rememberedAvailable
+              ? remembered.endpointId
+              : (options[0]?.id ?? "")
         )
+        if (rememberedAvailable)
+          setModel((current) => current || remembered.model)
       })
       .catch((error) => {
         if (!controller.signal.aborted) setError(message(error))
@@ -282,21 +320,38 @@ export function SpeakerVideoCaptions({
     }
   }, [imageIndex, runId, base, selectedImage])
 
+  function openDialog(at: number | null) {
+    setManualAt(at)
+    setShowSettings(false)
+    setLoadingEndpoints(true)
+    setOpen(true)
+  }
+  async function resolve(speaker: TranscriptionSpeaker, accept: boolean) {
+    setResolving(speaker.id)
+    try {
+      return await onResolveSuggestion(speaker, accept)
+    } finally {
+      setResolving("")
+    }
+  }
   async function start() {
     setBusy(true)
     setError("")
+    saveCaptionSettings(endpointId, model)
     try {
       const result = await api.post<{ run: CaptionRun }>(
         `${base}/speaker-captions`,
         {
           endpointId,
           model,
-          frameBudget: Number(budget),
+          // A manual read needs a few nearby retries at most.
+          frameBudget: manualAt === null ? Number(budget) : 6,
           autoApply: manualAt === null && autoApply,
           ...(manualAt === null ? {} : { offsetMs: manualAt }),
         }
       )
       await acceptRun(result.run)
+      setShowSettings(false)
     } catch (error) {
       setError(message(error))
     } finally {
@@ -369,6 +424,33 @@ export function SpeakerVideoCaptions({
       : run?.observations.find((item) => item.frameIndex === imageIndex)
   const failedImages =
     run?.observations.filter((item) => item.error).length ?? 0
+  const manualMode = manualAt !== null
+  // In "read name here" mode only the run for this exact moment is relevant;
+  // older whole-video results would bury the one answer the user asked for.
+  const manualResultReady =
+    manualMode &&
+    run?.status === "completed" &&
+    run.frames[0]?.manual === true &&
+    run.frames[0]?.offsetMs === manualAt
+  const showRun = Boolean(run) && (!manualMode || active || manualResultReady)
+  const showForm =
+    !active && (manualMode ? !manualResultReady : !run || showSettings)
+  const manyResults = (run?.results.length ?? 0) > 4
+  const speakerFor = (speakerId: string) =>
+    speakers.find((speaker) => speaker.id === speakerId)
+  const pendingSuggestion = (result: CaptionRun["results"][number]) => {
+    const speaker = speakerFor(result.speakerId)
+    return speaker &&
+      result.name &&
+      !result.applied &&
+      speaker.suggestedName === result.name
+      ? speaker
+      : null
+  }
+  const acceptedManually = (result: CaptionRun["results"][number]) =>
+    Boolean(result.name) &&
+    !result.applied &&
+    speakerFor(result.speakerId)?.displayName === result.name
 
   // Only call attention to this when something is left to do or went wrong;
   // a finished, clean run folds into a quiet icon button.
@@ -439,10 +521,7 @@ export function SpeakerVideoCaptions({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                setLoadingEndpoints(true)
-                setOpen(true)
-              }}
+              onClick={() => openDialog(null)}
             >
               {active
                 ? t("View analysis")
@@ -460,10 +539,7 @@ export function SpeakerVideoCaptions({
                 render={
                   <Button
                     aria-label={openLabel}
-                    onClick={() => {
-                      setLoadingEndpoints(true)
-                      setOpen(true)
-                    }}
+                    onClick={() => openDialog(null)}
                     size="icon-sm"
                     variant="outline"
                   />
@@ -484,16 +560,14 @@ export function SpeakerVideoCaptions({
               size="sm"
               variant="secondary"
               disabled={!available || active || busy}
-              onClick={() => {
-                setManualAt(
+              onClick={() =>
+                openDialog(
                   Math.max(
                     0,
                     captureVideoPosition?.() ?? Math.round(currentTimeMs)
                   )
                 )
-                setLoadingEndpoints(true)
-                setOpen(true)
-              }}
+              }
             >
               <ImageIcon data-icon="inline-start" />
               {t("Read name here")} · {timestamp(currentTimeMs)}
@@ -505,10 +579,20 @@ export function SpeakerVideoCaptions({
       <Dialog open={open} onOpenChange={setOpen}>
         <Dialog.Content className="sm:max-w-xl">
           <Dialog.Header
-            title={t("Read speaker name captions")}
-            description={t(
-              "Read printed speaker names across the video, with sharper crops and full-frame fallbacks. Manually named speakers stay unchanged."
-            )}
+            title={
+              manualMode
+                ? t("Read name at {value0}", { value0: timestamp(manualAt) })
+                : t("Read speaker name captions")
+            }
+            description={
+              manualMode
+                ? t(
+                    "Reads the printed name caption at this moment and a few seconds after it."
+                  )
+                : t(
+                    "Read printed speaker names across the video, with sharper crops and full-frame fallbacks. Manually named speakers stay unchanged."
+                  )
+            }
           />
           <Dialog.Body className="flex flex-col gap-4">
             {error ? (
@@ -516,12 +600,12 @@ export function SpeakerVideoCaptions({
                 <Alert.Description>{t(error)}</Alert.Description>
               </Alert>
             ) : null}
-            {run ? (
+            {run && showRun ? (
               <Frame
                 className="[&_[data-slot=frame-description]]:overflow-visible [&_[data-slot=frame-description]]:text-clip [&_[data-slot=frame-description]]:whitespace-normal"
                 aria-live="polite"
               >
-                <Frame.Header>
+                <Frame.Header className={manualResultReady ? "hidden" : ""}>
                   <Frame.Title>{statusLabel}</Frame.Title>
                   <Frame.Description>
                     {analyzed} {t("of")} {total} {t("images analyzed")}
@@ -581,7 +665,7 @@ export function SpeakerVideoCaptions({
                       </Frame.Content>
                     </Frame.Row>
                   ) : null}
-                  {run.results.length > 0 ? (
+                  {manyResults && !manualMode ? (
                     <Frame.Row>
                       <Frame.Content className="min-w-0 space-y-3">
                         <div
@@ -642,6 +726,15 @@ export function SpeakerVideoCaptions({
                       result.frameIndices,
                       run.frames
                     )
+                    const suggestion = pendingSuggestion(result)
+                    const accepted = acceptedManually(result)
+                    const caption = result.name
+                      ? run.observations.find(
+                          (item) =>
+                            result.frameIndices.includes(item.frameIndex) &&
+                            item.caption
+                        )?.caption
+                      : ""
                     return (
                       <Frame.Row key={`${run.id}:${result.speakerId}`}>
                         <Frame.Content className="min-w-0">
@@ -670,7 +763,7 @@ export function SpeakerVideoCaptions({
                                 className="max-w-full whitespace-normal"
                                 size="sm"
                                 variant={
-                                  result.applied
+                                  result.applied || accepted
                                     ? "success"
                                     : result.conflict
                                       ? "warning"
@@ -682,11 +775,13 @@ export function SpeakerVideoCaptions({
                                 {t(
                                   result.applied
                                     ? "Automatically applied"
-                                    : result.conflict
-                                      ? "Review needed"
-                                      : result.name
-                                        ? "Suggestion"
-                                        : "No name found"
+                                    : accepted
+                                      ? "Applied"
+                                      : result.conflict
+                                        ? "Review needed"
+                                        : result.name
+                                          ? "Suggestion"
+                                          : "No name found"
                                 )}
                               </Badge>
                               {result.name ? (
@@ -700,10 +795,39 @@ export function SpeakerVideoCaptions({
                               ) : null}
                             </div>
                           </div>
+                          {caption ? (
+                            <p className="mt-2 text-sm break-words text-muted-foreground">
+                              {t("Caption: “{value0}”", { value0: caption })}
+                            </p>
+                          ) : null}
                           {!result.name ? (
                             <p className="mt-2 text-sm leading-relaxed break-words text-muted-foreground">
                               {t(captionMissLabel(result.reason))}
                             </p>
+                          ) : null}
+                          {suggestion ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                disabled={resolving === suggestion.id}
+                                onClick={() => resolve(suggestion, true)}
+                              >
+                                {resolving === suggestion.id ? (
+                                  <Spinner data-icon="inline-start" />
+                                ) : null}
+                                {t("Accept name {value0}", {
+                                  value0: result.name,
+                                })}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={resolving === suggestion.id}
+                                onClick={() => resolve(suggestion, false)}
+                              >
+                                {t("Dismiss suggestion")}
+                              </Button>
+                            </div>
                           ) : null}
                           <details
                             className="group/evidence mt-3"
@@ -728,12 +852,6 @@ export function SpeakerVideoCaptions({
                                 <p className="text-sm text-muted-foreground">
                                   {t(
                                     "Conflicting captions · review before accepting"
-                                  )}
-                                </p>
-                              ) : result.name && !result.applied ? (
-                                <p className="text-sm text-muted-foreground">
-                                  {t(
-                                    "Suggestion · accept or dismiss in the speaker list"
                                   )}
                                 </p>
                               ) : null}
@@ -834,12 +952,14 @@ export function SpeakerVideoCaptions({
                       </Frame.Content>
                     </Frame.Row>
                   ) : null}
-                  {run.results.some((result) => result.name) ? (
+                  {run.results.some(
+                    (result) => result.name && !result.applied
+                  ) ? (
                     <Frame.Row>
                       <Frame.Content>
                         <p className="text-xs leading-relaxed text-muted-foreground">
                           {t(
-                            "Confidence is an evidence score, not a calibrated probability. Repeated crops of one moment count as one observation."
+                            "A single readable caption stays a suggestion for you to confirm. Names are applied automatically only after several matching captions."
                           )}
                         </p>
                       </Frame.Content>
@@ -848,75 +968,62 @@ export function SpeakerVideoCaptions({
                 </Frame.Panel>
               </Frame>
             ) : null}
-            {!active ? (
+            {showForm ? (
               <div className="flex flex-col gap-4">
-                <div className="flex flex-wrap gap-2">
+                {manualMode ? (
                   <Button
+                    className="self-start"
                     size="sm"
-                    variant={manualAt === null ? "default" : "secondary"}
-                    aria-pressed={manualAt === null}
+                    variant="ghost"
                     onClick={() => setManualAt(null)}
                   >
-                    {t("Search the video")}
+                    {t("Search the whole video instead")}
                   </Button>
+                ) : !playerActionSlot ? (
                   <Button
+                    className="self-start"
                     size="sm"
-                    variant={manualAt !== null ? "default" : "secondary"}
-                    aria-pressed={manualAt !== null}
+                    variant="secondary"
                     onClick={() =>
                       setManualAt(Math.max(0, Math.round(currentTimeMs)))
                     }
                   >
+                    <ImageIcon data-icon="inline-start" />
                     {t("Read name here")} · {timestamp(currentTimeMs)}
                   </Button>
-                </div>
-                {manualAt !== null ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t(
-                      "Read the caption at {value0}. The result is offered for review.",
-                      { value0: timestamp(manualAt) }
-                    )}
-                  </p>
                 ) : null}
-                <Field>
-                  <FieldLabel>{t("Vision endpoint")}</FieldLabel>
-                  <Select
-                    value={endpointId}
-                    onValueChange={(value) => {
-                      setEndpointId(value ?? "")
-                      setModel("")
-                    }}
-                    items={endpoints.map((item) => ({
-                      value: item.id,
-                      label: item.name,
-                    }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue
-                        placeholder={
-                          loadingEndpoints
-                            ? t("Loading endpoints…")
-                            : t("Select a vision endpoint")
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {endpoints.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {!loadingEndpoints && !endpoints.length ? (
-                    <FieldDescription>
-                      {t(
-                        "Configure an enabled endpoint with vision capability in Settings → Endpoints to read video images."
-                      )}
-                    </FieldDescription>
-                  ) : null}
-                </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel>{t("Vision endpoint")}</FieldLabel>
+                    <Select
+                      value={endpointId}
+                      onValueChange={(value) => {
+                        setEndpointId(value ?? "")
+                        setModel("")
+                      }}
+                      items={endpoints.map((item) => ({
+                        value: item.id,
+                        label: item.name,
+                      }))}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue
+                          placeholder={
+                            loadingEndpoints
+                              ? t("Loading endpoints…")
+                              : t("Select a vision endpoint")
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {endpoints.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
                   <Field>
                     <FieldLabel>{t("Vision model")}</FieldLabel>
                     <Input
@@ -930,97 +1037,103 @@ export function SpeakerVideoCaptions({
                       maxLength={200}
                     />
                   </Field>
-                  <Field>
-                    <FieldLabel>{t("Maximum images")}</FieldLabel>
-                    <Select
-                      value={budget}
-                      onValueChange={(value) => setBudget(value ?? "24")}
-                      items={[
-                        { value: "12", label: "12 images" },
-                        { value: "24", label: "24 images" },
-                        { value: "48", label: "48 images" },
-                      ]}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[12, 24, 48].map((value) => (
-                          <SelectItem key={value} value={String(value)}>
-                            {value} images
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
                 </div>
-                <p className="-mt-2 text-xs text-muted-foreground">
-                  {t(
-                    "The image budget includes nearby retries, sharper crops and full-frame fallbacks. Each analyzed image uses one model request."
-                  )}
-                </p>
-                <Frame>
-                  <Frame.Panel>
-                    <Frame.Row>
-                      <Frame.Content>
-                        <Frame.Title as="p">
+                {!loadingEndpoints && !endpoints.length ? (
+                  <p className="-mt-2 text-xs text-muted-foreground">
+                    {t(
+                      "Configure an enabled endpoint with vision capability in Settings → Endpoints to read video images."
+                    )}
+                  </p>
+                ) : null}
+                {!manualMode ? (
+                  <>
+                    <Field>
+                      <FieldLabel>{t("Maximum images")}</FieldLabel>
+                      <Select
+                        value={budget}
+                        onValueChange={(value) => setBudget(value ?? "24")}
+                        items={[
+                          { value: "12", label: "12 images" },
+                          { value: "24", label: "24 images" },
+                          { value: "48", label: "48 images" },
+                        ]}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[12, 24, 48].map((value) => (
+                            <SelectItem key={value} value={String(value)}>
+                              {value} images
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        {t(
+                          "The image budget includes nearby retries, sharper crops and full-frame fallbacks. Each analyzed image uses one model request."
+                        )}
+                      </FieldDescription>
+                    </Field>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
                           {t("Apply consistent matches automatically")}
-                        </Frame.Title>
-                        <Frame.Description>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
                           {t(
                             "Requires at least three matching images across two speech turns, with no conflicting name."
                           )}
-                        </Frame.Description>
-                      </Frame.Content>
-                      <Frame.Actions>
-                        <Switch
-                          aria-label={t(
-                            "Apply consistent matches automatically"
-                          )}
-                          checked={manualAt === null && autoApply}
-                          disabled={manualAt !== null}
-                          onCheckedChange={setAutoApply}
-                        />
-                      </Frame.Actions>
-                    </Frame.Row>
-                  </Frame.Panel>
-                </Frame>
-                <Alert tone="info" variant="plain">
-                  <Alert.Description>
-                    {t(
-                      "Selected crops and, when needed, full video frames are sent to the chosen endpoint. This reads printed names; it does not identify faces."
-                    )}
-                  </Alert.Description>
-                </Alert>
+                        </p>
+                      </div>
+                      <Switch
+                        aria-label={t("Apply consistent matches automatically")}
+                        checked={autoApply}
+                        onCheckedChange={setAutoApply}
+                      />
+                    </div>
+                  </>
+                ) : null}
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {t(
+                    "Selected crops and, when needed, full video frames are sent to the chosen endpoint. This reads printed names; it does not identify faces."
+                  )}
+                </p>
               </div>
             ) : null}
           </Dialog.Body>
           {!active ? (
             <Dialog.Footer>
               <Dialog.Close render={<Button variant="secondary" />}>
-                {t("Cancel")}
+                {showForm ? t("Cancel") : t("Close")}
               </Dialog.Close>
-              <Button
-                disabled={
-                  busy ||
-                  loadingEndpoints ||
-                  !available ||
-                  !endpointId ||
-                  !(
-                    model.trim() ||
-                    endpoint?.visionModel ||
-                    endpoint?.chatModel
-                  )
-                }
-                onClick={start}
-              >
-                {busy ? <Spinner data-icon="inline-start" /> : null}
-                {manualAt !== null
-                  ? t("Read name here")
-                  : run
-                    ? t("Start new analysis")
-                    : t("Start caption analysis")}
-              </Button>
+              {showForm ? (
+                <Button
+                  disabled={
+                    busy ||
+                    loadingEndpoints ||
+                    !available ||
+                    !endpointId ||
+                    !(
+                      model.trim() ||
+                      endpoint?.visionModel ||
+                      endpoint?.chatModel
+                    )
+                  }
+                  onClick={start}
+                >
+                  {busy ? <Spinner data-icon="inline-start" /> : null}
+                  {manualMode
+                    ? t("Read name here")
+                    : run
+                      ? t("Start new analysis")
+                      : t("Start caption analysis")}
+                </Button>
+              ) : !manualMode ? (
+                <Button variant="outline" onClick={() => setShowSettings(true)}>
+                  {t("Start new analysis")}
+                </Button>
+              ) : null}
             </Dialog.Footer>
           ) : null}
         </Dialog.Content>

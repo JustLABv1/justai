@@ -118,7 +118,11 @@ func planSpeakerCaptionFrames(segments []models.TranscriptionSegment, speakers [
 		for round := 0; round < 7; round++ {
 			for _, turn := range ordered {
 				duration := turn.TurnEndMs - turn.TurnStartMs
-				offsets := []int64{min(int64(2000), duration/2), min(int64(6000), duration/2), duration / 4, duration / 2, duration * 3 / 4, min(int64(12000), duration-1000), duration - 1000}
+				// Broadcasters (e.g. parliament feeds) usually fade in the name
+				// caption 10-30 s after a speaker starts, so sample that window
+				// first; very early frames still show the previous speaker or
+				// no caption at all.
+				offsets := []int64{min(int64(15000), duration/2), min(int64(25000), duration*3/4), min(int64(8000), duration/3), duration / 2, min(int64(35000), duration-1000), min(int64(3000), duration/4), duration - 1000}
 				turn.OffsetMs = turn.TurnStartMs + offsets[round]
 				duplicate := false
 				for _, prev := range samples[id] {
@@ -184,6 +188,66 @@ func captionFrameMatchesSpeaker(frame speakerCaptionFrame, segments []models.Tra
 		}
 	}
 	return found
+}
+
+// manualCaptionGapMs lets a manually chosen moment fall into a short speech
+// pause; the user picked it deliberately while watching the caption.
+const manualCaptionGapMs = 3000
+
+// speakerTurnAt returns the audio speaker talking at offsetMs, together with
+// the bounds of their surrounding turn. Segments without a speaker are
+// ignored and a short pause is attributed to the nearest speaker.
+func speakerTurnAt(offsetMs int64, segments []models.TranscriptionSegment) (uuid.UUID, int64, int64, error) {
+	rows := make([]models.TranscriptionSegment, 0, len(segments))
+	for _, s := range segments {
+		if s.SpeakerID != nil && s.EndOffsetMs > s.StartOffsetMs {
+			rows = append(rows, s)
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].StartOffsetMs < rows[j].StartOffsetMs })
+	anchor := -1
+	distance := int64(manualCaptionGapMs + 1)
+	covering := map[uuid.UUID]bool{}
+	for i, s := range rows {
+		d := int64(0)
+		if offsetMs < s.StartOffsetMs {
+			d = s.StartOffsetMs - offsetMs
+		} else if offsetMs > s.EndOffsetMs {
+			d = offsetMs - s.EndOffsetMs
+		}
+		if d == 0 {
+			covering[*s.SpeakerID] = true
+		}
+		if d < distance {
+			anchor, distance = i, d
+		}
+	}
+	if len(covering) > 1 {
+		return uuid.Nil, 0, 0, fmt.Errorf("several speakers overlap at this position; choose a moment where only one person speaks")
+	}
+	if anchor < 0 {
+		return uuid.Nil, 0, 0, fmt.Errorf("no speech assigned to a speaker at this position; choose a moment while the person is speaking")
+	}
+	id := *rows[anchor].SpeakerID
+	start, end := rows[anchor].StartOffsetMs, rows[anchor].EndOffsetMs
+	for i := anchor - 1; i >= 0 && *rows[i].SpeakerID == id && rows[i].EndOffsetMs >= start-manualCaptionGapMs; i-- {
+		start = min(start, rows[i].StartOffsetMs)
+	}
+	for i := anchor + 1; i < len(rows) && *rows[i].SpeakerID == id && rows[i].StartOffsetMs <= end+manualCaptionGapMs; i++ {
+		end = max(end, rows[i].EndOffsetMs)
+	}
+	return id, start, end, nil
+}
+
+// captionFrameUsable validates a sample before and after analysis. Planned
+// samples must sit inside a clean turn; a manually chosen moment only needs
+// to still belong to the same speaker.
+func captionFrameUsable(frame speakerCaptionFrame, segments []models.TranscriptionSegment) bool {
+	if frame.Manual {
+		id, _, _, err := speakerTurnAt(frame.OffsetMs, segments)
+		return err == nil && id == frame.SpeakerID
+	}
+	return captionFrameMatchesSpeaker(frame, segments)
 }
 
 type captionLimitedBuffer struct {
@@ -348,7 +412,7 @@ func resolveSpeakerCaptionResults(frames []speakerCaptionFrame, observations []s
 			continue
 		}
 		f := frames[o.FrameIndex]
-		if !captionFrameMatchesSpeaker(f, segments) {
+		if !captionFrameUsable(f, segments) {
 			continue
 		}
 		if groups[f.SpeakerID] == nil {
@@ -389,9 +453,14 @@ func resolveSpeakerCaptionResults(frames []speakerCaptionFrame, observations []s
 				best = v
 			}
 		}
-		confidence := min(best.confidence, 0.65)
+		// One readable caption is a strong hint but stays a suggestion; a
+		// moment the user picked deliberately counts for a little more.
+		confidence := min(best.confidence, 0.7)
+		if frames[best.indices[0]].Manual {
+			confidence = min(best.confidence, 0.8)
+		}
 		if len(best.indices) >= 2 {
-			confidence = min(best.confidence, 0.78)
+			confidence = min(best.confidence, 0.8)
 		}
 		if len(best.indices) >= 3 && len(best.turns) >= 2 && len(choices) == 1 {
 			confidence = min(best.confidence, 0.92)
@@ -454,7 +523,7 @@ func resolveSpeakerCaptionResults(frames []speakerCaptionFrame, observations []s
 				continue
 			}
 			f := frames[o.FrameIndex]
-			if f.SpeakerID != speaker.ID || !captionFrameMatchesSpeaker(f, segments) {
+			if f.SpeakerID != speaker.ID || !captionFrameUsable(f, segments) {
 				continue
 			}
 			indices = append(indices, o.FrameIndex)
@@ -492,22 +561,25 @@ func planManualSpeakerCaptionFrame(offsetMs int64, segments []models.Transcripti
 	if offsetMs < 0 {
 		return speakerCaptionFrame{}, fmt.Errorf("choose a position within a clear speaker turn")
 	}
-	for _, segment := range segments {
-		if segment.SpeakerID == nil || segment.StartOffsetMs > offsetMs || segment.EndOffsetMs < offsetMs {
+	id, start, end, err := speakerTurnAt(offsetMs, segments)
+	if err != nil {
+		return speakerCaptionFrame{}, err
+	}
+	for _, speaker := range speakers {
+		if speaker.ID != id {
 			continue
 		}
-		for _, speaker := range speakers {
-			if speaker.ID != *segment.SpeakerID || speakerNameProtected(speaker) {
-				continue
-			}
-			frame := speakerCaptionFrame{SpeakerID: speaker.ID, Label: speaker.Label, OffsetMs: offsetMs, TurnStartMs: segment.StartOffsetMs, TurnEndMs: segment.EndOffsetMs, Manual: true}
-			if captionFrameMatchesSpeaker(frame, segments) {
-				return frame, nil
-			}
+		if speakerNameProtected(speaker) {
+			return speakerCaptionFrame{}, fmt.Errorf("this speaker already has a manually assigned name; rename them in the speaker list instead")
 		}
+		return speakerCaptionFrame{SpeakerID: speaker.ID, Label: speaker.Label, OffsetMs: offsetMs, TurnStartMs: start, TurnEndMs: max(end, offsetMs+1000), Manual: true}, nil
 	}
-	return speakerCaptionFrame{}, fmt.Errorf("choose a position within a clear unnamed speaker turn")
+	return speakerCaptionFrame{}, fmt.Errorf("no speech assigned to a speaker at this position; choose a moment while the person is speaking")
 }
+
+// captionRetryStepMs moves a retry far enough that a caption which had not
+// faded in yet (or was already gone) is likely visible at the next sample.
+const captionRetryStepMs = 8000
 
 func nextSpeakerCaptionRetry(frame speakerCaptionFrame, observation speakerCaptionObservation, frames []speakerCaptionFrame, segments []models.TranscriptionSegment) (speakerCaptionFrame, bool) {
 	if observation.Error != "" || (observation.Name != "" && observation.Confidence >= 0.8 && !observation.Ambiguous) || frame.Retry >= 4 {
@@ -515,19 +587,25 @@ func nextSpeakerCaptionRetry(frame speakerCaptionFrame, observation speakerCapti
 	}
 	next := frame
 	next.Retry++
-	switch next.Retry {
-	case 1:
+	switch {
+	case observation.Reason == "uncertain_text" && frame.View == "":
+		// A caption is visible but hard to read: look closer at the same moment.
 		next.View = "sharp"
-	case 2:
+	case observation.Reason == "uncertain_text" && frame.View == "sharp":
 		next.View = "full"
-	case 3:
+	case frame.OffsetMs+captionRetryStepMs <= frame.TurnEndMs-1000:
+		// No caption yet: re-sample later in the same turn instead of
+		// re-reading a frame that simply does not show one.
 		next.View = ""
-		next.OffsetMs = min(frame.TurnEndMs-1000, frame.OffsetMs+3000)
-	case 4:
+		next.OffsetMs = frame.OffsetMs + captionRetryStepMs
+	case frame.View != "full":
+		// The turn is too short to move on; the caption may sit outside the
+		// lower-half crop.
 		next.View = "full"
-		next.OffsetMs = max(frame.TurnStartMs+1000, frame.OffsetMs-6000)
+	default:
+		return speakerCaptionFrame{}, false
 	}
-	if !captionFrameMatchesSpeaker(next, segments) {
+	if !captionFrameUsable(next, segments) {
 		return speakerCaptionFrame{}, false
 	}
 	for _, prev := range frames {

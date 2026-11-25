@@ -35,8 +35,8 @@ including the administrator who starts it.
 1. Stop live transcriptions and agent runs.
 2. Open **Administration → Backup** and upload the archive. It is sent in
    16 MB chunks, the same size as video upload parts, so any archive size works
-   behind a proxy that already accepts video uploads (for ingress-nginx,
-   `nginx.ingress.kubernetes.io/proxy-body-size` of at least `20m`).
+   behind a proxy that accepts requests of that size. The Helm chart sets
+   `nginx.ingress.kubernetes.io/proxy-body-size` to `20m` for ingress-nginx.
    Each chunk is retried on network errors and timeouts. If the upload still
    stops, or you pause it, close the tab, or reload, everything received so far
    is kept: choose the same file again and the upload continues from the last

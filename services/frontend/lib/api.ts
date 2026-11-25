@@ -98,7 +98,7 @@ async function request<T>(path: string, init?: APIRequestInit): Promise<T> {
   }
   try {
     if (!response.ok) {
-      let message = response.statusText
+      let message = response.statusText || `HTTP ${response.status}`
       let code: string | undefined
       let requestId: string | undefined
       let details: unknown
@@ -136,7 +136,18 @@ async function request<T>(path: string, init?: APIRequestInit): Promise<T> {
     if (response.status === 204) {
       return undefined as T
     }
-    return (await response.json()) as T
+    try {
+      return (await response.json()) as T
+    } catch (caught) {
+      if (!(caught instanceof Error) || caught.name !== "SyntaxError") {
+        throw caught
+      }
+      throw new APIError(
+        "The server returned an unexpected response. Check the reverse proxy configuration.",
+        response.status,
+        { code: "invalid_response" }
+      )
+    }
   } finally {
     // Keep the timeout alive while the response body is being decoded. A
     // stalled JSON body must not leave history or context requests pending

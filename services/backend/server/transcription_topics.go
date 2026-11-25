@@ -510,19 +510,14 @@ func (a *App) startTopicSummary(ctx context.Context, topic models.TranscriptionT
 			return http.StatusConflict, fmt.Errorf("the topic is too short to summarise")
 		}
 	}
-	var endpointID uuid.NullUUID
-	var grammarModel, title, language string
-	if err := a.DB.QueryRowContext(ctx, `SELECT grammar_endpoint_id, COALESCE(grammar_model, ''), title, language FROM transcription_sessions WHERE id = $1`, topic.SessionID).Scan(&endpointID, &grammarModel, &title, &language); err != nil {
+	var title, language string
+	if err := a.DB.QueryRowContext(ctx, `SELECT title, language FROM transcription_sessions WHERE id = $1`, topic.SessionID).Scan(&title, &language); err != nil {
 		return http.StatusInternalServerError, err
 	}
-	if !endpointID.Valid {
-		return http.StatusBadRequest, fmt.Errorf("configure a grammar/chat endpoint before generating summaries")
+	endpoint, status, err := a.transcriptionChatEndpoint(ctx, topic.SessionID)
+	if err != nil {
+		return status, err
 	}
-	endpoint, err := a.providerEndpoint(ctx, endpointID.UUID)
-	if err != nil || !endpointSupports(endpoint, "chat") {
-		return http.StatusBadRequest, fmt.Errorf("the configured grammar endpoint does not support chat")
-	}
-	endpoint.ChatModel = firstNonEmptyString(grammarModel, endpoint.ChatModel)
 	claim, err := a.DB.ExecContext(ctx, `UPDATE transcription_topics SET summary_status = 'processing', summary_error = '', updated_at = now() WHERE id = $1 AND summary_status <> 'processing'`, topic.ID)
 	if err != nil {
 		return http.StatusInternalServerError, err
