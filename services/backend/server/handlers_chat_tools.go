@@ -66,6 +66,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 	definitions = append(definitions, justAIControlTools()...)
 	definitions = append(definitions, transcriptionChatTools()...)
 	definitions = append(definitions, reminderTools()...)
+	definitions = append(definitions, transcriptionEditTools()...)
 	definitions = append(definitions, templateTools()...)
 	definitions = append(definitions, attachmentReadTools()...)
 	bindings := make(map[string]voiceToolBinding, len(definitions))
@@ -80,7 +81,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 }
 
 func isAssistantBuiltInToolName(name string) bool {
-	if isTemplateTool(name) || isAttachmentReadTool(name) || isReminderTool(name) {
+	if isTemplateTool(name) || isAttachmentReadTool(name) || isReminderTool(name) || isTranscriptionEditTool(name) {
 		return true
 	}
 	switch name {
@@ -111,6 +112,9 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 	}
 	if isReminderTool(toolName) {
 		return a.reminderTool(ctx, userID, organizationID, conversationID, toolName, arguments)
+	}
+	if isTranscriptionEditTool(toolName) {
+		return a.transcriptionEditTool(ctx, userID, organizationID, conversationID, toolName, arguments)
 	}
 	if isTemplateTool(toolName) {
 		result, artifact, err := a.templateTool(ctx, userID, organizationID, toolName, arguments)
@@ -339,7 +343,7 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 	action := strings.ToLower(strings.TrimSpace(envelope.Action))
 	toolName := ""
 	switch {
-	case action == "get_justai_help", action == "list_justai_tools", action == "navigate_justai", action == "start_live_transcription", action == "start_video_transcription", action == "get_transcription", isReminderTool(action):
+	case action == "get_justai_help", action == "list_justai_tools", action == "navigate_justai", action == "start_live_transcription", action == "start_video_transcription", action == "get_transcription", isReminderTool(action), isTranscriptionEditTool(action):
 		toolName = action
 	case strings.Contains(action, "dalle.text2im"), strings.Contains(action, "image_generation"), strings.Contains(action, "generate_image"):
 		toolName = "generate_image"

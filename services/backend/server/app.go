@@ -335,6 +335,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
 	org.POST("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
 	org.POST("/transcription/sessions/:id/join-code", a.platformFeature("transcription"), a.rotateTranscriptionJoinCode)
+	org.POST("/transcription/sessions/:id/chat", a.platformFeature("transcription"), a.openTranscriptionChat)
 	org.GET("/transcription/sessions/:id/notifications", a.platformFeature("transcription"), a.sessionNotifications)
 	org.PUT("/transcription/sessions/:id/notifications", a.platformFeature("transcription"), a.sessionNotifications)
 	org.GET("/notifications", a.listNotifications)

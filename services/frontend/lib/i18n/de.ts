@@ -5410,6 +5410,15 @@ export const de = {
     "Sag mir morgen um 9 wegen der Frist Bescheid",
   "Notify me when the debate on the budget is over":
     "Sag mir Bescheid, wenn die Haushaltsdebatte vorbei ist",
+  "Ask AI": "KI fragen",
+  "Ask AI about this transcript": "KI zu diesem Transkript fragen",
+  "Reads this transcript as it stands, also while it is still running.":
+    "Liest das Transkript auf aktuellem Stand mit, auch während es noch läuft.",
+  "Open in chat": "Im Chat öffnen",
+  "The chat could not be opened.": "Der Chat konnte nicht geöffnet werden.",
+  "Change topic selection": "Themenauswahl ändern",
+  "Name speaker": "Sprecher benennen",
+  "Correct transcript": "Transkript korrigieren",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

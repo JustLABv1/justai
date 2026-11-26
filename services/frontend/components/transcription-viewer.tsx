@@ -1,12 +1,13 @@
 "use client"
 
-import { CalendarClock, Eye, Radio, WifiOff } from "lucide-react"
+import { CalendarClock, Eye, Radio, Sparkles, WifiOff } from "lucide-react"
 import { TopicIcon } from "@/components/topic-icons"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
 import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import { Spinner } from "@/components/panelui/spinner"
 import { Switch } from "@/components/panelui/switch"
 import { api, APIError } from "@/lib/api"
@@ -91,6 +92,29 @@ export function TranscriptionViewer() {
   const [error, setError] = useState("")
   const [follow, setFollow] = useState(true)
   const lastOffset = useRef(-1)
+  const router = useRouter()
+  const [askBusy, setAskBusy] = useState(false)
+
+  // Opens the reader's chat about this transcript in JustAI; it reads the
+  // transcript as it stands with every question.
+  const askAI = async () => {
+    if (!org) return
+    setAskBusy(true)
+    try {
+      api.setOrganizationId(org)
+      const result = await api.post<{ conversation: { id: string } }>(
+        `/api/v1/transcription/sessions/${encodeURIComponent(session)}/chat`
+      )
+      router.push(`/${encodeURIComponent(result.conversation.id)}`)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : t("The chat could not be opened.")
+      )
+      setAskBusy(false)
+    }
+  }
   const endRef = useRef<HTMLDivElement>(null)
   const finished =
     snapshot?.session.status === "completed" ||
@@ -249,6 +273,17 @@ export function TranscriptionViewer() {
               <Badge variant="secondary">{t("Scheduled")}</Badge>
             ) : finished ? (
               <Badge variant="secondary">{t("Finished")}</Badge>
+            ) : null}
+            {/* Signed-in readers can ask the assistant about it; a link view cannot. */}
+            {session && org && !token ? (
+              <Button
+                className="ml-auto"
+                disabled={askBusy}
+                onClick={() => void askAI()}
+                size="sm"
+              >
+                <Sparkles data-icon="inline-start" /> {t("Ask AI")}
+              </Button>
             ) : null}
           </div>
           {interrupted?.interruptedAt ? (

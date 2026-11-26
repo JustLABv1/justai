@@ -10,6 +10,7 @@ import { Home, Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
+import { TranscriptChatDock } from "@/components/transcript-chat-dock"
 import { TemplatesView } from "@/components/templates-view"
 import { KnowledgeWorkspace } from "@/components/knowledge-workspace"
 import { useFolderTrail } from "@/lib/knowledge-folder-trail"
@@ -1326,6 +1327,37 @@ export function Workspace({
                   user={user}
                 />
               ))}
+            {(activeView === "transcription" ||
+              activeView === "video-transcription") &&
+            sessionViewMatches &&
+            activeSessionId &&
+            !disabledFeatures.transcription &&
+            !disabledFeatures.chat ? (
+              <TranscriptChatDock
+                key={activeSessionId}
+                onOpenFullChat={(conversationId) =>
+                  navigate("chat", conversationId)
+                }
+                renderChat={(conversation) => (
+                  <ChatView
+                    assistants={chatAgents}
+                    cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
+                    conversation={conversation}
+                    conversationId={conversation.id}
+                    displayName={user.displayName}
+                    embedded
+                    endpoints={endpoints}
+                    key={conversation.id}
+                    mcpServers={servers}
+                    notes={notes}
+                    onConversationUpdated={() => {
+                      void refreshConversations().catch(() => undefined)
+                    }}
+                  />
+                )}
+                sessionId={activeSessionId}
+              />
+            ) : null}
             {activeView === "video-transcription" &&
               sessionViewMatches &&
               (disabledFeatures.transcription ? (
