@@ -1,5 +1,6 @@
 "use client"
 
+import { Mascot } from "@/components/mascot"
 import { Workbench } from "@/components/panelui/workbench"
 import { Micro } from "@/components/panelui/micro"
 import { Tooltip } from "@/components/panelui/tooltip"
@@ -235,81 +236,113 @@ export function LiveTranscriptionConversationView({
     !snapshot.sources.some((source) => source.status === "connected")
   if (scheduled)
     return (
-      <div className="mx-auto w-full max-w-7xl rounded-2xl bg-card">
-        <header className="flex flex-wrap items-center justify-between gap-4 px-6 py-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-semibold">{snapshot.session.title}</h1>
-            <Badge variant="secondary">{t("Scheduled")}</Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {processingSettings}
-            <AlertDialog>
-              <AlertDialogTrigger
-                render={<Button size="sm" variant="destructive" />}
-              >
-                <X data-icon="inline-start" /> {t("Cancel scheduled capture")}
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogTitle>
-                  {t("Cancel scheduled capture?")}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t(
-                    "The stream will no longer start automatically at the scheduled time."
-                  )}
-                </AlertDialogDescription>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("Keep scheduled")}</AlertDialogCancel>
-                  <AlertDialogAction
-                    tone="destructive"
-                    onClick={() => void onStopSession()}
+      <Workbench
+        className="h-[max(32rem,calc(100dvh-8rem))]"
+        compactBelow={840}
+        inspectorWidth={384}
+        focusShortcut={false}
+      >
+        <Workbench.Canvas className="items-stretch justify-start bg-none p-0">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <header className="flex shrink-0 flex-wrap items-center gap-3 border-b px-5 py-4 sm:px-6">
+              <div className="flex min-w-0 flex-[1_1_16rem] flex-wrap items-center gap-2">
+                <h1 className="text-lg font-semibold">
+                  {snapshot.session.title}
+                </h1>
+                <Badge variant="secondary">{t("Scheduled")}</Badge>
+              </div>
+              <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center justify-end gap-2">
+                {processingSettings}
+                {topicsPanel && (
+                  <Workbench.InspectorTrigger
+                    aria-label={t("Topics")}
+                    className="w-auto gap-2 px-3"
                   >
-                    {t("Cancel capture")}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                    <PanelRight aria-hidden="true" /> {t("Topics")}
+                  </Workbench.InspectorTrigger>
+                )}
+                <AlertDialog>
+                  <AlertDialogTrigger
+                    render={<Button size="sm" variant="destructive" />}
+                  >
+                    <X data-icon="inline-start" />{" "}
+                    {t("Cancel scheduled capture")}
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogTitle>
+                      {t("Cancel scheduled capture?")}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t(
+                        "The stream will no longer start automatically at the scheduled time."
+                      )}
+                    </AlertDialogDescription>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>
+                        {t("Keep scheduled")}
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        tone="destructive"
+                        onClick={() => void onStopSession()}
+                      >
+                        {t("Cancel capture")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </header>
+            <section
+              aria-label={t("Scheduled capture")}
+              className="min-h-0 flex-1 overflow-y-auto px-5 py-6 text-center sm:px-6"
+            >
+              <div className="flex min-h-full flex-col items-center justify-center gap-5">
+                <Mascot
+                  state="sleeping"
+                  size={88}
+                  fallback={
+                    <CalendarClock
+                      aria-hidden="true"
+                      className="size-8 text-muted-foreground"
+                    />
+                  }
+                />
+                <div className="flex flex-col gap-2">
+                  <h2 className="text-xl font-semibold">
+                    {scheduledSources.some(
+                      (source) => source.transportStatus === "watching"
+                    )
+                      ? t("JustAI is waiting for the broadcast")
+                      : t("Your transcription is scheduled")}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {t(
+                      "JustAI will capture the stream automatically. You can close your browser."
+                    )}
+                  </p>
+                </div>
+                <div className="flex w-full flex-col items-center gap-3">
+                  {scheduledSources.map((source) => (
+                    <ScheduledCaptureCard
+                      key={source.id}
+                      onEditSchedule={onEditSchedule}
+                      source={source}
+                      topics={topics}
+                    />
+                  ))}
+                </div>
+              </div>
+            </section>
           </div>
-        </header>
-        <section
-          aria-label={t("Scheduled capture")}
-          className="flex flex-col items-center gap-5 px-6 py-8 text-center"
-        >
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <CalendarClock className="size-7" />
-          </div>
-          <div className="flex flex-col gap-2">
-            <h2 className="text-xl font-semibold">
-              {scheduledSources.some(
-                (source) => source.transportStatus === "watching"
-              )
-                ? t("JustAI is waiting for the broadcast")
-                : t("Your transcription is scheduled")}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {t(
-                "JustAI will capture the stream automatically. You can close your browser."
-              )}
-            </p>
-          </div>
-          <div className="flex w-full flex-col items-center gap-3">
-            {scheduledSources.map((source) => (
-              <ScheduledCaptureCard
-                key={source.id}
-                onEditSchedule={onEditSchedule}
-                source={source}
-                topics={topics}
-              />
-            ))}
-          </div>
-          {topicsPanel ? (
-            <div className="w-full max-w-2xl">{topicsPanel}</div>
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            {t("The transcript will appear here when capture starts.")}
-          </p>
-        </section>
-      </div>
+        </Workbench.Canvas>
+        {topicsPanel && (
+          <Workbench.Inspector title={t("Topics")} className="ps-2">
+            <div className="w-full overflow-y-auto rounded-[20px] bg-background p-4">
+              {topicsPanel}
+            </div>
+          </Workbench.Inspector>
+        )}
+      </Workbench>
     )
 
   const header = (
@@ -484,26 +517,6 @@ export function LiveTranscriptionConversationView({
           </Badge>
         )}
       </div>
-      {waitingForTopic && (
-        <div className="flex items-start gap-3 py-6" role="status">
-          <CalendarClock className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-          <div>
-            {nextTopic && (
-              <p className="text-sm font-medium">{nextTopic.title}</p>
-            )}
-            {plannedTime && (
-              <p className="text-sm">
-                {t("Planned for {value0} (Berlin time)", {
-                  value0: plannedTime,
-                })}
-              </p>
-            )}
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("Transcription begins when a selected topic is called.")}
-            </p>
-          </div>
-        </div>
-      )}
       <div
         aria-label={t("Transcript")}
         className={`divide-y overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${mode === "stream" ? "min-h-0 flex-1" : "max-h-[min(55dvh,32rem)]"}`}
@@ -512,6 +525,42 @@ export function LiveTranscriptionConversationView({
           lines.length > 0 || (partial && !waitingForTopic) ? 0 : undefined
         }
       >
+        {waitingForTopic && (
+          <div
+            className={
+              lines.length === 0
+                ? "flex min-h-full flex-col items-center justify-center gap-4 px-4 py-8 text-center"
+                : "flex items-center gap-3 py-4"
+            }
+            role="status"
+          >
+            <Mascot
+              state="sleeping"
+              size={lines.length === 0 ? 88 : 40}
+              fallback={
+                <CalendarClock
+                  aria-hidden="true"
+                  className="size-6 shrink-0 text-muted-foreground"
+                />
+              }
+            />
+            <div className="max-w-md">
+              {nextTopic && (
+                <p className="text-sm font-medium">{nextTopic.title}</p>
+              )}
+              {plannedTime && (
+                <p className="text-sm">
+                  {t("Planned for {value0} (Berlin time)", {
+                    value0: plannedTime,
+                  })}
+                </p>
+              )}
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("Transcription begins when a selected topic is called.")}
+              </p>
+            </div>
+          </div>
+        )}
         {lines.length === 0 && !partial && !waitingForTopic ? (
           <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
             <div className="relative grid size-24 place-items-center rounded-full border border-primary/20 bg-primary/5 text-primary shadow-[0_0_0_12px_hsl(var(--primary)/0.035)]">
