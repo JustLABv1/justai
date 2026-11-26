@@ -5222,8 +5222,8 @@ export const de = {
   "Sent to {value0} browser(s).": "An {value0} Browser gesendet.",
   "E-mail sent.": "E-Mail gesendet.",
   "E-mail failed: {value0}": "E-Mail fehlgeschlagen: {value0}",
-  "Turn on browser or e-mail notifications first.":
-    "Schalte zuerst Browser- oder E-Mail-Benachrichtigungen ein.",
+  "Turn on browser, e-mail or webhook notifications first.":
+    "Schalte zuerst Browser-, E-Mail- oder Webhook-Benachrichtigungen ein.",
   "Notifications for this transcript are off":
     "Benachrichtigungen für dieses Transkript sind aus",
   "Notifications for this transcript are on":
@@ -5281,6 +5281,48 @@ export const de = {
   "Set reminder": "Erinnerung stellen",
   "List reminders": "Erinnerungen anzeigen",
   "Cancel reminder": "Erinnerung löschen",
+  "Sent to {value0} webhook(s).": "An {value0} Webhook(s) gesendet.",
+  "JSON (signed)": "JSON (signiert)",
+  "In Slack, add the Incoming Webhooks app to a channel and copy its URL (https://hooks.slack.com/…).":
+    "Füge in Slack einem Kanal die App „Incoming Webhooks“ hinzu und kopiere ihre URL (https://hooks.slack.com/…).",
+  "In a Teams channel, open Workflows, choose “Post to a channel when a webhook request is received” and copy the URL.":
+    "Öffne in einem Teams-Kanal „Workflows“, wähle „Bei Empfang einer Webhookanforderung in einem Kanal posten“ und kopiere die URL.",
+  "In Discord, open the channel settings, Integrations, Webhooks, create one and copy its URL.":
+    "Öffne in Discord die Kanaleinstellungen, dann Integrationen und Webhooks, lege einen an und kopiere seine URL.",
+  "JustAI posts JSON to this address. Each request is signed: X-JustAI-Signature is sha256= followed by the HMAC-SHA256 of “timestamp.body” with your secret, and X-JustAI-Timestamp holds the timestamp.":
+    "JustAI schickt JSON an diese Adresse. Jede Anfrage ist signiert: X-JustAI-Signature enthält sha256= und den HMAC-SHA256 von „Zeitstempel.Body“ mit deinem Geheimnis, X-JustAI-Timestamp den Zeitstempel.",
+  "The webhook could not be changed.":
+    "Der Webhook konnte nicht geändert werden.",
+  "Test sent to “{value0}”.": "Test an „{value0}“ gesendet.",
+  "The test failed.": "Der Test ist fehlgeschlagen.",
+  "The webhook could not be removed.":
+    "Der Webhook konnte nicht entfernt werden.",
+  "Turned off after repeated errors: {value0}":
+    "Nach wiederholten Fehlern ausgeschaltet: {value0}",
+  "Last delivery failed: {value0}":
+    "Letzte Zustellung fehlgeschlagen: {value0}",
+  "Last delivered {value0}": "Zuletzt zugestellt {value0}",
+  "Not used yet": "Noch nicht verwendet",
+  Webhooks: "Webhooks",
+  "Sends your notifications to other tools: Slack, Mattermost, Microsoft Teams, Discord, or as signed JSON to your own systems.":
+    "Schickt deine Benachrichtigungen an andere Dienste: Slack, Mattermost, Microsoft Teams, Discord oder als signiertes JSON an eigene Systeme.",
+  "In Mattermost, open Integrations, Incoming Webhooks, add one for a channel and copy its URL (https://your-server/hooks/…).":
+    "Öffne in Mattermost „Integrationen“ und dann „Eingehende Webhooks“, lege einen für einen Kanal an und kopiere seine URL (https://dein-server/hooks/…).",
+  "Add webhook": "Webhook hinzufügen",
+  "No webhooks yet.": "Noch keine Webhooks.",
+  "Send a test to “{value0}”": "Test an „{value0}“ senden",
+  "Remove “{value0}”": "„{value0}“ entfernen",
+  "“{value0}” on": "„{value0}“ an",
+  "Notifications will no longer be sent to this address.":
+    "An diese Adresse werden keine Benachrichtigungen mehr gesendet.",
+  "Remove “{value0}”?": "„{value0}“ entfernen?",
+  "Copy the signing secret": "Signatur-Geheimnis kopieren",
+  "Your system checks each request with this secret. It is shown only now.":
+    "Dein System prüft jede Anfrage mit diesem Geheimnis. Es wird nur jetzt angezeigt.",
+  "JustAI sends each of your notifications to this address.":
+    "JustAI schickt jede deiner Benachrichtigungen an diese Adresse.",
+  Service: "Dienst",
+  "Webhook URL": "Webhook-URL",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

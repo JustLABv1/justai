@@ -4,6 +4,7 @@ import { Send } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
+import { NotificationWebhooks } from "@/components/notification-webhooks"
 import { Button } from "@/components/panelui/button"
 import { Frame } from "@/components/panelui/frame"
 import { Spinner } from "@/components/panelui/spinner"
@@ -94,19 +95,24 @@ export function NotificationSettingsPanel() {
     try {
       const result = await api.post<{
         pushed: number
+        webhooks: number
         emailed: boolean
         emailError: string
       }>("/api/v1/notifications/test")
       const parts = []
       if (result.pushed > 0)
         parts.push(t("Sent to {value0} browser(s).", { value0: result.pushed }))
+      if (result.webhooks > 0)
+        parts.push(
+          t("Sent to {value0} webhook(s).", { value0: result.webhooks })
+        )
       if (result.emailed) parts.push(t("E-mail sent."))
       if (result.emailError)
         parts.push(t("E-mail failed: {value0}", { value0: result.emailError }))
       setMessage(
         parts.length > 0
           ? parts.join(" ")
-          : t("Turn on browser or e-mail notifications first.")
+          : t("Turn on browser, e-mail or webhook notifications first.")
       )
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : String(caught))
@@ -197,6 +203,7 @@ export function NotificationSettingsPanel() {
           </Frame.Row>
         </Frame.Panel>
       </Frame>
+      <NotificationWebhooks />
       {message ? (
         <p className="text-sm text-muted-foreground" role="status">
           {message}

@@ -284,7 +284,7 @@ func (a *App) notify(ctx context.Context, event notificationEvent) {
 			continue
 		}
 		liveStreamEvents.inc("notification_" + event.Kind)
-		a.deliverNotification(ctx, recipient, id, title, body, linkLabel, event.Link)
+		a.deliverNotification(ctx, recipient, id, event.Kind, title, body, linkLabel, event.Link)
 	}
 }
 
@@ -307,7 +307,7 @@ func (a *App) pushSubject(ctx context.Context) string {
 	return "mailto:notifications@justai.invalid"
 }
 
-func (a *App) deliverNotification(ctx context.Context, recipient notificationRecipient, id uuid.UUID, title, body, linkLabel, path string) {
+func (a *App) deliverNotification(ctx context.Context, recipient notificationRecipient, id uuid.UUID, kind, title, body, linkLabel, path string) {
 	link := a.publicLink(ctx, path)
 	if smtp := a.effectiveSMTP(ctx); smtp.Host != "" && recipient.EmailEnabled && recipient.Email != "" {
 		if err := sendMail(smtp, mailMessage{To: recipient.Email, Subject: title, Text: body, LinkLabel: linkLabel, Link: link}); err != nil {
@@ -315,6 +315,7 @@ func (a *App) deliverNotification(ctx context.Context, recipient notificationRec
 		}
 	}
 	a.pushToUser(ctx, recipient.UserID, map[string]string{"title": title, "body": body, "url": link, "tag": id.String()})
+	a.deliverWebhooks(ctx, recipient.UserID, webhookMessage{ID: id.String(), Type: kind, Title: title, Body: body, URL: link, LinkLabel: linkLabel, CreatedAt: time.Now().UTC()})
 }
 
 // pushToUser sends a message to every browser the user subscribed. It returns how
@@ -509,6 +510,11 @@ func (a *App) testNotification(c *gin.Context) {
 		title, body = "JustAI-Testbenachrichtigung", "Benachrichtigungen kommen hier an."
 	}
 	pushed := a.pushToUser(c, principal.UserID, map[string]string{"title": title, "body": body, "url": a.publicLink(c, "/"), "tag": "justai-test"})
+	linkLabel := "Open JustAI"
+	if strings.HasPrefix(locale, "de") {
+		linkLabel = "JustAI öffnen"
+	}
+	hooked := a.deliverWebhooks(c, principal.UserID, webhookMessage{ID: uuid.NewString(), Type: "test", Title: title, Body: body, URL: a.publicLink(c, "/"), LinkLabel: linkLabel, CreatedAt: time.Now().UTC()})
 	emailed, emailError := false, ""
 	if smtp := a.effectiveSMTP(c); smtp.Host != "" && emailEnabled && email != "" {
 		if err := sendMail(smtp, mailMessage{To: email, Subject: title, Text: body}); err != nil {
@@ -517,7 +523,7 @@ func (a *App) testNotification(c *gin.Context) {
 			emailed = true
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"pushed": pushed, "emailed": emailed, "emailError": emailError})
+	c.JSON(http.StatusOK, gin.H{"pushed": pushed, "webhooks": hooked, "emailed": emailed, "emailError": emailError})
 }
 
 // sessionNotifications: GET or PUT {"muted": bool} for one transcript.
