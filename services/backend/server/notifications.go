@@ -275,12 +275,21 @@ func (a *App) notify(ctx context.Context, event notificationEvent) {
 		return
 	}
 	session := uuid.NullUUID{UUID: event.SessionID, Valid: event.SessionID != uuid.Nil}
+	var owner uuid.UUID
+	if session.Valid {
+		_ = a.DB.QueryRowContext(ctx, `SELECT user_id FROM transcription_sessions WHERE id = $1`, event.SessionID).Scan(&owner)
+	}
 	for _, recipient := range recipients {
 		title, body, linkLabel := notificationTexts(recipient.Locale, event)
+		link := event.Link
+		// People it was shared with open transcripts in the read-only view.
+		if session.Valid && recipient.UserID != owner {
+			link = readerLink(event.Link, event.OrganizationID)
+		}
 		var id uuid.UUID
 		err := a.DB.QueryRowContext(ctx, `INSERT INTO notifications (user_id, organization_id, kind, title, body, link, session_id, dedupe_key)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id`,
-			recipient.UserID, event.OrganizationID, event.Kind, title, body, event.Link, session, event.DedupeKey).Scan(&id)
+			recipient.UserID, event.OrganizationID, event.Kind, title, body, link, session, event.DedupeKey).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue // announced before
 		}
@@ -289,7 +298,7 @@ func (a *App) notify(ctx context.Context, event notificationEvent) {
 			continue
 		}
 		liveStreamEvents.inc("notification_" + event.Kind)
-		a.deliverNotification(ctx, recipient, id, event.Kind, title, body, linkLabel, event.Link)
+		a.deliverNotification(ctx, recipient, id, event.Kind, title, body, linkLabel, link)
 	}
 }
 
@@ -564,4 +573,14 @@ func (a *App) sessionNotifications(c *gin.Context) {
 	var muted bool
 	_ = a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM transcription_notification_mutes WHERE session_id = $1 AND user_id = $2)`, sessionID, principal.UserID).Scan(&muted)
 	c.JSON(http.StatusOK, gin.H{"muted": muted})
+}
+
+// readerLink turns a transcript's page into its read-only view for a reader.
+func readerLink(path string, organizationID uuid.UUID) string {
+	for _, prefix := range []string{"/live-transcription/", "/video-transcription/"} {
+		if id, ok := strings.CutPrefix(path, prefix); ok {
+			return "/transcription/view?session=" + id + "&org=" + organizationID.String()
+		}
+	}
+	return path
 }

@@ -821,7 +821,7 @@ func (a *App) searchConversationTranscripts(ctx context.Context, conversationID 
 		LEFT JOIN transcription_speakers sp ON sp.id = tsg.speaker_id
 		WHERE cts.conversation_id = $1
 		  AND ts.organization_id = c.organization_id
-		  AND ts.user_id = c.user_id
+		  AND (ts.user_id = c.user_id OR EXISTS (SELECT 1 FROM transcription_readers tr WHERE tr.session_id = ts.id AND tr.user_id = c.user_id))
 		  AND tsg.canonical = TRUE
 		  AND to_tsvector('simple', tsg.text) @@ to_tsquery('simple', $2)
 		ORDER BY ts_rank(to_tsvector('simple', tsg.text), to_tsquery('simple', $2)) DESC,

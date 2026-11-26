@@ -8,7 +8,9 @@ import {
 import { storageReferenceItems } from "@/lib/composer-storage-references"
 import { useTranslations } from "@/components/locale-provider"
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -157,7 +159,15 @@ type Props = {
   onConversationMissing?: () => void
   onNavigate?: (view: ViewId) => void
   onOpenHistory?: () => void
+  /**
+   * Shown inside another page (the chat beside a transcript): no full-page
+   * backdrop and no seasonal weather on the composer.
+   */
+  embedded?: boolean
 }
+
+/** True inside a chat that is embedded in another page. */
+const ChatEmbeddedContext = createContext(false)
 
 type AssistantHistoryResponse = {
   repository?: {
@@ -2432,6 +2442,7 @@ function Composer({
   voiceError?: string | null
   onVoiceErrorClear?: () => void
 }) {
+  const embedded = useContext(ChatEmbeddedContext)
   const { t, locale } = useTranslations()
 
   const voiceControls = useVoiceControls()
@@ -3022,7 +3033,7 @@ function Composer({
                     compact && "flex flex-wrap items-center gap-2"
                   )}
                   data-running={isThreadRunning}
-                  data-seasonal-composer={compact ? "" : undefined}
+                  data-seasonal-composer={compact && !embedded ? "" : undefined}
                 >
                   <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                     <Quote className="size-3.5 shrink-0" aria-hidden="true" />
@@ -3191,21 +3202,25 @@ function Composer({
                             </Menu.SubContent>
                           </Menu.Sub>
                         </Prompt.Menu>
-                        <Prompt.Tool
-                          label={t("Search Storage")}
-                          pressed={searchStorage}
-                          onPressedChange={onSearchStorageChange}
-                          showLabel={!compact}
-                          className={cn(
-                            "h-8 text-xs",
-                            searchStorage && "bg-primary/10 text-primary"
-                          )}
-                          title={t(
-                            "Search workspace Storage for this conversation. Files and / references still work when this is off."
-                          )}
-                        >
-                          <Database className="size-4" aria-hidden="true" />
-                        </Prompt.Tool>
+                        {/* Beside a transcript the chat answers from that
+                            transcript only, so searching Storage would not apply. */}
+                        {!embedded && (
+                          <Prompt.Tool
+                            label={t("Search Storage")}
+                            pressed={searchStorage}
+                            onPressedChange={onSearchStorageChange}
+                            showLabel={!compact}
+                            className={cn(
+                              "h-8 text-xs",
+                              searchStorage && "bg-primary/10 text-primary"
+                            )}
+                            title={t(
+                              "Search workspace Storage for this conversation. Files and / references still work when this is off."
+                            )}
+                          >
+                            <Database className="size-4" aria-hidden="true" />
+                          </Prompt.Tool>
+                        )}
                         {onOpenHistory && (
                           <Button
                             aria-label={t("Open conversation history")}
@@ -3357,6 +3372,7 @@ function AssistantThreadLayout({
   onVoiceErrorClear,
 }: AssistantThreadLayoutProps) {
   const { t } = useTranslations()
+  const embedded = useContext(ChatEmbeddedContext)
 
   const isEmpty = useAuiState((state) => state.thread.messages.length === 0)
   const latestAssistantMessageId = useAuiState((state) => {
@@ -3383,7 +3399,7 @@ function AssistantThreadLayout({
           !isEmpty && "bg-background"
         )}
       >
-        {isEmpty && <ChatBackdrop />}
+        {isEmpty && !embedded && <ChatBackdrop />}
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
           <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
             <Quote className="size-3.5" aria-hidden="true" />
@@ -4055,6 +4071,7 @@ export function ChatView({
   onConversationMissing,
   onEnsureConversation,
   onOpenHistory,
+  embedded = false,
 }: Props) {
   const { t } = useTranslations()
 
@@ -4626,109 +4643,111 @@ export function ChatView({
         : "default"
 
   return (
-    <div
-      aria-busy={conversationLoading}
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-    >
+    <ChatEmbeddedContext.Provider value={embedded}>
       <div
-        className="chat-surface-content relative flex min-h-0 flex-1 flex-col"
-        data-loading={conversationLoading ? "true" : undefined}
+        aria-busy={conversationLoading}
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        {surfaceReady && surfaceMatchesRoute && (
+        <div
+          className="chat-surface-content relative flex min-h-0 flex-1 flex-col"
+          data-loading={conversationLoading ? "true" : undefined}
+        >
+          {surfaceReady && surfaceMatchesRoute && (
+            <div
+              key={`${surfaceKey}:${assistantSurfaceKey}`}
+              className="chat-surface-enter flex min-h-0 flex-1 flex-col"
+            >
+              <AssistantChatSurface
+                displayName={displayName}
+                activeEndpoint={activeEndpoint}
+                assistants={assistants}
+                cacheScope={cacheScope}
+                conversationId={activeConversationId}
+                conversationAssistantId={conversation?.assistantId}
+                conversationEndpointId={conversation?.endpointId}
+                conversationChatModel={conversation?.chatModel}
+                endpoints={activeChatEndpoints}
+                mcpServers={mcpServers}
+                notes={notes}
+                initialMessages={initialMessages}
+                onConversationCreated={handleSurfaceConversationCreated}
+                onConversationUpdated={handleSurfaceConversationUpdated}
+                onConversationSettled={onConversationSettled}
+                onEnsureConversation={ensureConversation}
+                onAssistantSelectionChange={handleAssistantSelectionChange}
+                onAttachMCP={attachMCPServer}
+                onRemoveMCP={removeMCPServer}
+                onAttachNote={attachNote}
+                onRemoveNote={removeNote}
+                onRemoveRepository={removeRepository}
+                onRemoveKnowledge={removeUploadedFile}
+                onRemoveTranscription={removeTranscription}
+                onSaveKnowledge={saveKnowledgeSource}
+                onOpenHistory={onOpenHistory}
+                onRemoveUpload={removeUploadedFile}
+                onUpload={uploadFile}
+                conversationContext={conversationContext}
+              />
+            </div>
+          )}
+        </div>
+        {conversationLoading && (
           <div
-            key={`${surfaceKey}:${assistantSurfaceKey}`}
-            className="chat-surface-enter flex min-h-0 flex-1 flex-col"
+            aria-live="polite"
+            className="chat-history-loading absolute inset-0 z-20 flex items-center justify-center bg-background/95 text-sm text-muted-foreground backdrop-blur-sm"
+            role="status"
           >
-            <AssistantChatSurface
-              displayName={displayName}
-              activeEndpoint={activeEndpoint}
-              assistants={assistants}
-              cacheScope={cacheScope}
-              conversationId={activeConversationId}
-              conversationAssistantId={conversation?.assistantId}
-              conversationEndpointId={conversation?.endpointId}
-              conversationChatModel={conversation?.chatModel}
-              endpoints={activeChatEndpoints}
-              mcpServers={mcpServers}
-              notes={notes}
-              initialMessages={initialMessages}
-              onConversationCreated={handleSurfaceConversationCreated}
-              onConversationUpdated={handleSurfaceConversationUpdated}
-              onConversationSettled={onConversationSettled}
-              onEnsureConversation={ensureConversation}
-              onAssistantSelectionChange={handleAssistantSelectionChange}
-              onAttachMCP={attachMCPServer}
-              onRemoveMCP={removeMCPServer}
-              onAttachNote={attachNote}
-              onRemoveNote={removeNote}
-              onRemoveRepository={removeRepository}
-              onRemoveKnowledge={removeUploadedFile}
-              onRemoveTranscription={removeTranscription}
-              onSaveKnowledge={saveKnowledgeSource}
-              onOpenHistory={onOpenHistory}
-              onRemoveUpload={removeUploadedFile}
-              onUpload={uploadFile}
-              conversationContext={conversationContext}
-            />
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div
+                aria-hidden="true"
+                className="chat-history-loading-logo relative size-14"
+              >
+                <BrandMark className="absolute inset-0 size-full text-[var(--brand-foreground)]/25" />
+                <span className="chat-history-loading-logo-sheen absolute inset-0">
+                  <BrandMark className="size-full" />
+                </span>
+              </div>
+              <p className="font-medium text-foreground">
+                {t("Loading conversation…")}
+              </p>
+            </div>
           </div>
         )}
-      </div>
-      {conversationLoading && (
-        <div
-          aria-live="polite"
-          className="chat-history-loading absolute inset-0 z-20 flex items-center justify-center bg-background/95 text-sm text-muted-foreground backdrop-blur-sm"
-          role="status"
-        >
-          <div className="flex flex-col items-center gap-4 text-center">
-            <div
-              aria-hidden="true"
-              className="chat-history-loading-logo relative size-14"
-            >
-              <BrandMark className="absolute inset-0 size-full text-[var(--brand-foreground)]/25" />
-              <span className="chat-history-loading-logo-sheen absolute inset-0">
-                <BrandMark className="size-full" />
-              </span>
+        {historyError && (
+          <div
+            aria-live="assertive"
+            className="absolute inset-0 z-20 flex items-center justify-center bg-background/95 p-6 text-center backdrop-blur-sm"
+            role="alert"
+          >
+            <div className="flex max-w-sm flex-col items-center gap-3">
+              <p className="font-medium text-foreground">
+                {t("Conversation history could not be loaded")}
+              </p>
+              <p className="text-sm text-muted-foreground">{t(historyError)}</p>
+              <Button
+                onClick={() => {
+                  setHistoryError("")
+                  setHistoryRetryToken((value) => value + 1)
+                }}
+                variant="outline"
+              >
+                <RefreshCw data-icon="inline-start" /> {t("Try again")}
+              </Button>
             </div>
-            <p className="font-medium text-foreground">
-              {t("Loading conversation…")}
-            </p>
           </div>
-        </div>
-      )}
-      {historyError && (
-        <div
-          aria-live="assertive"
-          className="absolute inset-0 z-20 flex items-center justify-center bg-background/95 p-6 text-center backdrop-blur-sm"
-          role="alert"
-        >
-          <div className="flex max-w-sm flex-col items-center gap-3">
-            <p className="font-medium text-foreground">
-              {t("Conversation history could not be loaded")}
-            </p>
-            <p className="text-sm text-muted-foreground">{t(historyError)}</p>
-            <Button
-              onClick={() => {
-                setHistoryError("")
-                setHistoryRetryToken((value) => value + 1)
-              }}
-              variant="outline"
-            >
-              <RefreshCw data-icon="inline-start" /> {t("Try again")}
-            </Button>
-          </div>
-        </div>
-      )}
-      <span className="sr-only">
-        {
-          conversationContext.knowledgeSources.filter(
-            (source) => source.contextScope !== "message"
-          ).length
-        }{" "}
-        {t("knowledge sources,")} {conversationContext.mcpServers.length}{" "}
-        {t("MCP servers,")} {conversationContext.notes?.length ?? 0}{" "}
-        {t("notes,")} {conversationContext.transcriptionSessions.length}{" "}
-        {t("transcription sessions attached.")}
-      </span>
-    </div>
+        )}
+        <span className="sr-only">
+          {
+            conversationContext.knowledgeSources.filter(
+              (source) => source.contextScope !== "message"
+            ).length
+          }{" "}
+          {t("knowledge sources,")} {conversationContext.mcpServers.length}{" "}
+          {t("MCP servers,")} {conversationContext.notes?.length ?? 0}{" "}
+          {t("notes,")} {conversationContext.transcriptionSessions.length}{" "}
+          {t("transcription sessions attached.")}
+        </span>
+      </div>
+    </ChatEmbeddedContext.Provider>
   )
 }

@@ -61,6 +61,12 @@ func TestNotificationsReachOwnerAndReadersIntegration(t *testing.T) {
 	if again := a.claimNotificationEvents(ctx); len(again) != 0 {
 		t.Fatalf("claimed twice: %+v", again)
 	}
+	var ownerLink, readerLinkGot string
+	_ = db.QueryRowContext(ctx, `SELECT link FROM notifications WHERE user_id = $1`, owner).Scan(&ownerLink)
+	_ = db.QueryRowContext(ctx, `SELECT link FROM notifications WHERE user_id = $1`, reader).Scan(&readerLinkGot)
+	if ownerLink != "/live-transcription/"+copyID.String() || readerLinkGot != "/transcription/view?session="+copyID.String()+"&org="+orgID.String() {
+		t.Fatalf("links: owner %q, reader %q", ownerLink, readerLinkGot)
+	}
 
 	// The sitting ends: the whole transcript is announced once.
 	if _, err := db.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'completed', ended_at = now() - interval '5 minutes' WHERE id = $1`, sessionID); err != nil {
