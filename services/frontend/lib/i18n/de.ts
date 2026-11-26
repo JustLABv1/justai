@@ -5193,8 +5193,8 @@ export const de = {
   "Not recorded": "Nicht aufgenommen",
   Notifications: "Benachrichtigungen",
   "Notifications, {value0} unread": "Benachrichtigungen, {value0} ungelesen",
-  "You hear here when a topic or a whole live transcript you own or that was shared with you is finished.":
-    "Hier erfährst du, sobald ein Thema oder ein ganzes Live-Transkript fertig ist, das dir gehört oder mit dir geteilt wurde.",
+  "Finished topics and transcripts, problems during your transcriptions, and reminders you asked the assistant for.":
+    "Fertige Themen und Transkripte, Probleme bei deinen Transkriptionen und Erinnerungen, um die du den Assistenten gebeten hast.",
   "Recent notifications": "Letzte Benachrichtigungen",
   Recent: "Zuletzt",
   "Mark all as read": "Alle als gelesen markieren",
@@ -5278,6 +5278,9 @@ export const de = {
   "Notify me": "Mich benachrichtigen",
   "Browser and e-mail are set in your profile.":
     "Browser und E-Mail stellst du in deinem Profil ein.",
+  "Set reminder": "Erinnerung stellen",
+  "List reminders": "Erinnerungen anzeigen",
+  "Cancel reminder": "Erinnerung löschen",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

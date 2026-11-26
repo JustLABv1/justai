@@ -65,6 +65,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 	}
 	definitions = append(definitions, justAIControlTools()...)
 	definitions = append(definitions, transcriptionChatTools()...)
+	definitions = append(definitions, reminderTools()...)
 	definitions = append(definitions, templateTools()...)
 	definitions = append(definitions, attachmentReadTools()...)
 	bindings := make(map[string]voiceToolBinding, len(definitions))
@@ -79,7 +80,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 }
 
 func isAssistantBuiltInToolName(name string) bool {
-	if isTemplateTool(name) || isAttachmentReadTool(name) {
+	if isTemplateTool(name) || isAttachmentReadTool(name) || isReminderTool(name) {
 		return true
 	}
 	switch name {
@@ -91,7 +92,7 @@ func isAssistantBuiltInToolName(name string) bool {
 }
 
 func chatBuiltInFallbackInstructions() string {
-	return justAIControlInstructions + ` For get_justai_help use action_input {"topic":"overview"} (topics: overview, chat, storage, agents, transcription, tools, settings, profile). For list_justai_tools and start_live_transcription use action_input {}. For navigate_justai use action_input {"destination":"profile"}, optionally with tab; destinations: chat, agents, storage, templates, live_transcription, video_transcription, workspace_settings, profile, admin. Use the same JSON action protocol for all controls. ` + "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, file, and transcription actions. For video transcription use action \"start_video_transcription\" and action_input {\"title\":\"optional title\",\"language\":\"auto\"}; this shows a video upload card, so do not claim the upload has already started. If the source is unclear first ask video upload or live recording. For live recording use start_live_transcription. To read a transcript or its status use action \"get_transcription\" and action_input {\"sessionId\":\"the session id\"}. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}. For CSV, JSON, Markdown, text, HTML, or a non-PDF download that the user explicitly asked to receive as a file (words like file, Datei, download, herunterladen, speichern, exportieren); requests to create or write a Markdown, HTML page, JSON, CSV, or code example without those words are answered with a fenced code block in the chat, not an action; use action \"create_file\" and action_input {\"format\":\"csv\",\"content\":\"the complete file content\",\"title\":\"optional title\",\"filename\":\"optional-name.csv\"}; use valid CSV or JSON for those formats. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
+	return justAIControlInstructions + ` For get_justai_help use action_input {"topic":"overview"} (topics: overview, chat, storage, agents, transcription, tools, settings, profile). For list_justai_tools and start_live_transcription use action_input {}. For navigate_justai use action_input {"destination":"profile"}, optionally with tab; destinations: chat, agents, storage, templates, live_transcription, video_transcription, workspace_settings, profile, admin. Use the same JSON action protocol for all controls. ` + "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, file, and transcription actions. For video transcription use action \"start_video_transcription\" and action_input {\"title\":\"optional title\",\"language\":\"auto\"}; this shows a video upload card, so do not claim the upload has already started. If the source is unclear first ask video upload or live recording. For live recording use start_live_transcription. To read a transcript or its status use action \"get_transcription\" and action_input {\"sessionId\":\"the session id\"}. To remind the user later use action \"set_reminder\" and action_input {\"message\":\"what to remind\",\"inMinutes\":20} or {\"message\":\"...\",\"at\":\"YYYY-MM-DD HH:MM\"} in the user's local time; list_reminders and cancel_reminder with {\"reminderId\":\"...\"} manage them. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}. For CSV, JSON, Markdown, text, HTML, or a non-PDF download that the user explicitly asked to receive as a file (words like file, Datei, download, herunterladen, speichern, exportieren); requests to create or write a Markdown, HTML page, JSON, CSV, or code example without those words are answered with a fenced code block in the chat, not an action; use action \"create_file\" and action_input {\"format\":\"csv\",\"content\":\"the complete file content\",\"title\":\"optional title\",\"filename\":\"optional-name.csv\"}; use valid CSV or JSON for those formats. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
 }
 
 func chatToolEventKindForName(name string) string {
@@ -107,6 +108,9 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 	}
 	if isAttachmentReadTool(toolName) {
 		return a.readAttachmentTool(ctx, userID, organizationID, conversationID, toolName, arguments)
+	}
+	if isReminderTool(toolName) {
+		return a.reminderTool(ctx, userID, organizationID, conversationID, toolName, arguments)
 	}
 	if isTemplateTool(toolName) {
 		result, artifact, err := a.templateTool(ctx, userID, organizationID, toolName, arguments)
@@ -335,7 +339,7 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 	action := strings.ToLower(strings.TrimSpace(envelope.Action))
 	toolName := ""
 	switch {
-	case action == "get_justai_help", action == "list_justai_tools", action == "navigate_justai", action == "start_live_transcription", action == "start_video_transcription", action == "get_transcription":
+	case action == "get_justai_help", action == "list_justai_tools", action == "navigate_justai", action == "start_live_transcription", action == "start_video_transcription", action == "get_transcription", isReminderTool(action):
 		toolName = action
 	case strings.Contains(action, "dalle.text2im"), strings.Contains(action, "image_generation"), strings.Contains(action, "generate_image"):
 		toolName = "generate_image"

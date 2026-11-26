@@ -273,6 +273,9 @@ const toolLabelsMessages: Record<string, string> = {
   start_live_transcription: "Set up live transcription",
   start_video_transcription: "Set up video transcription",
   get_transcription: "Read transcript",
+  set_reminder: "Set reminder",
+  list_reminders: "List reminders",
+  cancel_reminder: "Cancel reminder",
   web_search: "Web search",
   browse_url: "Browse URL",
   generate_image: "Generate image",
@@ -295,6 +298,9 @@ function toolCategory(toolName: string, serverName?: string) {
       "start_live_transcription",
       "start_video_transcription",
       "get_transcription",
+      "set_reminder",
+      "list_reminders",
+      "cancel_reminder",
     ].includes(toolName)
   )
     return "justai"

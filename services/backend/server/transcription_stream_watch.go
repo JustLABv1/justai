@@ -56,6 +56,9 @@ func (m *TranscriptionManager) setStreamAlert(sessionID, sourceID uuid.UUID, kin
 	}
 	liveStreamEvents.inc(kind)
 	m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "alert": message})
+	if m.app != nil && notifiedStreamAlerts[kind] {
+		go m.app.notifyStreamAlert(sessionID, kind)
+	}
 }
 
 type watchState struct {

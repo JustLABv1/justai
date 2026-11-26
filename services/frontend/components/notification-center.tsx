@@ -1,6 +1,13 @@
 "use client"
 
-import { Bell, CheckCheck, Settings2 } from "lucide-react"
+import {
+  AlarmClock,
+  Bell,
+  CheckCheck,
+  CircleCheck,
+  Settings2,
+  TriangleAlert,
+} from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 
@@ -74,8 +81,12 @@ export function NotificationCenter({
   useEffect(() => {
     if (localeSent.current === locale) return
     localeSent.current = locale
+    // The time zone lets the assistant set reminders for the user's own clock.
     void api
-      .put("/api/v1/notifications/settings", { locale })
+      .put("/api/v1/notifications/settings", {
+        locale,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      })
       .catch(() => undefined)
   }, [locale])
 
@@ -127,7 +138,7 @@ export function NotificationCenter({
             <Sheet.Title>{t("Notifications")}</Sheet.Title>
             <Sheet.Description>
               {t(
-                "You hear here when a topic or a whole live transcript you own or that was shared with you is finished."
+                "Finished topics and transcripts, problems during your transcriptions, and reminders you asked the assistant for."
               )}
             </Sheet.Description>
           </Sheet.Header>
@@ -173,12 +184,9 @@ export function NotificationCenter({
                         }}
                         type="button"
                       >
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            "mt-1.5 size-2 shrink-0 rounded-full",
-                            item.readAt ? "bg-transparent" : "bg-primary"
-                          )}
+                        <NotificationKindIcon
+                          kind={item.kind}
+                          unread={!item.readAt}
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium">
@@ -221,5 +229,52 @@ export function NotificationCenter({
         </Sheet.Content>
       </Sheet>
     </>
+  )
+}
+
+const problemKinds = new Set([
+  "capture_aborted",
+  "stream_unreachable",
+  "watch_missed",
+  "topic_missed",
+  "plan_missing",
+  "stream_outage",
+  "transcription_failed",
+  "processing_failed",
+])
+
+/** What a notification is about, with a dot while it is unread. */
+function NotificationKindIcon({
+  kind,
+  unread,
+}: {
+  kind: string
+  unread: boolean
+}) {
+  const Icon =
+    kind === "reminder"
+      ? AlarmClock
+      : problemKinds.has(kind)
+        ? TriangleAlert
+        : kind === "topic_done" ||
+            kind === "transcript_done" ||
+            kind === "stream_recovered"
+          ? CircleCheck
+          : Bell
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "relative mt-0.5 grid size-7 shrink-0 place-items-center rounded-md",
+        problemKinds.has(kind)
+          ? "bg-destructive/10 text-destructive"
+          : "bg-primary/10 text-primary"
+      )}
+    >
+      <Icon className="size-4" />
+      {unread ? (
+        <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary ring-2 ring-popover" />
+      ) : null}
+    </span>
   )
 }

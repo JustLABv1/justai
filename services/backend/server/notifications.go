@@ -24,7 +24,8 @@ import (
 // in the app and, where set up, sent by e-mail and browser push. Every user can turn
 // them off per transcript.
 
-const notificationInterval = 30 * time.Second
+// notificationInterval also bounds how late a reminder can arrive.
+const notificationInterval = 15 * time.Second
 
 // notificationTopicSettle lets a finished topic get its own transcript and, when one is
 // written, its summary before it is announced.
@@ -44,15 +45,23 @@ type notificationItem struct {
 // notificationEvent is one thing to announce, before it is put into each recipient's
 // language.
 type notificationEvent struct {
-	Kind           string // topic_done or transcript_done
+	Kind           string
 	OrganizationID uuid.UUID
-	SessionID      uuid.UUID // the shared session; its mutes and readers apply
-	DedupeKey      string
-	Link           string // path in the app
-	Topic          string
-	SessionTitle   string
-	HasSummary     bool
-	TopicCount     int
+	// SessionID is the transcript the event is about; its mutes apply, and its readers
+	// hear about results. Nil for events that are not about a transcript.
+	SessionID uuid.UUID
+	// OwnerOnly: problems go to the owner, who can act on them, not to every reader.
+	OwnerOnly bool
+	// UserID addresses one person directly (a reminder); no session rules apply.
+	UserID       uuid.UUID
+	DedupeKey    string
+	Link         string // path in the app
+	Topic        string
+	SessionTitle string
+	HasSummary   bool
+	TopicCount   int
+	Minutes      int
+	Message      string // a reminder's text
 }
 
 func notificationTexts(locale string, event notificationEvent) (title, body, linkLabel string) {
@@ -73,6 +82,13 @@ func notificationTexts(locale string, event notificationEvent) (title, body, lin
 			body = event.SessionTitle + ": the transcript and summary of this topic are ready."
 		}
 		return title, body, "Open topic"
+	case "reminder":
+		if german {
+			return "Erinnerung", event.Message, "Chat öffnen"
+		}
+		return "Reminder", event.Message, "Open chat"
+	case "capture_aborted", "stream_unreachable", "watch_missed", "topic_missed", "plan_missing", "stream_outage", "stream_recovered", "transcription_failed", "processing_failed":
+		return problemTexts(german, event)
 	default:
 		if german {
 			title = "„" + event.SessionTitle + "“ ist abgeschlossen"
@@ -95,6 +111,46 @@ func notificationTexts(locale string, event notificationEvent) (title, body, lin
 	}
 }
 
+// problemTexts describe what went wrong during a transcription and what happens next.
+func problemTexts(german bool, event notificationEvent) (title, body, linkLabel string) {
+	name := event.SessionTitle
+	type text struct{ title, body string }
+	var de, en text
+	switch event.Kind {
+	case "capture_aborted":
+		de = text{"Aufnahme abgebrochen: „" + name + "“", "Der Stream kam nicht zurück, die Aufnahme wurde beendet. Was bis dahin transkribiert wurde, bleibt erhalten."}
+		en = text{"Capture stopped: “" + name + "”", "The stream did not come back, so the capture ended. What was transcribed until then is kept."}
+	case "stream_unreachable":
+		de = text{"„" + name + "“: Stream nicht erreichbar", "Der Livestream ist seit einiger Zeit nicht erreichbar. JustAI versucht es weiter, bis das Zeitfenster endet."}
+		en = text{"“" + name + "”: stream unreachable", "The livestream has been unreachable for a while. JustAI keeps trying until the watch window ends."}
+	case "watch_missed":
+		de = text{"„" + name + "“: keine Übertragung gefunden", "Im geplanten Zeitfenster kam keine Übertragung zustande, es wurde nichts aufgenommen."}
+		en = text{"“" + name + "”: no broadcast found", "No broadcast started within the planned window, so nothing was recorded."}
+	case "topic_missed":
+		de = text{"„" + name + "“: ausgewähltes Thema verpasst", "Ein ausgewähltes Thema wurde aufgerufen, bevor die Aufnahme lief. Die übrigen Themen werden weiter aufgenommen."}
+		en = text{"“" + name + "”: selected topic missed", "A selected topic was called up before the capture was running. The remaining topics are still recorded."}
+	case "plan_missing":
+		de = text{"„" + name + "“ steht nicht mehr im Plan", "Die Sitzung ist nicht mehr im Bundestagsplan. Sie wurde vielleicht abgesagt oder umbenannt; prüfe den Zeitplan."}
+		en = text{"“" + name + "” is no longer in the plan", "The sitting is no longer in the Bundestag plan. It may have been cancelled or renamed; check the schedule."}
+	case "stream_outage":
+		de = text{"„" + name + "“: Stream unterbrochen", fmt.Sprintf("Seit %d Minuten kommt nichts an. JustAI verbindet sich automatisch neu.", event.Minutes)}
+		en = text{"“" + name + "”: stream interrupted", fmt.Sprintf("Nothing has arrived for %d minutes. JustAI reconnects automatically.", event.Minutes)}
+	case "stream_recovered":
+		de = text{"„" + name + "“: Stream wieder da", fmt.Sprintf("Die Aufnahme läuft weiter. Die Unterbrechung dauerte etwa %d Minuten.", event.Minutes)}
+		en = text{"“" + name + "”: stream is back", fmt.Sprintf("The capture continues. The interruption lasted about %d minutes.", event.Minutes)}
+	case "transcription_failed":
+		de = text{"Transkription fehlgeschlagen: „" + name + "“", "Die Verarbeitung ist fehlgeschlagen. Öffne die Transkription für Details."}
+		en = text{"Transcription failed: “" + name + "”", "Processing failed. Open the transcription for details."}
+	default: // processing_failed
+		de = text{"Nachbearbeitung fehlgeschlagen: „" + name + "“", "Sprechererkennung oder Glättung ist fehlgeschlagen. Das Transkript bleibt erhalten; du kannst den Schritt wiederholen oder überspringen."}
+		en = text{"Post-processing failed: “" + name + "”", "Speaker detection or polishing failed. The transcript is kept; you can retry or skip the step."}
+	}
+	if german {
+		return de.title, de.body, "Transkription öffnen"
+	}
+	return en.title, en.body, "Open transcription"
+}
+
 func (m *TranscriptionManager) notificationLoop(ctx context.Context) {
 	ticker := time.NewTicker(notificationInterval)
 	defer ticker.Stop()
@@ -108,6 +164,12 @@ func (m *TranscriptionManager) notificationLoop(ctx context.Context) {
 			continue
 		}
 		for _, event := range m.app.claimNotificationEvents(ctx) {
+			m.app.notify(ctx, event)
+		}
+		for _, event := range m.app.claimProblemEvents(ctx) {
+			m.app.notify(ctx, event)
+		}
+		for _, event := range m.app.claimDueReminders(ctx) {
 			m.app.notify(ctx, event)
 		}
 	}
@@ -170,13 +232,21 @@ type notificationRecipient struct {
 	Locale       string
 }
 
-// notificationRecipients: the owner and the readers of a session, unless they muted it.
-func (a *App) notificationRecipients(ctx context.Context, sessionID uuid.UUID) ([]notificationRecipient, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT u.id, u.email, COALESCE(ns.email_enabled, TRUE), COALESCE(ns.locale, 'en')
+// notificationRecipients: a directly addressed user; else the owner of the session
+// and, unless OwnerOnly, its readers, leaving out whoever muted the session.
+func (a *App) notificationRecipients(ctx context.Context, event notificationEvent) ([]notificationRecipient, error) {
+	query := `SELECT u.id, u.email, COALESCE(ns.email_enabled, TRUE), COALESCE(ns.locale, 'en')
 		FROM users u LEFT JOIN notification_settings ns ON ns.user_id = u.id
 		WHERE u.status = 'active'
-		AND (u.id = (SELECT user_id FROM transcription_sessions WHERE id = $1) OR u.id IN (SELECT user_id FROM transcription_readers WHERE session_id = $1))
-		AND NOT EXISTS (SELECT 1 FROM transcription_notification_mutes mu WHERE mu.session_id = $1 AND mu.user_id = u.id)`, sessionID)
+		AND (u.id = (SELECT user_id FROM transcription_sessions WHERE id = $1) OR (NOT $2 AND u.id IN (SELECT user_id FROM transcription_readers WHERE session_id = $1)))
+		AND NOT EXISTS (SELECT 1 FROM transcription_notification_mutes mu WHERE mu.session_id = $1 AND mu.user_id = u.id)`
+	args := []any{event.SessionID, event.OwnerOnly}
+	if event.UserID != uuid.Nil {
+		query = `SELECT u.id, u.email, COALESCE(ns.email_enabled, TRUE), COALESCE(ns.locale, 'en')
+			FROM users u LEFT JOIN notification_settings ns ON ns.user_id = u.id WHERE u.status = 'active' AND u.id = $1`
+		args = []any{event.UserID}
+	}
+	rows, err := a.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -194,17 +264,18 @@ func (a *App) notificationRecipients(ctx context.Context, sessionID uuid.UUID) (
 
 // notify lists the event for each recipient and sends it by e-mail and push.
 func (a *App) notify(ctx context.Context, event notificationEvent) {
-	recipients, err := a.notificationRecipients(ctx, event.SessionID)
+	recipients, err := a.notificationRecipients(ctx, event)
 	if err != nil {
 		slog.Warn("notification recipients failed", "sessionId", event.SessionID, "error", err)
 		return
 	}
+	session := uuid.NullUUID{UUID: event.SessionID, Valid: event.SessionID != uuid.Nil}
 	for _, recipient := range recipients {
 		title, body, linkLabel := notificationTexts(recipient.Locale, event)
 		var id uuid.UUID
 		err := a.DB.QueryRowContext(ctx, `INSERT INTO notifications (user_id, organization_id, kind, title, body, link, session_id, dedupe_key)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id`,
-			recipient.UserID, event.OrganizationID, event.Kind, title, body, event.Link, event.SessionID, event.DedupeKey).Scan(&id)
+			recipient.UserID, event.OrganizationID, event.Kind, title, body, event.Link, session, event.DedupeKey).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue // announced before
 		}
@@ -354,6 +425,7 @@ func (a *App) notificationSettings(c *gin.Context) {
 		var request struct {
 			EmailEnabled *bool   `json:"emailEnabled"`
 			Locale       *string `json:"locale"`
+			TimeZone     *string `json:"timeZone"`
 		}
 		if err := c.ShouldBindJSON(&request); err != nil {
 			writeError(c, http.StatusBadRequest, err)
@@ -367,9 +439,17 @@ func (a *App) notificationSettings(c *gin.Context) {
 				return
 			}
 		}
-		if _, err := a.DB.ExecContext(c, `INSERT INTO notification_settings (user_id, email_enabled, locale) VALUES ($1, COALESCE($2, TRUE), COALESCE(NULLIF($3, ''), 'en'))
-			ON CONFLICT (user_id) DO UPDATE SET email_enabled = COALESCE($2, notification_settings.email_enabled), locale = COALESCE(NULLIF($3, ''), notification_settings.locale), updated_at = now()`,
-			principal.UserID, request.EmailEnabled, locale); err != nil {
+		zone := ""
+		if request.TimeZone != nil {
+			zone = strings.TrimSpace(*request.TimeZone)
+			if _, err := time.LoadLocation(zone); err != nil || zone == "" || zone == "Local" || len(zone) > 64 {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("unknown time zone"))
+				return
+			}
+		}
+		if _, err := a.DB.ExecContext(c, `INSERT INTO notification_settings (user_id, email_enabled, locale, timezone) VALUES ($1, COALESCE($2, TRUE), COALESCE(NULLIF($3, ''), 'en'), COALESCE(NULLIF($4, ''), 'UTC'))
+			ON CONFLICT (user_id) DO UPDATE SET email_enabled = COALESCE($2, notification_settings.email_enabled), locale = COALESCE(NULLIF($3, ''), notification_settings.locale), timezone = COALESCE(NULLIF($4, ''), notification_settings.timezone), updated_at = now()`,
+			principal.UserID, request.EmailEnabled, locale, zone); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}

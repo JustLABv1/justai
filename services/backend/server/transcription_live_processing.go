@@ -301,9 +301,9 @@ func (a *App) controlLiveProcessing(c *gin.Context) {
 	action := c.Query("action")
 	var result sql.Result
 	if action == "skip" {
-		result, err = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='queued',diarization_status=CASE WHEN stage='diarization' THEN 'skipped' ELSE diarization_status END,polish_status=CASE WHEN stage='grammar' THEN 'skipped' ELSE polish_status END,error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1 AND status='failed'`, id)
+		result, err = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='queued',failure_notified_at=NULL,diarization_status=CASE WHEN stage='diarization' THEN 'skipped' ELSE diarization_status END,polish_status=CASE WHEN stage='grammar' THEN 'skipped' ELSE polish_status END,error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1 AND status='failed'`, id)
 	} else if action == "retry" {
-		result, err = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='queued',error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1 AND status='failed'`, id)
+		result, err = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='queued',failure_notified_at=NULL,error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1 AND status='failed'`, id)
 	} else {
 		writeError(c, 400, fmt.Errorf("choose retry or skip"))
 		return
