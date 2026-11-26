@@ -138,7 +138,7 @@ export function LiveTranscriptionConversationView({
 }: Props) {
   const presentation = useTranslatedConfig(presentationMessages)
 
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const config = presentation[mode]
   const SourceIcon = config.icon
@@ -153,12 +153,31 @@ export function LiveTranscriptionConversationView({
     [snapshot.segments]
   )
   const live = snapshot.session.status === "live"
+  const waitingForTopic =
+    live &&
+    snapshot.sources.length > 0 &&
+    snapshot.sources.every((source) => source.captureScope === "topics") &&
+    !topics.some((topic) => topic.starred && topic.status === "active")
+  const nextTopic = waitingForTopic
+    ? topics
+        .filter((topic) => topic.starred && topic.status === "planned")
+        .sort((a, b) => a.order - b.order)[0]
+    : undefined
+  const plannedTime = nextTopic?.plannedStartAt
+    ? new Date(nextTopic.plannedStartAt).toLocaleTimeString(locale, {
+        timeZone: "Europe/Berlin",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : undefined
   const sourceConnected = primarySource?.status === "connected"
   const hasSignal = level > 0.06 || (primarySource?.signalLevel || 0) > 0.06
   const isMicRoom = mode === "microphone"
   const pendingRequests = joinRequests.filter(
     (request) => request.status === "pending"
   )
+  const [endDialogOpen, setEndDialogOpen] = useState(false)
   const [updatingRequestId, setUpdatingRequestId] = useState<string | null>(
     null
   )
@@ -198,7 +217,7 @@ export function LiveTranscriptionConversationView({
             {processingSettings}
             <AlertDialog>
               <AlertDialogTrigger
-                render={<Button size="sm" variant="outline" />}
+                render={<Button size="sm" variant="destructive" />}
               >
                 <X data-icon="inline-start" /> {t("Cancel scheduled capture")}
               </AlertDialogTrigger>
@@ -267,19 +286,6 @@ export function LiveTranscriptionConversationView({
 
   return (
     <div className="mx-auto w-full max-w-7xl rounded-2xl border bg-card shadow-sm">
-      {alerts.length > 0 ? (
-        <div
-          className="flex flex-col gap-1 border-b bg-amber-500/10 px-5 py-3 text-sm text-amber-900 sm:px-6 dark:text-amber-200"
-          role="status"
-        >
-          {alerts.map((source) => (
-            <p key={source.id}>
-              <span className="font-medium">{source.name}:</span>{" "}
-              {translateStreamAlert(t, source.alert ?? "")}
-            </p>
-          ))}
-        </div>
-      ) : null}
       <header className="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">
@@ -292,8 +298,12 @@ export function LiveTranscriptionConversationView({
             <h1 className="text-lg font-semibold tracking-tight">
               {snapshot.session.title}
             </h1>
-            <Badge variant={live ? "default" : "secondary"}>
-              {loading ? t("Syncing") : snapshot.session.status}
+            <Badge variant={live && !waitingForTopic ? "default" : "secondary"}>
+              {loading
+                ? t("Syncing")
+                : waitingForTopic
+                  ? t("Waiting for topic")
+                  : snapshot.session.status}
             </Badge>
             <span className="text-xs text-muted-foreground">
               {t("Hosted by")} {user.displayName}
@@ -301,12 +311,12 @@ export function LiveTranscriptionConversationView({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="hidden sm:inline-flex" variant="secondary">
-            <Users data-icon="inline-start" />
-            {isMicRoom
-              ? t("{value0} in room", { value0: snapshot.speakers.length || 1 })
-              : t("1 source")}
-          </Badge>
+          {isMicRoom ? (
+            <Badge className="hidden sm:inline-flex" variant="secondary">
+              <Users data-icon="inline-start" />
+              {t("{value0} in room", { value0: snapshot.speakers.length || 1 })}
+            </Badge>
+          ) : null}
           {/* Inviting people only makes sense where they join with their microphone;
               everywhere else others can follow along with a read-only link. */}
           {isMicRoom ? (
@@ -336,18 +346,28 @@ export function LiveTranscriptionConversationView({
                 : t("Pause session")}
             </Button>
           )}
-          <AlertDialog>
-            <AlertDialogTrigger
+          <DropdownMenu>
+            <DropdownMenuTrigger
               render={
                 <Button
-                  className="hidden sm:inline-flex"
-                  size="sm"
-                  variant="destructive"
+                  aria-label={t("More session actions")}
+                  size="icon-sm"
+                  variant="outline"
                 />
               }
             >
-              <Square data-icon="inline-start" /> {t("End session")}
-            </AlertDialogTrigger>
+              <MoreHorizontal />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setEndDialogOpen(true)}
+              >
+                <Square /> {t("End session")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <AlertDialog open={endDialogOpen} onOpenChange={setEndDialogOpen}>
             <AlertDialogContent>
               <AlertDialogTitle>
                 {t("End this transcription?")}
@@ -368,85 +388,61 @@ export function LiveTranscriptionConversationView({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  aria-label={t("More session actions")}
-                  className="sm:hidden"
-                  size="icon-sm"
-                  variant="outline"
-                />
-              }
-            >
-              <MoreHorizontal />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <AlertDialog>
-                <AlertDialogTrigger
-                  render={<DropdownMenuItem variant="destructive" />}
-                >
-                  <Square /> {t("End session")}
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogTitle>
-                    {t("End this transcription?")}
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t(
-                      "The live feed will stop for everyone. The transcript collected so far will be kept."
-                    )}
-                  </AlertDialogDescription>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>
-                      {t("Keep session live")}
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      tone="destructive"
-                      onClick={() => void onStopSession()}
-                    >
-                      {t("End session")}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </header>
-      <StreamHealthNotice sources={snapshot.sources} />
-      {topicsPanel ? (
-        <div className="border-b px-5 py-4 sm:px-6">{topicsPanel}</div>
-      ) : null}
-
-      <RealtimeConnectionStatus
-        className="mx-5 mt-4 sm:mx-6"
-        interruptionAt={interruptionAt}
-        status={transportStatus}
-      />
-
       <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
-        <section className="flex min-w-0 flex-col rounded-xl border bg-background p-5">
+        <section className="flex min-w-0 flex-col self-start rounded-xl border bg-background p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div>
               <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                 <AudioLines className="size-4" /> {t("Live conversation")}
               </div>
               <h2 className="mt-1 text-base font-semibold tracking-tight">
-                {t("Transcript in progress")}
+                {waitingForTopic
+                  ? t("Waiting for a selected topic")
+                  : t("Transcript in progress")}
               </h2>
             </div>
-            <Badge variant={hasSignal && live ? "default" : "secondary"}>
-              <Volume2 data-icon="inline-start" />
-              {hasSignal && live
-                ? isMicRoom
-                  ? t("Someone is speaking")
-                  : t("Audio flowing")
-                : t("Listening")}
-            </Badge>
+            {!waitingForTopic && (
+              <Badge variant={hasSignal && live ? "default" : "secondary"}>
+                <Volume2 data-icon="inline-start" />
+                {hasSignal && live
+                  ? isMicRoom
+                    ? t("Someone is speaking")
+                    : t("Audio flowing")
+                  : t("Listening")}
+              </Badge>
+            )}
           </div>
-          <div className="flex flex-1 flex-col divide-y">
-            {lines.length === 0 && !partial ? (
+          {waitingForTopic && (
+            <div className="flex items-start gap-3 py-6" role="status">
+              <CalendarClock className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+              <div>
+                {nextTopic && (
+                  <p className="text-sm font-medium">{nextTopic.title}</p>
+                )}
+                {plannedTime && (
+                  <p className="text-sm">
+                    {t("Planned for {value0} (Berlin time)", {
+                      value0: plannedTime,
+                    })}
+                  </p>
+                )}
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("Transcription begins when a selected topic is called.")}
+                </p>
+              </div>
+            </div>
+          )}
+          <div
+            aria-label={t("Transcript")}
+            className="max-h-[min(55dvh,32rem)] divide-y overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            role="region"
+            tabIndex={
+              lines.length > 0 || (partial && !waitingForTopic) ? 0 : undefined
+            }
+          >
+            {lines.length === 0 && !partial && !waitingForTopic ? (
               <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
                 <div className="relative grid size-24 place-items-center rounded-full border border-primary/20 bg-primary/5 text-primary shadow-[0_0_0_12px_hsl(var(--primary)/0.035)]">
                   <span className="absolute inset-[-7px] rounded-full border border-primary/20 motion-safe:animate-pulse" />
@@ -519,7 +515,7 @@ export function LiveTranscriptionConversationView({
                   <time className="pt-0.5 text-xs text-muted-foreground">
                     {formatOffset(line.startOffsetMs)}
                   </time>
-                  <p className="text-sm leading-6">
+                  <p className="text-sm leading-6 wrap-anywhere">
                     <span className="mr-2 font-semibold text-foreground">
                       {t(speakerName(snapshot, line.speakerKey))}
                     </span>
@@ -528,10 +524,10 @@ export function LiveTranscriptionConversationView({
                 </article>
               ))
             )}
-            {partial ? (
+            {partial && !waitingForTopic ? (
               <article className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 py-4 text-muted-foreground">
                 <time className="pt-0.5 text-xs">{t("Live")}</time>
-                <p className="text-sm leading-6">
+                <p className="text-sm leading-6 wrap-anywhere">
                   <span className="mr-2 font-semibold">
                     {partialSourceId ? t("Speaker") : t("Listening")}
                   </span>
@@ -542,7 +538,26 @@ export function LiveTranscriptionConversationView({
           </div>
         </section>
 
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-3">
+          <RealtimeConnectionStatus
+            interruptionAt={interruptionAt}
+            status={transportStatus}
+            connectedLabel={waitingForTopic ? t("Connected") : undefined}
+          />
+          <StreamHealthNotice sources={snapshot.sources} />
+          {alerts.length > 0 ? (
+            <div
+              className="flex flex-col gap-1 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200"
+              role="status"
+            >
+              {alerts.map((source) => (
+                <p key={source.id}>
+                  <span className="font-medium">{source.name}:</span>{" "}
+                  {translateStreamAlert(t, source.alert ?? "")}
+                </p>
+              ))}
+            </div>
+          ) : null}
           {isMicRoom ? (
             <section className="rounded-xl border bg-background p-4">
               <div className="flex items-center justify-between gap-3">
@@ -737,6 +752,9 @@ export function LiveTranscriptionConversationView({
           </section>
         </aside>
       </div>
+      {topicsPanel ? (
+        <div className="border-t px-5 py-4 sm:px-6">{topicsPanel}</div>
+      ) : null}
     </div>
   )
 }

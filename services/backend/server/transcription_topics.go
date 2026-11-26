@@ -145,25 +145,26 @@ func (m *TranscriptionManager) loadOpenTopics(ctx context.Context, sessionID, so
 
 // observeTopics reacts to a finished transcript segment: when the chair calls up an
 // item, the previous item is finished at that moment and the new one opened.
-func (m *TranscriptionManager) observeTopics(ctx context.Context, sessionID, sourceID uuid.UUID, text string, startOffsetMs int64) {
+func (m *TranscriptionManager) observeTopics(ctx context.Context, sessionID, sourceID uuid.UUID, text string, startOffsetMs int64) bool {
 	if !mightAnnounceTopic(text) {
-		return
+		return false
 	}
 	topics, err := m.loadOpenTopics(ctx, sessionID, sourceID)
 	if err != nil || len(topics) == 0 {
-		return
+		return false
 	}
 	if isSittingClosed(text) {
 		m.finishActiveTopics(ctx, sessionID, sourceID, startOffsetMs, "sitting_closed")
 		m.applyTopicScope(ctx, sessionID, sourceID)
-		return
+		return false
 	}
 	idx := detectTopicAnnouncement(text, topics)
 	if idx < 0 || topics[idx].Status == "active" {
-		return
+		return false
 	}
 	m.switchTopic(ctx, sessionID, sourceID, topics[idx].ID, startOffsetMs, "announcement")
 	m.applyTopicScope(ctx, sessionID, sourceID)
+	return true
 }
 
 // switchTopic finishes the active topic and opens another at the given offset.

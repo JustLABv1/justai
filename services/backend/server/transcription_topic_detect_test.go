@@ -66,3 +66,25 @@ func TestSittingCloseAndPrecheck(t *testing.T) {
 		t.Error("precheck wrong")
 	}
 }
+
+func TestHousingBudgetCallAcrossFinalSegments(t *testing.T) {
+	topics := []topicRef{{Kind: "EPL", Numbers: []int{25}, Title: "Wohnen, Stadtentwicklung und Bauwesen", Status: "planned"}}
+	for _, segments := range [][]string{
+		{"Ich rufe auf: den Einzelplan 25. Bundesministerium für Wohnen, Stadtentwicklung, und Bauwesen mit dem Beschluss mit den Beschlussempfehlungen des Haushaltsausschusses auf ist auf Drucksache 19-9061. und 9062."},
+		{"Vielen Dank. Ich rufe auf:", "den Einzelplan", "25. Bundesministerium für Wohnen, Stadtentwicklung, und Bauwesen."},
+	} {
+		var pending topicCallBuffer
+		for i, text := range segments {
+			offset := int64(i * 2000)
+			got := detectTopicAnnouncement(pending.candidate(text, offset, offset+2000), topics)
+			if (got == 0) != (i == len(segments)-1) {
+				t.Fatalf("segment %q: match %d", text, got)
+			}
+		}
+	}
+	var pending topicCallBuffer
+	pending.candidate("Ich rufe auf:", 0, 2000)
+	if detectTopicAnnouncement(pending.candidate("den Einzelplan 25.", 30000, 32000), topics) != -1 {
+		t.Fatal("an expired call matched a later mention")
+	}
+}

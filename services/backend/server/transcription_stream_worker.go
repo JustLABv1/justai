@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -147,16 +148,16 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	var scheduledStartAt, scheduledEndAt sql.NullTime
 	var reconnectGraceSeconds, silenceStopSeconds int
 	var model, startMode, streamStatus string
-	var recordAudio bool
+	var recordAudio, topicsOnly bool
 	if err := m.DB.QueryRowContext(ctx, `
 		SELECT stream.url_ciphertext, stream.protocol, session.transcription_endpoint_id,
 		       COALESCE(session.transcription_model, ''), session.language, session.status,
 		       session.record_audio, stream.scheduled_start_at, stream.scheduled_end_at,
-		       stream.reconnect_grace_seconds, stream.start_mode, stream.silence_stop_seconds, stream.status
+		       stream.reconnect_grace_seconds, stream.start_mode, stream.silence_stop_seconds, stream.status, stream.capture_scope = 'topics'
 		FROM transcription_stream_sources stream
 		JOIN transcription_sources source ON source.id = stream.source_id
 		JOIN transcription_sessions session ON session.id = source.session_id
-		WHERE stream.source_id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&encryptedURL, &protocol, &endpointID, &model, &language, &sessionStatus, &recordAudio, &scheduledStartAt, &scheduledEndAt, &reconnectGraceSeconds, &startMode, &silenceStopSeconds, &streamStatus); err != nil {
+		WHERE stream.source_id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&encryptedURL, &protocol, &endpointID, &model, &language, &sessionStatus, &recordAudio, &scheduledStartAt, &scheduledEndAt, &reconnectGraceSeconds, &startMode, &silenceStopSeconds, &streamStatus, &topicsOnly); err != nil {
 		return err
 	}
 	if sessionStatus == "completed" || sessionStatus == "processing" {
@@ -315,7 +316,7 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 			continue
 		}
 		mediaURL, _ := url.Parse(resolved.URL)
-		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, resolved.URL, mediaURL.Scheme, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart, guard)
+		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, resolved.URL, mediaURL.Scheme, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart, guard, topicsOnly)
 		if connected {
 			reconnectDeadline = time.Now().Add(time.Duration(reconnectGraceSeconds) * time.Second)
 		}
@@ -354,13 +355,14 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	}
 }
 
-func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream provider.TranscriptionStream, streamURL, protocol, mode string, sessionID, sourceID uuid.UUID, sourceOffset *atomic.Int64, recordingID uuid.UUID, recordingPart *int, guard *silenceGuard) (connected bool, resultErr error) {
+func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream provider.TranscriptionStream, streamURL, protocol, mode string, sessionID, sourceID uuid.UUID, sourceOffset *atomic.Int64, recordingID uuid.UUID, recordingPart *int, guard *silenceGuard, topicsOnly bool) (connected bool, resultErr error) {
 	attemptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	baseOffset := sourceOffset.Load()
 	eventsDone := make(chan error, 1)
 	go func() {
 		var eventErr error
+		var topicCall topicCallBuffer
 		for event := range stream.Events() {
 			if event.Err != nil {
 				if eventErr == nil {
@@ -375,6 +377,11 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				continue
 			}
 			if event.Kind == "partial" {
+				// A provisional segment can straddle an unconfirmed agenda change.
+				if topicsOnly {
+					continue
+				}
+
 				m.broadcast(sessionID, "transcription.partial", ginData{"sourceId": sourceID, "text": textValue})
 				continue
 			}
@@ -392,6 +399,28 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				endOffset = baseOffset + event.EndOffsetMs
 			}
 			persistCtx := context.WithoutCancel(ctx)
+			announcement := topicCall.candidate(textValue, startOffset, endOffset)
+			if topicsOnly {
+				opened := m.observeTopics(persistCtx, sessionID, sourceID, announcement, startOffset)
+				var selected bool
+				err := m.DB.QueryRowContext(persistCtx, `SELECT EXISTS (
+					SELECT 1 FROM transcription_topics WHERE session_id = $1
+					AND (source_id IS NULL OR source_id = $2) AND status = 'active' AND starred
+				)`, sessionID, sourceID).Scan(&selected)
+				if err != nil {
+					eventErr = err
+					cancel()
+					continue
+				}
+				if !selected {
+					continue
+				}
+				if boundary := topicTrigger.FindStringIndex(textValue); opened && boundary != nil && boundary[0] > 0 {
+					// Keep the announcement but discard speech preceding it in the same result.
+					textValue = textValue[boundary[0]:]
+					rawText = textValue
+				}
+			}
 			segment, persistErr := m.app.persistTranscriptionSegmentWithRaw(persistCtx, sessionID, sourceID, textValue, rawText, startOffset, endOffset)
 			if persistErr != nil {
 				if eventErr == nil {
@@ -402,7 +431,9 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 			}
 			m.broadcast(sessionID, "transcription.final", ginData{"sourceId": sourceID, "segment": segment})
 			m.observeSpeakers(persistCtx, sessionID, sourceID, segment.ID, textValue)
-			m.observeTopics(persistCtx, sessionID, sourceID, textValue, startOffset)
+			if !topicsOnly {
+				m.observeTopics(persistCtx, sessionID, sourceID, announcement, startOffset)
+			}
 		}
 		eventsDone <- eventErr
 	}()
@@ -565,6 +596,9 @@ func (m *TranscriptionManager) finishLiveStreamWith(sessionID, sourceID uuid.UUI
 	m.finishTopicsAtStreamEnd(sessionID, sourceID)
 	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = 'stopped', last_error = '', end_reason = $3,
 		outage_seconds = outage_seconds + CASE WHEN interrupted_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM $2 - interrupted_at))::int ELSE 0 END,
+		outage_history = CASE WHEN interrupted_at IS NOT NULL THEN outage_history || jsonb_build_array(
+			jsonb_build_object('startedAt', interrupted_at, 'endedAt', GREATEST(interrupted_at, $2))
+		) ELSE outage_history END,
 		interrupted_at = NULL, updated_at = $2 WHERE source_id = $1`, sourceID, now, endReason)
 	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = $2 WHERE id = $1`, sourceID, now)
 	result, _ := m.DB.Exec(`UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status IN ('waiting', 'live', 'paused') AND NOT EXISTS (SELECT 1 FROM transcription_sources other WHERE other.session_id = $1 AND other.id <> $3 AND other.status <> 'stopped')`, sessionID, now, sourceID)
@@ -608,7 +642,10 @@ func (m *TranscriptionManager) setStreamStatus(sessionID, sourceID uuid.UUID, st
 		reconnect_count = CASE WHEN $4 THEN LEAST(reconnect_count + 1, 2147480000) ELSE reconnect_count END,
 		last_seen_at = CASE WHEN $2 = 'connected' THEN now() ELSE last_seen_at END,
 		outage_count = outage_count + CASE WHEN $2 = 'reconnecting' AND interrupted_at IS NULL AND status = 'connected' THEN 1 ELSE 0 END,
-		outage_seconds = outage_seconds + CASE WHEN $2 IN ('connected', 'stopped', 'failed') AND interrupted_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM now() - interrupted_at))::int ELSE 0 END,
+		outage_seconds = outage_seconds + CASE WHEN $2 IN ('connected', 'stopped', 'failed', 'scheduled', 'watching') AND interrupted_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM now() - interrupted_at))::int ELSE 0 END,
+		outage_history = CASE WHEN $2 IN ('connected', 'stopped', 'failed', 'scheduled', 'watching') AND interrupted_at IS NOT NULL
+			THEN outage_history || jsonb_build_array(jsonb_build_object('startedAt', interrupted_at, 'endedAt', GREATEST(interrupted_at, now())))
+			ELSE outage_history END,
 		interrupted_at = CASE WHEN $2 = 'reconnecting' THEN COALESCE(interrupted_at, CASE WHEN status = 'connected' THEN now() END)
 			WHEN $2 IN ('connected', 'stopped', 'failed', 'scheduled', 'watching') THEN NULL ELSE interrupted_at END,
 		updated_at = now()
@@ -619,13 +656,14 @@ func (m *TranscriptionManager) setStreamStatus(sessionID, sourceID uuid.UUID, st
 // broadcastStreamState sends the stored transport state of a stream source, merged with extra.
 func (m *TranscriptionManager) broadcastStreamState(sessionID, sourceID uuid.UUID, extra ginData) {
 	var reconnectCount, outageCount, outageSeconds int
+	var outageHistory json.RawMessage
 	var lastSeenAt, interruptedAt *time.Time
 	var currentStatus, currentError, endReason string
-	if err := m.DB.QueryRow(`SELECT status, reconnect_count, last_seen_at, last_error, interrupted_at, outage_count, outage_seconds, end_reason FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&currentStatus, &reconnectCount, &lastSeenAt, &currentError, &interruptedAt, &outageCount, &outageSeconds, &endReason); err != nil {
+	if err := m.DB.QueryRow(`SELECT status, reconnect_count, last_seen_at, last_error, interrupted_at, outage_count, outage_seconds, end_reason, outage_history FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&currentStatus, &reconnectCount, &lastSeenAt, &currentError, &interruptedAt, &outageCount, &outageSeconds, &endReason, &outageHistory); err != nil {
 		return
 	}
 	data := ginData{"sourceId": sourceID, "status": currentStatus, "lastError": currentError, "reconnectCount": reconnectCount, "lastSeenAt": lastSeenAt,
-		"interruptedAt": interruptedAt, "outageCount": outageCount, "outageSeconds": outageSeconds, "endReason": endReason}
+		"interruptedAt": interruptedAt, "outageCount": outageCount, "outageSeconds": outageSeconds, "outageHistory": outageHistory, "endReason": endReason}
 	for key, value := range extra {
 		data[key] = value
 	}

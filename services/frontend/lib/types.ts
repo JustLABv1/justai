@@ -899,6 +899,7 @@ export type TranscriptionSource = {
   alert?: string
   signalLevel: number
   /** Set while a connected stream is reconnecting. */
+  outageHistory?: { startedAt: string; endedAt: string }[]
   interruptedAt?: string | null
   outageCount?: number
   outageSeconds?: number

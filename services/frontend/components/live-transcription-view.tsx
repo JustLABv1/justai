@@ -813,6 +813,9 @@ export function LiveTranscriptionView({
                       "interruptedAt" in data
                         ? (data.interruptedAt as string | null)
                         : source.interruptedAt,
+                    outageHistory: Array.isArray(data.outageHistory)
+                      ? (data.outageHistory as TranscriptionSource["outageHistory"])
+                      : source.outageHistory,
                     outageCount:
                       typeof data.outageCount === "number"
                         ? data.outageCount

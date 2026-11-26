@@ -480,10 +480,11 @@ type TranscriptionSource struct {
 	SignalLevel float64 `json:"signalLevel"`
 	// Stream outages: InterruptedAt is set while a connected capture reconnects;
 	// EndReason is "aborted" when the capture ended because the stream did not come back.
-	InterruptedAt *time.Time `json:"interruptedAt,omitempty"`
-	OutageCount   int        `json:"outageCount,omitempty"`
-	OutageSeconds int        `json:"outageSeconds,omitempty"`
-	EndReason     string     `json:"endReason,omitempty"`
+	InterruptedAt *time.Time      `json:"interruptedAt,omitempty"`
+	OutageCount   int             `json:"outageCount,omitempty"`
+	OutageSeconds int             `json:"outageSeconds,omitempty"`
+	EndReason     string          `json:"endReason,omitempty"`
+	OutageHistory json.RawMessage `json:"outageHistory,omitempty"`
 }
 
 type TranscriptionStreamSource struct {

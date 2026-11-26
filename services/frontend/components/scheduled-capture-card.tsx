@@ -112,21 +112,28 @@ export function ScheduledCaptureCard({
         <p className="text-xs font-medium text-muted-foreground">
           {source.name || t("Live stream")}
         </p>
-        <Countdown target={start} watching={watching} />
+        {topicsOnly ? (
+          <p className="text-lg font-semibold">
+            {t("Scheduled topic monitoring")}
+          </p>
+        ) : (
+          <Countdown target={start} watching={watching} />
+        )}
         <p className="text-muted-foreground">
-          {watching
-            ? t("Listening now. Capture begins as soon as speech is heard.")
-            : source.startMode === "when_live"
-              ? t(
-                  "Watches from {value0}; capture begins when speech is heard.",
-                  {
-                    value0: dateTime.format(new Date(start)),
-                  }
-                )
-              : topicsOnly
-                ? t("{value0}, shortly before the first selected topic.", {
-                    value0: dateTime.format(new Date(start)),
-                  })
+          {topicsOnly
+            ? t(
+                "Monitoring from {value0}. Transcription begins when a selected topic is called.",
+                { value0: dateTime.format(new Date(start)) }
+              )
+            : watching
+              ? t("Listening now. Capture begins as soon as speech is heard.")
+              : source.startMode === "when_live"
+                ? t(
+                    "Watches from {value0}; capture begins when speech is heard.",
+                    {
+                      value0: dateTime.format(new Date(start)),
+                    }
+                  )
                 : dateTime.format(new Date(start))}
         </p>
       </div>

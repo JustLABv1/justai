@@ -1,6 +1,8 @@
 "use client"
 
 import {
+  CalendarClock,
+  ChevronDown,
   Check,
   Copy,
   FileText,
@@ -13,7 +15,7 @@ import {
   TopicNotifyIcon,
   TopicQuietIcon,
 } from "@/components/topic-icons"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useId, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
 import { Badge } from "@/components/panelui/badge"
@@ -74,6 +76,8 @@ export function LiveTranscriptionTopics({
   topicsOnly?: boolean
 }) {
   const { t, locale } = useTranslations()
+  const agendaId = useId()
+  const [agendaOpen, setAgendaOpen] = useState(true)
   const [openId, setOpenId] = useState<string | null>(null)
   const [sittingNo, setSittingNo] = useState(
     defaultSittingNo ? String(defaultSittingNo) : ""
@@ -93,7 +97,14 @@ export function LiveTranscriptionTopics({
     [onTopics, topics]
   )
 
+  const activeTopic = topics.find((topic) => topic.status === "active")
+  const nextSelectedTopic = topicsOnly
+    ? topics
+        .filter((topic) => topic.starred && topic.status === "planned")
+        .sort((a, b) => a.order - b.order)[0]
+    : undefined
   const time = new Intl.DateTimeFormat(locale, {
+    ...(topicsOnly ? { timeZone: "Europe/Berlin" } : {}),
     hour: "2-digit",
     minute: "2-digit",
   })
@@ -143,17 +154,15 @@ export function LiveTranscriptionTopics({
 
   const statusBadge = (topic: TranscriptionTopic) =>
     topic.status === "active" ? (
-      <Badge variant="default">{t("Running")}</Badge>
+      <Badge variant={topicsOnly && !topic.starred ? "secondary" : "default"}>
+        {t("Topic in progress")}
+      </Badge>
     ) : topic.status === "done" ? (
       <Badge variant="secondary">{t("Finished")}</Badge>
     ) : topicsOnly ? (
       topic.starred ? (
-        <Badge variant="default">{t("Selected for recording")}</Badge>
-      ) : (
-        <span className="text-xs text-muted-foreground">
-          {t("Not selected")}
-        </span>
-      )
+        <Badge variant="secondary">{t("Selected for recording")}</Badge>
+      ) : null
     ) : topic.starred ? (
       <Badge variant="outline">
         <TopicNotifyIcon aria-hidden="true" className="size-3" />
@@ -170,7 +179,29 @@ export function LiveTranscriptionTopics({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 font-medium">
-          <TopicIcon className="size-4" /> {t("Topics")}
+          {topics.length > 0 ? (
+            <Button
+              aria-controls={agendaId}
+              aria-expanded={agendaOpen}
+              aria-label={
+                agendaOpen ? t("Collapse agenda") : t("Expand agenda")
+              }
+              onClick={() => setAgendaOpen((open) => !open)}
+              size="sm"
+              variant="ghost"
+            >
+              <TopicIcon aria-hidden="true" className="size-4" />
+              {t("Topics")}
+              <ChevronDown
+                aria-hidden="true"
+                className={cn("size-4", !agendaOpen && "-rotate-90")}
+              />
+            </Button>
+          ) : (
+            <>
+              <TopicIcon className="size-4" /> {t("Topics")}
+            </>
+          )}
         </h3>
         {topics.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -193,6 +224,43 @@ export function LiveTranscriptionTopics({
           </div>
         ) : null}
       </div>
+
+      {nextSelectedTopic ? (
+        <div className="flex items-start gap-3 rounded-lg bg-muted/60 px-4 py-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <CalendarClock aria-hidden="true" className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("Next selected topic")}
+            </p>
+            {agendaOpen ? (
+              <a
+                className="font-medium underline-offset-4 hover:underline"
+                href={`#agenda-topic-${nextSelectedTopic.id}`}
+              >
+                {nextSelectedTopic.title}
+              </a>
+            ) : (
+              <p className="font-medium">{nextSelectedTopic.title}</p>
+            )}
+            {nextSelectedTopic.plannedStartAt ? (
+              <p className="text-xs text-muted-foreground">
+                {t("Planned for {value0} (Berlin time)", {
+                  value0: time.format(
+                    new Date(nextSelectedTopic.plannedStartAt)
+                  ),
+                })}
+              </p>
+            ) : null}
+            {!activeTopic?.starred ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("Transcription begins when a selected topic is called.")}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {finishedNotice ? (
         <div
@@ -257,18 +325,28 @@ export function LiveTranscriptionTopics({
           </div>
         </div>
       ) : (
-        <ul className="flex flex-col divide-y divide-border/60 rounded-lg bg-muted/40">
+        <ul
+          id={agendaId}
+          hidden={!agendaOpen}
+          className="divide-y divide-border/60 overflow-hidden rounded-lg bg-muted/40"
+        >
           {topics.map((topic) => (
             <li
               className={cn(
                 "flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2",
-                topic.status === "active" && "bg-primary/5",
+                (topic.status === "active" ||
+                  (topicsOnly &&
+                    topic.starred &&
+                    topic.status === "planned")) &&
+                  "bg-primary/5",
                 topicsOnly &&
                   !topic.starred &&
                   topic.status === "planned" &&
                   "text-muted-foreground"
               )}
+              id={`agenda-topic-${topic.id}`}
               key={topic.id}
+              tabIndex={-1}
             >
               {topicsOnly && topic.status === "planned" ? (
                 <Checkbox
@@ -279,7 +357,18 @@ export function LiveTranscriptionTopics({
                     toggleStarred(topic, Boolean(next))
                   }
                 />
-              ) : topicsOnly ? null : (
+              ) : topicsOnly ? (
+                <span
+                  className="grid size-4 shrink-0 place-items-center"
+                  aria-hidden="true"
+                >
+                  {topic.status === "active" ? (
+                    <span className="size-2 rounded-full bg-primary" />
+                  ) : (
+                    <Check className="size-3.5 text-muted-foreground" />
+                  )}
+                </span>
+              ) : (
                 <Button
                   aria-label={
                     topic.starred
@@ -304,8 +393,8 @@ export function LiveTranscriptionTopics({
                   )}
                 </Button>
               )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{topic.title}</p>
+              <div className="min-w-0 flex-[1_1_12rem]">
+                <p className="font-medium">{topic.title}</p>
                 <p className="text-xs text-muted-foreground">
                   {topic.label}
                   {topic.plannedStartAt

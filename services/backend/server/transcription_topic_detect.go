@@ -20,7 +20,7 @@ type topicRef struct {
 var (
 	// The chair calls an item up with "Ich rufe ... auf" or "Wir kommen zu ...". Word
 	// boundaries keep "Zwischenrufe" and "rufen" from counting.
-	topicTrigger = regexp.MustCompile(`\b(rufe|rufen\s+wir|kommen\s+wir\s+(?:nun\s+|jetzt\s+)?zu|wir\s+kommen\s+(?:nun\s+|jetzt\s+)?zu|treten\s+wir\s+ein)\b`)
+	topicTrigger = regexp.MustCompile(`(?i)\b((?:ich\s+)?rufe|rufen\s+wir|kommen\s+wir\s+(?:nun\s+|jetzt\s+)?zu|wir\s+kommen\s+(?:nun\s+|jetzt\s+)?zu|treten\s+wir\s+ein)\b`)
 	topicEPL     = regexp.MustCompile(`\beinzelpl(?:an|ans|äne|änen)\s+((?:\d{1,2}(?:\s*(?:,|und|bis)\s*)?)+)`)
 	topicTOP     = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
 	topicZP      = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
@@ -71,6 +71,28 @@ func titleTokens(title string) []string {
 		out = append(out, w)
 	}
 	return out
+}
+
+// Providers may finalize the chair's introductory phrase before the item number.
+// Carry only an unfinished call, never a whole preceding speech.
+var unfinishedTopicCall = regexp.MustCompile(`(?i)\b(?:ich\s+rufe|wir\s+kommen\s+(?:nun\s+)?zu)(?:[[:punct:]\s]+(?:jetzt|nun|auf|den|die|das|dem|zum|einzelplan|tagesordnungspunkt|zusatzpunkt))*[[:punct:]\s]*$`)
+
+type topicCallBuffer struct {
+	text  string
+	endMs int64
+}
+
+func (b *topicCallBuffer) candidate(text string, startMs, endMs int64) string {
+	candidate := text
+	if b.text != "" && startMs <= b.endMs+10000 && !topicTrigger.MatchString(text) {
+		candidate = b.text + " " + text
+	}
+	b.text = ""
+	if suffix := unfinishedTopicCall.FindString(candidate); suffix != "" && len(suffix) <= 160 {
+		b.text = suffix
+		b.endMs = endMs
+	}
+	return candidate
 }
 
 // detectTopicAnnouncement finds which unfinished agenda item the chair just called up.
