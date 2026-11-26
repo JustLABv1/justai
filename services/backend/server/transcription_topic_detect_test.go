@@ -34,11 +34,14 @@ func TestDetectTopicAnnouncement(t *testing.T) {
 		{"Ich rufe den Zusatzpunkt 1 auf", 6},
 		{"Ich rufe nun den Geschäftsbereich des Bundesministeriums für Verkehr auf.", 3},
 		{"Kommen wir zu Umwelt, Klimaschutz und Naturschutz.", 4},
+		{"Der Einzelplan 10 ist damit angenommen. Wir kommen jetzt zum Einzelplan 15.", 2},
+		{"Kommen wir damit zum Tagesordnungspunkt 3.", 5},
 		// Not announcements.
 		{"Das war ein Zwischenruf aus der Fraktion, den ich rügen muss.", -1},
 		{"Der Einzelplan 15 ist ein wichtiger Haushalt für uns alle.", -1},
 		{"Ich rufe Einzelplan 99 auf.", -1},
 		{"Wir müssen beim Verkehr dringend mehr tun.", -1},
+		{"Wir kommen zur Abstimmung über den Einzelplan 15.", -1},
 	}
 	for _, c := range cases {
 		if got := detectTopicAnnouncement(c.text, topics); got != c.want {
@@ -86,5 +89,21 @@ func TestHousingBudgetCallAcrossFinalSegments(t *testing.T) {
 	pending.candidate("Ich rufe auf:", 0, 2000)
 	if detectTopicAnnouncement(pending.candidate("den Einzelplan 25.", 30000, 32000), topics) != -1 {
 		t.Fatal("an expired call matched a later mention")
+	}
+}
+
+// Sitting 112: the chair's "Wir kommen" was finalised on its own line.
+func TestCallSplitAfterWirKommen(t *testing.T) {
+	topics := []topicRef{
+		{Kind: "EPL", Numbers: []int{10}, Title: "Landwirtschaft, Ernährung und Heimat", Status: "active"},
+		{Kind: "EPL", Numbers: []int{17}, Title: "Bildung, Familie, Senioren, Frauen und Jugend", Status: "planned"},
+	}
+	var pending topicCallBuffer
+	lines := []string{"Keiner der Einzelplan 10 ist da.", "ist damit angenommen. Wir kommen", "jetzt zum Einzelplan 17.", "Bundesministerium für Bildung, Familie, Senioren,"}
+	for i, text := range lines {
+		got := detectTopicAnnouncement(pending.candidate(text, int64(i)*2000, int64(i)*2000+2000), topics)
+		if want := map[bool]int{true: 1, false: -1}[i == 2]; got != want {
+			t.Fatalf("line %q: got %d, want %d", text, got, want)
+		}
 	}
 }

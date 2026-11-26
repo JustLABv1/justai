@@ -860,5 +860,18 @@ type TranscriptionTopic struct {
 	SummaryError    string     `json:"summaryError,omitempty"`
 	// TranscriptSessionID is the topic's own transcript, made once the topic finished.
 	TranscriptSessionID *uuid.UUID `json:"transcriptSessionId,omitempty"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
+	// BoundaryProposal is an AI suggestion, waiting for the user, that a later agenda
+	// item began inside this topic.
+	BoundaryProposal *TopicBoundaryProposal `json:"boundaryProposal,omitempty"`
+	UpdatedAt        time.Time              `json:"updatedAt"`
+}
+
+// TopicBoundaryProposal: TopicID began at OffsetMs. Applied at Deadline unless the user
+// decides first.
+type TopicBoundaryProposal struct {
+	TopicID  uuid.UUID `json:"topicId"`
+	OffsetMs int64     `json:"offsetMs"`
+	Quote    string    `json:"quote"`
+	Reason   string    `json:"reason"`
+	Deadline time.Time `json:"deadline"`
 }

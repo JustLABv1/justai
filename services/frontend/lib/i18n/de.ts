@@ -2762,16 +2762,21 @@ export const de = {
   "More session actions": "Weitere Sitzungsaktionen",
   "Live conversation": "Live-Unterhaltung",
   "Waiting for topic": "Wartet auf Themenbeginn",
-  "Planned for {value0} (Berlin time)": "Geplant für {value0} Uhr (Berliner Zeit)",
-  "Transcription begins when a selected topic is called.": "Die Transkription beginnt, sobald ein ausgewähltes Thema aufgerufen wird.",
+  "Planned for {value0} (Berlin time)":
+    "Geplant für {value0} Uhr (Berliner Zeit)",
+  "Transcription begins when a selected topic is called.":
+    "Die Transkription beginnt, sobald ein ausgewähltes Thema aufgerufen wird.",
   "Scheduled topic monitoring": "Warten auf Themenbeginn",
-  "Monitoring from {value0}. Transcription begins when a selected topic is called.": "JustAI hört ab {value0} auf den Themenaufruf. Die Transkription beginnt mit dem Aufruf eines ausgewählten Themas.",
-  "Load the Bundestag agenda to follow individual topics live.": "Lade die Tagesordnung, um einzelne Themen live zu verfolgen.",
+  "Monitoring from {value0}. Transcription begins when a selected topic is called.":
+    "JustAI hört ab {value0} auf den Themenaufruf. Die Transkription beginnt mit dem Aufruf eines ausgewählten Themas.",
+  "Load the Bundestag agenda to follow individual topics live.":
+    "Lade die Tagesordnung, um einzelne Themen live zu verfolgen.",
   "Load agenda": "Tagesordnung laden",
   "Show stream details": "Streamdetails anzeigen",
   "Focus view": "Fokusansicht",
   "Stream details": "Streamdetails",
-  "Waiting for a selected topic": "Warten auf den Aufruf eines ausgewählten Themas",
+  "Waiting for a selected topic":
+    "Warten auf den Aufruf eines ausgewählten Themas",
   "Transcript in progress": "Transkript wird erstellt",
   "Someone is speaking": "Jemand spricht",
   "Audio flowing": "Audio wird übertragen",
@@ -5184,6 +5189,15 @@ export const de = {
     "Das Transkript erscheint hier, sobald jemand spricht.",
   "Agenda items": "Tagesordnungspunkte",
   "Not recorded": "Nicht aufgenommen",
+  "Skipped": "Übersprungen",
+  "Topic change detected": "Themenwechsel erkannt",
+  "“{value0}” probably began at {value1}.":
+    "„{value0}“ hat vermutlich bei {value1} begonnen.",
+  "JustAI applies this in {value0} min unless you decide.":
+    "JustAI übernimmt das in {value0} Min., wenn du nicht entscheidest.",
+  "JustAI applies this now.": "JustAI übernimmt das jetzt.",
+  "Accept change": "Übernehmen",
+  "Reject change": "Ablehnen",
   "Running now": "Läuft gerade",
   "Finished · summary available": "Beendet · Zusammenfassung verfügbar",
   "planned {value0}": "geplant {value0}",
@@ -5202,7 +5216,8 @@ export const de = {
   "Copy link": "Link kopieren",
   "Grant read access": "Lesezugriff erteilen",
   "Could not load sharing settings.": "Freigaben konnten nicht geladen werden.",
-  "Could not grant access. Check that all addresses belong to active workspace members.": "Freigabe fehlgeschlagen. Prüfe, ob alle Adressen zu aktiven Workspace-Mitgliedern gehören.",
+  "Could not grant access. Check that all addresses belong to active workspace members.":
+    "Freigabe fehlgeschlagen. Prüfe, ob alle Adressen zu aktiven Workspace-Mitgliedern gehören.",
   "Read-only link": "Link zum Mitlesen",
   "The link could not be loaded.": "Der Link konnte nicht geladen werden.",
   "The link could not be created.": "Der Link konnte nicht erstellt werden.",
@@ -5217,13 +5232,15 @@ export const de = {
   "New link": "Neuer Link",
   "Create link": "Link erstellen",
   "Reconnecting to the stream": "Stream wird erneut verbunden",
-  "JustAI is trying to reconnect.": "JustAI versucht, die Verbindung wiederherzustellen.",
+  "JustAI is trying to reconnect.":
+    "JustAI versucht, die Verbindung wiederherzustellen.",
   "Total downtime: {value0}": "Gesamte Ausfallzeit: {value0}",
   "1 interruption": "1 Unterbrechung",
   "{value0} interruptions": "{value0} Unterbrechungen",
   "{value0} downtime": "{value0} Ausfallzeit",
   "Interruption details": "Zeitpunkte der Unterbrechungen",
-  "Some earlier interruptions only have a total duration.": "Für frühere Unterbrechungen ist teilweise nur die Gesamtdauer gespeichert.",
+  "Some earlier interruptions only have a total duration.":
+    "Für frühere Unterbrechungen ist teilweise nur die Gesamtdauer gespeichert.",
   "Stream interrupted since {value0}": "Stream unterbrochen seit {value0}",
   "JustAI keeps reconnecting. If the stream does not come back within 15 minutes, the capture ends.":
     "JustAI verbindet sich immer wieder neu. Kommt der Stream nicht innerhalb von 15 Minuten zurück, endet die Aufnahme.",

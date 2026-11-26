@@ -108,6 +108,7 @@ func (m *TranscriptionManager) Start(ctx context.Context) {
 	}
 	go m.streamSourceSchedulerLoop(ctx)
 	go m.liveProcessingLoop(ctx)
+	go m.topicBoundaryLoop(ctx)
 }
 
 func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {

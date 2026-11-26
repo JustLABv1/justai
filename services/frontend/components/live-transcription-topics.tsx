@@ -8,6 +8,7 @@ import {
   FileText,
   Play,
   Sparkles,
+  X,
   Square,
 } from "lucide-react"
 import {
@@ -35,7 +36,7 @@ import {
 import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
 import { api } from "@/lib/api"
-import type { TranscriptionTopic } from "@/lib/types"
+import type { TopicBoundaryProposal, TranscriptionTopic } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { workspacePath } from "@/lib/workspace-routes"
 import { topicMoved } from "@/components/scheduled-capture-card"
@@ -110,6 +111,20 @@ export function LiveTranscriptionTopics({
   )
 
   const activeTopic = topics.find((topic) => topic.status === "active")
+  // The agenda has moved past an item once a later one has started; its slot time is
+  // no guide, since sittings often run late.
+  const reachedOrder = Math.max(
+    -1,
+    ...topics
+      .filter(
+        (topic) =>
+          (topic.status === "active" || topic.status === "done") &&
+          !notRecorded(topic)
+      )
+      .map((topic) => topic.order)
+  )
+  const passed = (topic: TranscriptionTopic) =>
+    topic.status === "planned" && topic.order < reachedOrder
   const nextSelectedTopic = topicsOnly
     ? topics
         .filter((topic) => topic.starred && topic.status === "planned")
@@ -192,6 +207,8 @@ export function LiveTranscriptionTopics({
       </Badge>
     ) : topic.status === "done" ? (
       <Badge variant="secondary">{t("Finished")}</Badge>
+    ) : passed(topic) ? (
+      <Badge variant="outline">{t("Skipped")}</Badge>
     ) : topicsOnly ? (
       topic.starred ? (
         <Badge variant="secondary">{t("Selected for recording")}</Badge>
@@ -253,6 +270,30 @@ export function LiveTranscriptionTopics({
           </div>
         ) : null}
       </div>
+
+      {topics.map((topic) =>
+        topic.boundaryProposal ? (
+          <BoundaryProposalCard
+            busy={busyId === topic.id}
+            key={`proposal-${topic.id}`}
+            nextTitle={
+              topics.find((item) => item.id === topic.boundaryProposal?.topicId)
+                ?.title ?? ""
+            }
+            onDecide={(decision) =>
+              void run(topic.id, async () => {
+                const result = await api.post<{
+                  topics: TranscriptionTopic[]
+                }>(`/api/v1/transcription/topics/${topic.id}/boundary`, {
+                  decision,
+                })
+                onTopics(result.topics)
+              })
+            }
+            proposal={topic.boundaryProposal}
+          />
+        ) : null
+      )}
 
       {nextSelectedTopic ? (
         <div className="flex items-start gap-3 rounded-lg bg-muted/60 px-4 py-3">
@@ -458,7 +499,7 @@ export function LiveTranscriptionTopics({
               </div>
               {statusBadge(topic)}
               <div className="ml-auto flex shrink-0 gap-1.5">
-                {topic.status === "planned" && capturing ? (
+                {topic.status === "planned" && capturing && !passed(topic) ? (
                   <Button
                     disabled={busyId === topic.id}
                     onClick={() =>
@@ -517,6 +558,80 @@ export function LiveTranscriptionTopics({
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Live detection missed an agenda change and an AI model found it in the transcript.
+ * The user can accept or reject; otherwise JustAI applies it when the time is up.
+ */
+function BoundaryProposalCard({
+  proposal,
+  nextTitle,
+  busy,
+  onDecide,
+}: {
+  proposal: TopicBoundaryProposal
+  nextTitle: string
+  busy: boolean
+  onDecide: (decision: "accept" | "reject") => void
+}) {
+  const { t } = useTranslations()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const minutes = Math.ceil(
+    (new Date(proposal.deadline).getTime() - now) / 60_000
+  )
+
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3"
+      role="status"
+    >
+      <p className="flex items-center gap-2 text-xs font-medium text-primary">
+        <Sparkles aria-hidden="true" className="size-4" />
+        {t("Topic change detected")}
+      </p>
+      <p className="font-medium">
+        {t("“{value0}” probably began at {value1}.", {
+          value0: nextTitle,
+          value1: formatOffset(proposal.offsetMs),
+        })}
+      </p>
+      {proposal.quote ? (
+        <blockquote className="border-l-2 border-primary/40 pl-2 text-xs text-muted-foreground italic">
+          „{proposal.quote}“
+        </blockquote>
+      ) : null}
+      {proposal.reason ? (
+        <p className="text-xs text-muted-foreground">{proposal.reason}</p>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {minutes > 0
+            ? t("JustAI applies this in {value0} min unless you decide.", {
+                value0: minutes,
+              })
+            : t("JustAI applies this now.")}
+        </p>
+        <div className="ml-auto flex shrink-0 gap-1.5">
+          <Button
+            disabled={busy}
+            onClick={() => onDecide("reject")}
+            size="sm"
+            variant="ghost"
+          >
+            <X data-icon="inline-start" /> {t("Reject change")}
+          </Button>
+          <Button disabled={busy} onClick={() => onDecide("accept")} size="sm">
+            <Check data-icon="inline-start" /> {t("Accept change")}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 

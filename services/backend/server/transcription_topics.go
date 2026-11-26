@@ -19,14 +19,16 @@ import (
 	"justai-backend/provider"
 )
 
-const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at, transcript_session_id`
+const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at, transcript_session_id, boundary_status, boundary_topic_id, boundary_offset_ms, boundary_quote, boundary_reason, boundary_deadline`
 
 func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	var t models.TranscriptionTopic
-	var source, transcript uuid.NullUUID
-	var start, end sql.NullInt64
+	var source, transcript, boundaryTopic uuid.NullUUID
+	var start, end, boundaryOffset sql.NullInt64
+	var boundaryStatus, boundaryQuote, boundaryReason string
+	var boundaryDeadline sql.NullTime
 	var plannedStart, plannedEnd, originalStart, planChanged sql.NullTime
-	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged, &transcript); err != nil {
+	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged, &transcript, &boundaryStatus, &boundaryTopic, &boundaryOffset, &boundaryQuote, &boundaryReason, &boundaryDeadline); err != nil {
 		return t, err
 	}
 	if source.Valid {
@@ -34,6 +36,9 @@ func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	}
 	if transcript.Valid {
 		t.TranscriptSessionID = &transcript.UUID
+	}
+	if boundaryStatus == "pending" && boundaryTopic.Valid && boundaryOffset.Valid && boundaryDeadline.Valid {
+		t.BoundaryProposal = &models.TopicBoundaryProposal{TopicID: boundaryTopic.UUID, OffsetMs: boundaryOffset.Int64, Quote: boundaryQuote, Reason: boundaryReason, Deadline: boundaryDeadline.Time}
 	}
 	if plannedStart.Valid {
 		t.PlannedStartAt = &plannedStart.Time
@@ -272,6 +277,8 @@ func (a *App) listTranscriptionTopics(c *gin.Context) {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
+	// Repairs an item the live detection missed although its data is already there.
+	a.Live.repairTopicBoundaries(c, sessionID)
 	topics, err := loadTopics(c, a.DB, sessionID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -547,6 +554,12 @@ const topicAutoSummaryMinWords = 150
 // summarises it shortly after, so each agenda item can be read on its own right away.
 func (m *TranscriptionManager) topicFinished(sessionID, topicID uuid.UUID) {
 	liveStreamEvents.inc("topic_finished")
+	// A call the live detection missed splits the item that ran over it.
+	splitCtx, cancelSplit := context.WithTimeout(context.Background(), 30*time.Second)
+	if next := m.splitMissedAnnouncement(splitCtx, topicID); next != uuid.Nil {
+		defer m.topicFinished(sessionID, next)
+	}
+	cancelSplit()
 	m.broadcastTopic(sessionID, topicID)
 	if m.app == nil {
 		return

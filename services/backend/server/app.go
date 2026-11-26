@@ -306,6 +306,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/transcription/topics/:id/transcript", a.platformFeature("transcription"), a.topicTranscript)
 	org.POST("/transcription/topics/:id/summary", a.platformFeature("transcription"), a.summarizeTranscriptionTopic)
 	org.POST("/transcription/topics/:id/transcript-session", a.platformFeature("transcription"), a.openTopicTranscript)
+	org.POST("/transcription/topics/:id/boundary", a.platformFeature("transcription"), a.decideTopicBoundary)
 	org.GET("/transcription/topics/:id/export/:format", a.platformFeature("transcription"), a.exportTranscriptionTopic)
 	org.GET("/transcription/sessions/:id/topics/export/:format", a.platformFeature("transcription"), a.exportTranscriptionTopics)
 	org.PATCH("/transcription/stream-sources/:id/schedule", a.platformFeature("transcription"), a.updateTranscriptionStreamSchedule)

@@ -932,7 +932,18 @@ export type TranscriptionTopic = {
   summaryError?: string
   /** The topic's own transcript, made once the topic finished. */
   transcriptSessionId?: string
+  /** An AI suggestion, waiting for the user, that a later item began inside this one. */
+  boundaryProposal?: TopicBoundaryProposal
   updatedAt: string
+}
+
+/** The item `topicId` began at `offsetMs`; applied at `deadline` unless decided first. */
+export type TopicBoundaryProposal = {
+  topicId: string
+  offsetMs: number
+  quote: string
+  reason: string
+  deadline: string
 }
 
 /** A session announced by the broadcaster, with the watch window derived from it. */
