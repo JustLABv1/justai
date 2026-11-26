@@ -33,7 +33,7 @@ export function StreamHealthNotice({
   if (notices.length === 0) return null
 
   return (
-    <div className="flex flex-col gap-2">
+    <>
       {notices.map((source) => {
         const reconnecting = source.transportStatus === "reconnecting"
         const failed = source.transportStatus === "failed"
@@ -57,7 +57,7 @@ export function StreamHealthNotice({
         const id = prefix + source.id
         const isOpen = expanded === source.id
         return (
-          <div key={source.id} className="min-w-0">
+          <div key={source.id} className="max-w-full min-w-0 shrink-0">
             <Micro
               size="sm"
               className="h-auto min-h-10 max-w-full gap-1.5 py-1 ps-2.5"
@@ -130,6 +130,6 @@ export function StreamHealthNotice({
           </div>
         )
       })}
-    </div>
+    </>
   )
 }

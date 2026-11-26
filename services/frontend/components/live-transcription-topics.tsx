@@ -298,34 +298,41 @@ export function LiveTranscriptionTopics({
       ) : null}
 
       {topics.length === 0 ? (
-        <div className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3">
+        <form
+          className="space-y-3 rounded-lg bg-muted/40 p-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!loading) void loadTopics()
+          }}
+        >
           <p className="text-xs text-muted-foreground">
-            {t(
-              "Load the agenda items of a Bundestag sitting. JustAI then recognises each item from the chair’s announcements and makes its transcript available as soon as it is finished."
-            )}
+            {t("Load the Bundestag agenda to follow individual topics live.")}
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              aria-label={t("Sitting number")}
-              className="w-32"
-              inputMode="numeric"
-              onChange={(event) =>
-                setSittingNo(event.target.value.replace(/\D/g, ""))
-              }
-              placeholder={t("e.g. 110")}
-              value={sittingNo}
-            />
-            <Button
-              disabled={loading}
-              onClick={() => void loadTopics()}
-              size="sm"
-              variant="outline"
+          <div className="space-y-1.5">
+            <label
+              htmlFor={`${agendaId}-sitting`}
+              className="block text-xs font-medium"
             >
-              {loading ? <Spinner /> : null}
-              {t("Load agenda items")}
-            </Button>
+              {t("Sitting number")}
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                id={`${agendaId}-sitting`}
+                className="h-8 w-20"
+                inputMode="numeric"
+                onChange={(event) =>
+                  setSittingNo(event.target.value.replace(/\D/g, ""))
+                }
+                placeholder="110"
+                value={sittingNo}
+              />
+              <Button disabled={loading} size="sm" type="submit">
+                {loading ? <Spinner /> : null}
+                {t("Load agenda")}
+              </Button>
+            </div>
           </div>
-        </div>
+        </form>
       ) : (
         <ul
           id={agendaId}
