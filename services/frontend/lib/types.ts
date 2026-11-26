@@ -930,6 +930,8 @@ export type TranscriptionTopic = {
   summary?: string
   summaryStatus: "none" | "processing" | "completed" | "failed"
   summaryError?: string
+  /** The topic's own transcript, made once the topic finished. */
+  transcriptSessionId?: string
   updatedAt: string
 }
 

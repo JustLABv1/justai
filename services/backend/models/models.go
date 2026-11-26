@@ -858,5 +858,7 @@ type TranscriptionTopic struct {
 	Summary         string     `json:"summary,omitempty"`
 	SummaryStatus   string     `json:"summaryStatus"`
 	SummaryError    string     `json:"summaryError,omitempty"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	// TranscriptSessionID is the topic's own transcript, made once the topic finished.
+	TranscriptSessionID *uuid.UUID `json:"transcriptSessionId,omitempty"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }

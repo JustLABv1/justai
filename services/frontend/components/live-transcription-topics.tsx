@@ -15,6 +15,7 @@ import {
   TopicNotifyIcon,
   TopicQuietIcon,
 } from "@/components/topic-icons"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useId, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
@@ -36,6 +37,7 @@ import { Spinner } from "@/components/panelui/spinner"
 import { api } from "@/lib/api"
 import type { TranscriptionTopic } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { workspacePath } from "@/lib/workspace-routes"
 import { topicMoved } from "@/components/scheduled-capture-card"
 import { TopicExportMenu } from "@/components/topic-export-menu"
 import { TopicSubscriptionButton } from "@/components/topic-subscriptions"
@@ -48,6 +50,14 @@ function formatOffset(ms?: number) {
   const s = total % 60
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${h}:${pad(m)}:${pad(s)}`
+}
+
+/** The topic passed without being captured, so it has no transcript. */
+function notRecorded(topic: TranscriptionTopic) {
+  return (
+    topic.status === "done" &&
+    (topic.detectedBy === "missed" || topic.startedOffsetMs == null)
+  )
 }
 
 /**
@@ -77,6 +87,7 @@ export function LiveTranscriptionTopics({
   topicsOnly?: boolean
 }) {
   const { t, locale } = useTranslations()
+  const router = useRouter()
   const agendaId = useId()
   const [agendaOpen, setAgendaOpen] = useState(true)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -153,8 +164,29 @@ export function LiveTranscriptionTopics({
       upsert(result.topic)
     })
 
+  // A finished topic opens as a transcript of its own, with speakers, summaries and
+  // export. A running topic still grows, so it opens as a live text preview.
+  const openTranscript = (topic: TranscriptionTopic) => {
+    if (topic.status !== "done") {
+      setOpenId(topic.id)
+      return
+    }
+    void run(topic.id, async () => {
+      const sessionId =
+        topic.transcriptSessionId ??
+        (
+          await api.post<{ sessionId: string }>(
+            `/api/v1/transcription/topics/${topic.id}/transcript-session`
+          )
+        ).sessionId
+      router.push(workspacePath("transcription", null, sessionId))
+    })
+  }
+
   const statusBadge = (topic: TranscriptionTopic) =>
-    topic.status === "active" ? (
+    notRecorded(topic) ? (
+      <Badge variant="outline">{t("Not recorded")}</Badge>
+    ) : topic.status === "active" ? (
       <Badge variant={topicsOnly && !topic.starred ? "secondary" : "default"}>
         {t("Topic in progress")}
       </Badge>
@@ -164,11 +196,6 @@ export function LiveTranscriptionTopics({
       topic.starred ? (
         <Badge variant="secondary">{t("Selected for recording")}</Badge>
       ) : null
-    ) : topic.starred ? (
-      <Badge variant="outline">
-        <TopicNotifyIcon aria-hidden="true" className="size-3" />
-        {t("Notify when finished")}
-      </Badge>
     ) : (
       <Badge variant="outline">{t("Planned")}</Badge>
     )
@@ -277,7 +304,7 @@ export function LiveTranscriptionTopics({
           <span className="flex gap-2">
             <Button
               onClick={() => {
-                setOpenId(finishedNotice.id)
+                openTranscript(finishedNotice)
                 onDismissNotice()
               }}
               size="sm"
@@ -430,7 +457,7 @@ export function LiveTranscriptionTopics({
                 </p>
               </div>
               {statusBadge(topic)}
-              <div className="flex gap-1">
+              <div className="ml-auto flex shrink-0 gap-1.5">
                 {topic.status === "planned" && capturing ? (
                   <Button
                     disabled={busyId === topic.id}
@@ -461,16 +488,17 @@ export function LiveTranscriptionTopics({
                       })
                     }
                     size="sm"
-                    variant="ghost"
+                    variant="secondary"
                   >
                     <Square data-icon="inline-start" /> {t("Finish")}
                   </Button>
                 ) : null}
-                {topic.status !== "planned" ? (
+                {topic.status !== "planned" && !notRecorded(topic) ? (
                   <Button
-                    onClick={() => setOpenId(topic.id)}
+                    disabled={busyId === topic.id}
+                    onClick={() => openTranscript(topic)}
                     size="sm"
-                    variant={topic.status === "done" ? "default" : "outline"}
+                    variant="secondary"
                   >
                     <FileText data-icon="inline-start" /> {t("Transcript")}
                   </Button>

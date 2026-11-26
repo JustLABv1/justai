@@ -19,18 +19,21 @@ import (
 	"justai-backend/provider"
 )
 
-const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at`
+const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at, transcript_session_id`
 
 func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	var t models.TranscriptionTopic
-	var source uuid.NullUUID
+	var source, transcript uuid.NullUUID
 	var start, end sql.NullInt64
 	var plannedStart, plannedEnd, originalStart, planChanged sql.NullTime
-	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged); err != nil {
+	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged, &transcript); err != nil {
 		return t, err
 	}
 	if source.Valid {
 		t.SourceID = &source.UUID
+	}
+	if transcript.Valid {
+		t.TranscriptSessionID = &transcript.UUID
 	}
 	if plannedStart.Valid {
 		t.PlannedStartAt = &plannedStart.Time
@@ -552,6 +555,13 @@ func (m *TranscriptionManager) topicFinished(sessionID, topicID uuid.UUID) {
 		time.Sleep(topicAutoSummaryDelay)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		// Every recorded topic becomes a transcript of its own. One opened right at the
+		// end may miss the last lines, so an untouched copy is rebuilt here.
+		if _, err := m.app.syncTopicTranscript(ctx, topicID, true); err == nil {
+			m.broadcastTopic(sessionID, topicID)
+		} else if !errors.Is(err, errTopicNotRecorded) {
+			slog.Warn("topic transcript failed", "topicId", topicID, "error", err)
+		}
 		topic, err := loadTopic(ctx, m.DB, topicID)
 		if err != nil || topic.Status != "done" || topic.DetectedBy == "missed" || topic.SummaryStatus == "completed" || topic.SummaryStatus == "processing" {
 			return

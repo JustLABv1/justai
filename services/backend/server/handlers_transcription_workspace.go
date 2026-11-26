@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -768,7 +769,17 @@ func transcriptionSummaryParagraphs(summary string) []string {
 	return paragraphs
 }
 
+// requestTranscriptionInsight retries once when the model ends without any text, which
+// self-hosted models do now and then on long transcript windows.
 func requestTranscriptionInsight(ctx context.Context, endpoint provider.Endpoint, systemPrompt, userInput string) (transcriptionInsightResponse, error) {
+	response, err := requestTranscriptionInsightOnce(ctx, endpoint, systemPrompt, userInput)
+	if errors.Is(err, provider.ErrNoChatContent) && ctx.Err() == nil {
+		return requestTranscriptionInsightOnce(ctx, endpoint, systemPrompt, userInput)
+	}
+	return response, err
+}
+
+func requestTranscriptionInsightOnce(ctx context.Context, endpoint provider.Endpoint, systemPrompt, userInput string) (transcriptionInsightResponse, error) {
 	insightContext, cancel := context.WithTimeout(ctx, transcriptionInsightCallTimeout)
 	defer cancel()
 	var output strings.Builder

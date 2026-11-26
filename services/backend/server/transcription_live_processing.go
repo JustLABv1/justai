@@ -134,6 +134,9 @@ func (m *TranscriptionManager) processLiveTranscript(ctx context.Context, id uui
 		}
 	}
 	_, err = m.DB.ExecContext(ctx, `UPDATE transcription_live_processing SET status='completed',stage='completed',error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1`, id)
+	if err == nil && m.app != nil {
+		m.app.refreshTopicTranscripts(ctx, id)
+	}
 	return err
 }
 
