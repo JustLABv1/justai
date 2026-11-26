@@ -579,6 +579,15 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 					continue
 				}
 			}
+			if call.Name == "notify_user" {
+				toolResult, err := e.app.agentNotifyUser(ctx, request, arguments)
+				if err != nil {
+					toolResult = err.Error()
+				}
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: toolResult, failed: err != nil})
+				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
+				continue
+			}
 			if isAttachmentReadTool(call.Name) && request.ConversationID != nil {
 				result, err := e.app.readAttachmentTool(ctx, request.UserID, request.OrganizationID, *request.ConversationID, call.Name, arguments)
 				toolResult := string(result)

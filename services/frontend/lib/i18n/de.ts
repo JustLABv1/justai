@@ -5323,6 +5323,19 @@ export const de = {
     "JustAI schickt jede deiner Benachrichtigungen an diese Adresse.",
   Service: "Dienst",
   "Webhook URL": "Webhook-URL",
+  "Waiting for my approval": "Wartet auf meine Freigabe",
+  "So an action does not expire unnoticed.":
+    "Damit eine Aktion nicht unbemerkt abläuft.",
+  "Run failed": "Lauf fehlgeschlagen",
+  "With the error message.": "Mit der Fehlermeldung.",
+  "Run completed": "Lauf abgeschlossen",
+  "With a short summary of the result.":
+    "Mit einer kurzen Zusammenfassung des Ergebnisses.",
+  "The notification setting could not be saved.":
+    "Die Benachrichtigungseinstellung konnte nicht gespeichert werden.",
+  "Tell me about runs of this workflow. Agents can also notify you themselves when their instructions ask for it, for example “tell me only if a new bill on digital policy appears”.":
+    "Benachrichtige mich über Läufe dieses Workflows. Agents können dich auch selbst benachrichtigen, wenn ihre Anweisung das verlangt, zum Beispiel „melde dich nur, wenn ein neuer Gesetzentwurf zur Digitalpolitik auftaucht“.",
+  "Send notification": "Benachrichtigung senden",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

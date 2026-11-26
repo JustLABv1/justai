@@ -421,6 +421,8 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/agent-workflows/:id/versions/:version", a.getAgentWorkflowVersion)
 	org.POST("/agent-workflows/:id/versions/:version/restore", a.restoreAgentWorkflowVersion)
 	org.PATCH("/agent-workflows/:id", a.updateAgentWorkflow)
+	org.GET("/agent-workflows/:id/notifications", a.workflowNotifications)
+	org.PUT("/agent-workflows/:id/notifications", a.workflowNotifications)
 	org.DELETE("/agent-workflows/:id", a.deleteAgentWorkflow)
 	org.POST("/agent-workflows/:id/validate", a.validateAgentWorkflow)
 	org.GET("/agent-workflows/:id/runs", a.listWorkflowRuns)

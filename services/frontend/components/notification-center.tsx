@@ -3,6 +3,8 @@
 import {
   AlarmClock,
   Bell,
+  Bot,
+  ShieldQuestion,
   CheckCheck,
   CircleCheck,
   Settings2,
@@ -241,6 +243,7 @@ const problemKinds = new Set([
   "stream_outage",
   "transcription_failed",
   "processing_failed",
+  "agent_failed",
 ])
 
 /** What a notification is about, with a dot while it is unread. */
@@ -254,13 +257,18 @@ function NotificationKindIcon({
   const Icon =
     kind === "reminder"
       ? AlarmClock
-      : problemKinds.has(kind)
-        ? TriangleAlert
-        : kind === "topic_done" ||
-            kind === "transcript_done" ||
-            kind === "stream_recovered"
-          ? CircleCheck
-          : Bell
+      : kind === "agent_approval"
+        ? ShieldQuestion
+        : kind === "agent_message"
+          ? Bot
+          : problemKinds.has(kind)
+            ? TriangleAlert
+            : kind === "topic_done" ||
+                kind === "transcript_done" ||
+                kind === "stream_recovered" ||
+                kind === "agent_completed"
+              ? CircleCheck
+              : Bell
   return (
     <span
       aria-hidden="true"

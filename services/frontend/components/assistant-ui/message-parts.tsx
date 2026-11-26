@@ -276,6 +276,7 @@ const toolLabelsMessages: Record<string, string> = {
   set_reminder: "Set reminder",
   list_reminders: "List reminders",
   cancel_reminder: "Cancel reminder",
+  notify_user: "Send notification",
   web_search: "Web search",
   browse_url: "Browse URL",
   generate_image: "Generate image",

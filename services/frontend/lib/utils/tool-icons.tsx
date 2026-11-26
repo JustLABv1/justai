@@ -418,6 +418,7 @@ export const formatToolName = (name: string): string => {
     set_reminder: "Set reminder",
     list_reminders: "List reminders",
     cancel_reminder: "Cancel reminder",
+    notify_user: "Send notification",
     browse_url: "Browse URL",
     create_pdf: "Create PDF",
     create_file: "Create file",

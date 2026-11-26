@@ -87,6 +87,8 @@ func notificationTexts(locale string, event notificationEvent) (title, body, lin
 			return "Erinnerung", event.Message, "Chat öffnen"
 		}
 		return "Reminder", event.Message, "Open chat"
+	case "agent_message", "agent_approval", "agent_failed", "agent_completed":
+		return agentTexts(german, event)
 	case "capture_aborted", "stream_unreachable", "watch_missed", "topic_missed", "plan_missing", "stream_outage", "stream_recovered", "transcription_failed", "processing_failed":
 		return problemTexts(german, event)
 	default:
@@ -170,6 +172,9 @@ func (m *TranscriptionManager) notificationLoop(ctx context.Context) {
 			m.app.notify(ctx, event)
 		}
 		for _, event := range m.app.claimDueReminders(ctx) {
+			m.app.notify(ctx, event)
+		}
+		for _, event := range m.app.claimAgentRunEvents(ctx) {
 			m.app.notify(ctx, event)
 		}
 	}
