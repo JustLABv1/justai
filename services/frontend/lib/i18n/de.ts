@@ -5191,6 +5191,93 @@ export const de = {
     "Das Transkript erscheint hier, sobald jemand spricht.",
   "Agenda items": "Tagesordnungspunkte",
   "Not recorded": "Nicht aufgenommen",
+  Notifications: "Benachrichtigungen",
+  "Notifications, {value0} unread": "Benachrichtigungen, {value0} ungelesen",
+  "You hear here when a topic or a whole live transcript you own or that was shared with you is finished.":
+    "Hier erfährst du, sobald ein Thema oder ein ganzes Live-Transkript fertig ist, das dir gehört oder mit dir geteilt wurde.",
+  "Recent notifications": "Letzte Benachrichtigungen",
+  Recent: "Zuletzt",
+  "Mark all as read": "Alle als gelesen markieren",
+  "No notifications yet.": "Noch keine Benachrichtigungen.",
+  unread: "ungelesen",
+  "Notification settings": "Benachrichtigungseinstellungen",
+  "Browser notifications": "Browser-Benachrichtigungen",
+  "This browser cannot show push notifications. On an iPhone, add JustAI to the home screen first.":
+    "Dieser Browser kann keine Push-Benachrichtigungen anzeigen. Auf dem iPhone füge JustAI zuerst zum Home-Bildschirm hinzu.",
+  "Blocked in this browser. Allow notifications for this site in the browser settings.":
+    "In diesem Browser blockiert. Erlaube Benachrichtigungen für diese Seite in den Browser-Einstellungen.",
+  "Shown even when JustAI is closed, on this device.":
+    "Erscheinen auf diesem Gerät, auch wenn JustAI geschlossen ist.",
+  "Browser notifications could not be turned on.":
+    "Browser-Benachrichtigungen konnten nicht eingeschaltet werden.",
+  "This server does not send e-mail yet.":
+    "Auf diesem Server ist noch kein E-Mail-Versand eingerichtet.",
+  "Sent to the address of your account.": "Geht an die Adresse deines Kontos.",
+  "The bell in the sidebar always lists your notifications. You can turn them off for a single live transcript in its topic list.":
+    "Die Glocke in der Seitenleiste zeigt deine Benachrichtigungen immer an. Für ein einzelnes Live-Transkript kannst du sie in seiner Themenliste ausschalten.",
+  "Test notification": "Testbenachrichtigung",
+  "Sends a message through every channel that is turned on, to check that it arrives.":
+    "Schickt eine Nachricht über jeden eingeschalteten Weg, damit du prüfen kannst, ob sie ankommt.",
+  "Send a test": "Test senden",
+  "Sent to {value0} browser(s).": "An {value0} Browser gesendet.",
+  "E-mail sent.": "E-Mail gesendet.",
+  "E-mail failed: {value0}": "E-Mail fehlgeschlagen: {value0}",
+  "Turn on browser or e-mail notifications first.":
+    "Schalte zuerst Browser- oder E-Mail-Benachrichtigungen ein.",
+  "Notifications for this transcript are off":
+    "Benachrichtigungen für dieses Transkript sind aus",
+  "Notifications for this transcript are on":
+    "Benachrichtigungen für dieses Transkript sind an",
+  "E-mail": "E-Mail",
+  "E-mail settings could not be loaded.":
+    "Die E-Mail-Einstellungen konnten nicht geladen werden.",
+  "E-mail settings saved.": "E-Mail-Einstellungen gespeichert.",
+  "E-mail settings could not be saved.":
+    "Die E-Mail-Einstellungen konnten nicht gespeichert werden.",
+  "Check the values and try again.":
+    "Prüfe die Angaben und versuche es erneut.",
+  "Test e-mail sent to {value0}.": "Test-E-Mail an {value0} gesendet.",
+  "The test e-mail failed.": "Die Test-E-Mail ist fehlgeschlagen.",
+  "Outgoing e-mail": "Ausgehende E-Mails",
+  "JustAI sends notifications by e-mail through this SMTP server, for example when a shared live transcript or one of its topics is finished.":
+    "Über diesen SMTP-Server verschickt JustAI Benachrichtigungen per E-Mail, zum Beispiel wenn ein geteiltes Live-Transkript oder eines seiner Themen fertig ist.",
+  "Set by the server configuration (config.yaml or JUSTAI_SMTP_* variables). Change it there; it takes precedence over this page.":
+    "Durch die Serverkonfiguration festgelegt (config.yaml oder JUSTAI_SMTP_*-Variablen). Änderungen bitte dort vornehmen; sie haben Vorrang vor dieser Seite.",
+  "Send e-mail": "E-Mails verschicken",
+  "When off, notifications appear in the app and by browser push only.":
+    "Ausgeschaltet erscheinen Benachrichtigungen nur in der App und als Browser-Push.",
+  "SMTP server": "SMTP-Server",
+  Port: "Port",
+  Encryption: "Verschlüsselung",
+  "STARTTLS (port 587)": "STARTTLS (Port 587)",
+  "TLS (port 465)": "TLS (Port 465)",
+  "Keep the stored password": "Gespeichertes Passwort behalten",
+  "Remove the stored password": "Gespeichertes Passwort entfernen",
+  Sender: "Absender",
+  "Test failed": "Test fehlgeschlagen",
+  "Test passed": "Test erfolgreich",
+  "The test goes to the e-mail address of your account.":
+    "Der Test geht an die E-Mail-Adresse deines Kontos.",
+  "Send test e-mail": "Test-E-Mail senden",
+  "Public address": "Öffentliche Adresse",
+  "Links in e-mails and push notifications point here. Use the address people open JustAI with.":
+    "Links in E-Mails und Push-Benachrichtigungen zeigen hierhin. Trage die Adresse ein, unter der JustAI aufgerufen wird.",
+  "Set by the server configuration (JUSTAI_PUBLIC_URL).":
+    "Durch die Serverkonfiguration festgelegt (JUSTAI_PUBLIC_URL).",
+  "Empty uses {value0}.": "Leer wird {value0} verwendet.",
+  Address: "Adresse",
+  "Try again.": "Versuche es erneut.",
+  "Record coming sittings automatically":
+    "Künftige Sitzungen automatisch aufnehmen",
+  "Subscribe to keywords such as “Digital”. JustAI plans matching topics of coming sittings and records them.":
+    "Abonniere Stichwörter wie „Digitales“. JustAI plant passende Themen kommender Sitzungen ein und nimmt sie auf.",
+  "Notifications for this transcript":
+    "Benachrichtigungen für dieses Transkript",
+  "JustAI tells you when a recorded topic is finished and when the whole transcript is done. Everyone it is shared with decides this for themselves.":
+    "JustAI sagt dir Bescheid, sobald ein aufgenommenes Thema fertig ist und wenn das ganze Transkript abgeschlossen ist. Alle, mit denen es geteilt ist, entscheiden das für sich selbst.",
+  "Notify me": "Mich benachrichtigen",
+  "Browser and e-mail are set in your profile.":
+    "Browser und E-Mail stellst du in deinem Profil ein.",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

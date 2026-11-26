@@ -1,12 +1,15 @@
 "use client"
 
 import {
+  Bell,
+  BellOff,
   CalendarClock,
   ChevronDown,
   Check,
   Copy,
   FileText,
   Play,
+  Settings2,
   Sparkles,
   X,
   Square,
@@ -24,6 +27,15 @@ import { Micro } from "@/components/panelui/micro"
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Checkbox } from "@/components/panelui/checkbox"
+import { Switch } from "@/components/panelui/switch"
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Dialog,
   DialogBody,
@@ -41,7 +53,7 @@ import { cn } from "@/lib/utils"
 import { workspacePath } from "@/lib/workspace-routes"
 import { topicMoved } from "@/components/scheduled-capture-card"
 import { TopicExportMenu } from "@/components/topic-export-menu"
-import { TopicSubscriptionButton } from "@/components/topic-subscriptions"
+import { TopicSubscriptionCard } from "@/components/topic-subscriptions"
 
 function formatOffset(ms?: number) {
   if (ms === undefined) return ""
@@ -258,7 +270,7 @@ export function LiveTranscriptionTopics({
                 tone="info"
               />
             </Micro>
-            <TopicSubscriptionButton sessionId={sessionId} />
+            <SessionNotifyToggle sessionId={sessionId} />
             {topics.some((topic) => topic.startedOffsetMs !== undefined) ? (
               <TopicExportMenu
                 fileName={t("Topics")}
@@ -550,6 +562,10 @@ export function LiveTranscriptionTopics({
         </ul>
       )}
 
+      {topics.length > 0 ? (
+        <TopicSubscriptionCard sessionId={sessionId} />
+      ) : null}
+
       {openTopic ? (
         <TopicTranscriptDialog
           onClose={() => setOpenId(null)}
@@ -558,6 +574,103 @@ export function LiveTranscriptionTopics({
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Notifications about this transcript (each finished topic and the end), for the
+ * current user. Opens a popover that explains them and has the switch.
+ */
+function SessionNotifyToggle({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslations()
+  const router = useRouter()
+  const [muted, setMuted] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void api
+      .get<{ muted: boolean }>(
+        `/api/v1/transcription/sessions/${sessionId}/notifications`
+      )
+      .then((result) => {
+        if (!cancelled) setMuted(result.muted)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+  if (muted === null) return null
+  const label = muted
+    ? t("Notifications for this transcript are off")
+    : t("Notifications for this transcript are on")
+  const setOn = (on: boolean) => {
+    setBusy(true)
+    void api
+      .put<{ muted: boolean }>(
+        `/api/v1/transcription/sessions/${sessionId}/notifications`,
+        { muted: !on }
+      )
+      .then((result) => setMuted(result.muted))
+      .catch(() => undefined)
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button
+            aria-label={label}
+            size="icon-sm"
+            title={label}
+            variant="ghost"
+          >
+            {muted ? (
+              <BellOff className="text-muted-foreground" />
+            ) : (
+              <Bell className="text-primary" />
+            )}
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className="w-80 gap-3 p-4">
+        <PopoverHeader>
+          <PopoverTitle>{t("Notifications for this transcript")}</PopoverTitle>
+          <PopoverDescription className="text-sm">
+            {t(
+              "JustAI tells you when a recorded topic is finished and when the whole transcript is done. Everyone it is shared with decides this for themselves."
+            )}
+          </PopoverDescription>
+        </PopoverHeader>
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2.5">
+          <label
+            className="text-sm font-medium"
+            htmlFor={`notify-${sessionId}`}
+          >
+            {t("Notify me")}
+          </label>
+          <Switch
+            checked={!muted}
+            disabled={busy}
+            id={`notify-${sessionId}`}
+            onCheckedChange={(checked) => setOn(checked)}
+            pending={busy}
+            size="sm"
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{t("Browser and e-mail are set in your profile.")}</span>
+          <Button
+            onClick={() => router.push("/profile?tab=notifications")}
+            size="sm"
+            variant="ghost"
+          >
+            <Settings2 data-icon="inline-start" />
+            {t("Settings")}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 

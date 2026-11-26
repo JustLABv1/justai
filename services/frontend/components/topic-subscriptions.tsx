@@ -100,13 +100,35 @@ function useKeywordPreview(keywords: string[]) {
  * Subscribe to agenda items by keyword: for every upcoming sitting with matching items,
  * JustAI schedules a capture of only those items, like this session.
  */
-export function TopicSubscriptionButton({ sessionId }: { sessionId: string }) {
+/**
+ * Invites the user to have JustAI record matching topics of coming sittings, below the
+ * topic list of a Bundestag session.
+ */
+export function TopicSubscriptionCard({ sessionId }: { sessionId: string }) {
   const { t } = useTranslations()
   const [open, setOpen] = useState(false)
   return (
-    <>
-      <Button onClick={() => setOpen(true)} size="sm" variant="outline">
-        <TopicSubscribeIcon data-icon="inline-start" /> {t("Subscribe to topics")}
+    <div className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/40 px-4 py-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+        <TopicSubscribeIcon aria-hidden="true" className="size-4" />
+      </span>
+      <div className="min-w-0 flex-[1_1_14rem]">
+        <p className="font-medium">
+          {t("Record coming sittings automatically")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            "Subscribe to keywords such as “Digital”. JustAI plans matching topics of coming sittings and records them."
+          )}
+        </p>
+      </div>
+      <Button
+        className="ml-auto"
+        onClick={() => setOpen(true)}
+        size="sm"
+        variant="secondary"
+      >
+        {t("Subscribe to topics")}
       </Button>
       {open ? (
         <TopicSubscriptionDialog
@@ -114,7 +136,7 @@ export function TopicSubscriptionButton({ sessionId }: { sessionId: string }) {
           sessionId={sessionId}
         />
       ) : null}
-    </>
+    </div>
   )
 }
 

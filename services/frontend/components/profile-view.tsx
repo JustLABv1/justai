@@ -26,7 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 
 import { api, APIError, resolveAPIURL } from "@/lib/api"
 import type {
@@ -37,6 +37,7 @@ import type {
   User,
 } from "@/lib/types"
 import { Tabs } from "@/components/panelui/tabs"
+import { NotificationSettingsPanel } from "@/components/notification-settings"
 import { Switch } from "@/components/panelui/switch"
 import { setMascotDisabled, useMascotDisabled } from "@/lib/mascot-preference"
 import { setSeasonsDisabled, useSeasonsDisabled } from "@/lib/season-preference"
@@ -207,6 +208,14 @@ function ProfileActivityGrid({
   )
 }
 
+const profileTabs = [
+  "activity",
+  "usage",
+  "preferences",
+  "notifications",
+  "account",
+]
+
 export function ProfileView({
   user,
   organization,
@@ -222,6 +231,11 @@ export function ProfileView({
   })
 
   const router = useRouter()
+  // ?tab= opens a section directly, for example from the notification bell.
+  const requestedTab = useSearchParams().get("tab")
+  const initialTab = profileTabs.includes(requestedTab ?? "")
+    ? (requestedTab as string)
+    : "activity"
   const inputRef = useRef<HTMLInputElement>(null)
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [avatarURL, setAvatarURL] = useState(user.avatarUrl ?? "")
@@ -714,11 +728,14 @@ export function ProfileView({
         pending={busy}
         title={t("Remove profile picture?")}
       />
-      <Tabs defaultValue="activity" className="gap-5">
+      <Tabs key={initialTab} defaultValue={initialTab} className="gap-5">
         <Tabs.List aria-label={t("Profile sections")}>
           <Tabs.Trigger value="activity">{t("Activity")}</Tabs.Trigger>
           <Tabs.Trigger value="usage">{t("Usage")}</Tabs.Trigger>
           <Tabs.Trigger value="preferences">{t("Preferences")}</Tabs.Trigger>
+          <Tabs.Trigger value="notifications">
+            {t("Notifications")}
+          </Tabs.Trigger>
           <Tabs.Trigger value="account">{t("Account")}</Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="activity" className="flex flex-col gap-5">
@@ -845,9 +862,7 @@ export function ProfileView({
                   <Switch
                     checked={!seasonsDisabled}
                     label={t("Seasonal effects")}
-                    onCheckedChange={(checked) =>
-                      setSeasonsDisabled(!checked)
-                    }
+                    onCheckedChange={(checked) => setSeasonsDisabled(!checked)}
                   />
                 </Frame.Actions>
               </Frame.Row>
@@ -864,14 +879,15 @@ export function ProfileView({
                   <Switch
                     checked={!mascotDisabled}
                     label={t("Mascot")}
-                    onCheckedChange={(checked) =>
-                      setMascotDisabled(!checked)
-                    }
+                    onCheckedChange={(checked) => setMascotDisabled(!checked)}
                   />
                 </Frame.Actions>
               </Frame.Row>
             </Frame.Panel>
           </Frame>
+        </Tabs.Content>
+        <Tabs.Content value="notifications" className="flex flex-col gap-5">
+          <NotificationSettingsPanel />
         </Tabs.Content>
         <Tabs.Content value="account" className="flex flex-col gap-5">
           <Frame>

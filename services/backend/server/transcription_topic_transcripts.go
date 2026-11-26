@@ -82,6 +82,17 @@ func (a *App) syncTopicTranscript(ctx context.Context, topicID uuid.UUID, refres
 		}
 	}
 
+	// A topic that was called up but not captured (an unselected item of a "selected
+	// topics only" capture) has no lines and gets no transcript.
+	var lineCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM transcription_segments WHERE session_id = $1 AND canonical AND start_offset_ms >= $2 AND ($3::bigint IS NULL OR start_offset_ms < $3) AND ($4::uuid IS NULL OR source_id IS NULL OR source_id = $4)`,
+		parentID, start.Int64, end, sourceID).Scan(&lineCount); err != nil {
+		return uuid.Nil, err
+	}
+	if lineCount == 0 && !copyID.Valid {
+		return uuid.Nil, errTopicNotRecorded
+	}
+
 	var sessionTitle string
 	if err := tx.QueryRowContext(ctx, `SELECT title FROM transcription_sessions WHERE id = $1`, parentID).Scan(&sessionTitle); err != nil {
 		return uuid.Nil, err

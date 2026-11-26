@@ -19,6 +19,7 @@ export const adminBreadcrumbLabels: Record<AdminTab, string> = {
   mcp: "MCP",
   controls: "Platform controls",
   authentication: "Authentication",
+  email: "E-mail",
   announcements: "Announcements",
   health: "Health",
   analytics: "Analytics",

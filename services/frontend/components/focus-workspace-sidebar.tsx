@@ -56,6 +56,7 @@ const ShieldCheck = sidebarIcon(Shield01Icon)
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
+import { NotificationCenter } from "@/components/notification-center"
 import { LanguageMenu } from "@/components/language-switcher"
 import { ThemeMenu } from "@/components/theme-switcher"
 
@@ -635,6 +636,7 @@ export function FocusWorkspaceSidebar({
             ))}
           </div>
           <NavRail.Footer>
+            <NotificationCenter onOpened={() => setOpenMobile(false)} />
             <NavRail.Item
               icon={<Settings2 />}
               active={activeView === "settings"}

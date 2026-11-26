@@ -33,6 +33,7 @@ export type AdminTab =
   | "mcp"
   | "controls"
   | "authentication"
+  | "email"
   | "announcements"
   | "health"
   | "analytics"

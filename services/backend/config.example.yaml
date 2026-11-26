@@ -58,6 +58,23 @@ stream_relays: []
   #   url: "https://relay-berlin.example.org"
   #   token_file: "/run/secrets/relay_berlin_token"
 
+# Where people open JustAI. Links in notification e-mails and push messages point
+# here. Empty uses the admin setting (Platform admin → E-mail), then the first
+# frontend origin. Env: JUSTAI_PUBLIC_URL.
+public_url: ""
+
+# Optional SMTP server for notification e-mails (for example when a shared live
+# transcript or one of its topics is finished). Usually set by a platform admin
+# under Platform admin → E-mail; a host set here (or JUSTAI_SMTP_HOST, _PORT,
+# _USERNAME, _PASSWORD, _FROM, _SECURITY) takes precedence and locks that page.
+smtp:
+  host: ""
+  port: 587
+  username: ""
+  password: ""
+  from: ""            # for example "JustAI <justai@example.org>"
+  security: "starttls" # starttls, tls (implicit, port 465) or none
+
 transcription:
   # Choose one: local or s3. Audio recording is opt-in per session.
   storage_driver: "local"
