@@ -2761,6 +2761,22 @@ export const de = {
   "Keep session live": "Sitzung weiterlaufen lassen",
   "More session actions": "Weitere Sitzungsaktionen",
   "Live conversation": "Live-Unterhaltung",
+  "Waiting for topic": "Wartet auf Themenbeginn",
+  "Planned for {value0} (Berlin time)":
+    "Geplant für {value0} Uhr (Berliner Zeit)",
+  "Transcription begins when a selected topic is called.":
+    "Die Transkription beginnt, sobald ein ausgewähltes Thema aufgerufen wird.",
+  "Scheduled topic monitoring": "Warten auf Themenbeginn",
+  "Monitoring from {value0}. Transcription begins when a selected topic is called.":
+    "JustAI hört ab {value0} auf den Themenaufruf. Die Transkription beginnt mit dem Aufruf eines ausgewählten Themas.",
+  "Load the Bundestag agenda to follow individual topics live.":
+    "Lade die Tagesordnung, um einzelne Themen live zu verfolgen.",
+  "Load agenda": "Tagesordnung laden",
+  "Show stream details": "Streamdetails anzeigen",
+  "Focus view": "Fokusansicht",
+  "Stream details": "Streamdetails",
+  "Waiting for a selected topic":
+    "Warten auf den Aufruf eines ausgewählten Themas",
   "Transcript in progress": "Transkript wird erstellt",
   "Someone is speaking": "Jemand spricht",
   "Audio flowing": "Audio wird übertragen",
@@ -5000,6 +5016,8 @@ export const de = {
   "Choose at least one topic.": "Wähle mindestens ein Thema.",
   "A selected topic was called up before the capture window began, so it was not recorded. The capture continues with the remaining topics.":
     "Ein ausgewähltes Thema wurde aufgerufen, bevor das Aufnahmefenster begann, und wurde daher nicht aufgenommen. Die Aufnahme läuft mit den übrigen Themen weiter.",
+  "The sitting was closed, so the capture has ended.":
+    "Die Sitzung wurde geschlossen, daher wurde die Aufnahme beendet.",
   "All selected topics are finished. The capture has ended.":
     "Alle ausgewählten Themen sind abgeschlossen. Die Aufnahme wurde beendet.",
   "Paused until {value0} (Berlin time), shortly before the next selected topic: {value1}.":
@@ -5107,6 +5125,10 @@ export const de = {
     "JustAI prüft den Plan des Bundestags regelmäßig und übernimmt Änderungen.",
   "The JustAI server must remain running.":
     "Der JustAI-Server muss weiterlaufen.",
+  "Collapse agenda": "Tagesordnung einklappen",
+  "Expand agenda": "Tagesordnung ausklappen",
+  "Next selected topic": "Nächstes ausgewähltes Thema",
+  "Topic in progress": "Thema läuft",
   "Selected for recording": "Zur Aufnahme vorgemerkt",
   "Do not record this topic": "Thema nicht aufnehmen",
   "Record this topic": "Thema aufnehmen",
@@ -5119,7 +5141,6 @@ export const de = {
   "Notify me when this topic is finished":
     "Benachrichtigen, wenn das Thema abgeschlossen ist",
   "Not selected": "Nicht ausgewählt",
-  "Notify when finished": "Benachrichtigung, wenn fertig",
   "Pauses between the selected topics and ends after the last one. If the sitting runs late, JustAI waits longer; at the latest it stops at {value0}.":
     "Pausiert zwischen den ausgewählten Themen und endet nach dem letzten. Läuft die Sitzung länger, wartet JustAI mit; spätestens um {value0} ist Schluss.",
   "Invite participants": "Teilnehmende einladen",
@@ -5170,10 +5191,179 @@ export const de = {
     "Das Transkript erscheint hier, sobald jemand spricht.",
   "Agenda items": "Tagesordnungspunkte",
   "Not recorded": "Nicht aufgenommen",
+  Notifications: "Benachrichtigungen",
+  "Notifications, {value0} unread": "Benachrichtigungen, {value0} ungelesen",
+  "Finished topics and transcripts, problems during your transcriptions, and reminders you asked the assistant for.":
+    "Fertige Themen und Transkripte, Probleme bei deinen Transkriptionen und Erinnerungen, um die du den Assistenten gebeten hast.",
+  "Recent notifications": "Letzte Benachrichtigungen",
+  Recent: "Zuletzt",
+  "Mark all as read": "Alle als gelesen markieren",
+  "No notifications yet.": "Noch keine Benachrichtigungen.",
+  unread: "ungelesen",
+  "Notification settings": "Benachrichtigungseinstellungen",
+  "Browser notifications": "Browser-Benachrichtigungen",
+  "This browser cannot show push notifications. On an iPhone, add JustAI to the home screen first.":
+    "Dieser Browser kann keine Push-Benachrichtigungen anzeigen. Auf dem iPhone füge JustAI zuerst zum Home-Bildschirm hinzu.",
+  "Blocked in this browser. Allow notifications for this site in the browser settings.":
+    "In diesem Browser blockiert. Erlaube Benachrichtigungen für diese Seite in den Browser-Einstellungen.",
+  "Shown even when JustAI is closed, on this device.":
+    "Erscheinen auf diesem Gerät, auch wenn JustAI geschlossen ist.",
+  "Browser notifications could not be turned on.":
+    "Browser-Benachrichtigungen konnten nicht eingeschaltet werden.",
+  "This server does not send e-mail yet.":
+    "Auf diesem Server ist noch kein E-Mail-Versand eingerichtet.",
+  "Sent to the address of your account.": "Geht an die Adresse deines Kontos.",
+  "The bell in the sidebar always lists your notifications. You can turn them off for a single live transcript in its topic list.":
+    "Die Glocke in der Seitenleiste zeigt deine Benachrichtigungen immer an. Für ein einzelnes Live-Transkript kannst du sie in seiner Themenliste ausschalten.",
+  "Test notification": "Testbenachrichtigung",
+  "Sends a message through every channel that is turned on, to check that it arrives.":
+    "Schickt eine Nachricht über jeden eingeschalteten Weg, damit du prüfen kannst, ob sie ankommt.",
+  "Send a test": "Test senden",
+  "Sent to {value0} browser(s).": "An {value0} Browser gesendet.",
+  "E-mail sent.": "E-Mail gesendet.",
+  "E-mail failed: {value0}": "E-Mail fehlgeschlagen: {value0}",
+  "Turn on browser, e-mail or webhook notifications first.":
+    "Schalte zuerst Browser-, E-Mail- oder Webhook-Benachrichtigungen ein.",
+  "Notifications for this transcript are off":
+    "Benachrichtigungen für dieses Transkript sind aus",
+  "Notifications for this transcript are on":
+    "Benachrichtigungen für dieses Transkript sind an",
+  "E-mail": "E-Mail",
+  "E-mail settings could not be loaded.":
+    "Die E-Mail-Einstellungen konnten nicht geladen werden.",
+  "E-mail settings saved.": "E-Mail-Einstellungen gespeichert.",
+  "E-mail settings could not be saved.":
+    "Die E-Mail-Einstellungen konnten nicht gespeichert werden.",
+  "Check the values and try again.":
+    "Prüfe die Angaben und versuche es erneut.",
+  "Test e-mail sent to {value0}.": "Test-E-Mail an {value0} gesendet.",
+  "The test e-mail failed.": "Die Test-E-Mail ist fehlgeschlagen.",
+  "Outgoing e-mail": "Ausgehende E-Mails",
+  "JustAI sends notifications by e-mail through this SMTP server, for example when a shared live transcript or one of its topics is finished.":
+    "Über diesen SMTP-Server verschickt JustAI Benachrichtigungen per E-Mail, zum Beispiel wenn ein geteiltes Live-Transkript oder eines seiner Themen fertig ist.",
+  "Set by the server configuration (config.yaml or JUSTAI_SMTP_* variables). Change it there; it takes precedence over this page.":
+    "Durch die Serverkonfiguration festgelegt (config.yaml oder JUSTAI_SMTP_*-Variablen). Änderungen bitte dort vornehmen; sie haben Vorrang vor dieser Seite.",
+  "Send e-mail": "E-Mails verschicken",
+  "When off, notifications appear in the app and by browser push only.":
+    "Ausgeschaltet erscheinen Benachrichtigungen nur in der App und als Browser-Push.",
+  "SMTP server": "SMTP-Server",
+  Port: "Port",
+  Encryption: "Verschlüsselung",
+  "STARTTLS (port 587)": "STARTTLS (Port 587)",
+  "TLS (port 465)": "TLS (Port 465)",
+  "Keep the stored password": "Gespeichertes Passwort behalten",
+  "Remove the stored password": "Gespeichertes Passwort entfernen",
+  Sender: "Absender",
+  "Test failed": "Test fehlgeschlagen",
+  "Test passed": "Test erfolgreich",
+  "The test goes to the e-mail address of your account.":
+    "Der Test geht an die E-Mail-Adresse deines Kontos.",
+  "Send test e-mail": "Test-E-Mail senden",
+  "Public address": "Öffentliche Adresse",
+  "Links in e-mails and push notifications point here. Use the address people open JustAI with.":
+    "Links in E-Mails und Push-Benachrichtigungen zeigen hierhin. Trage die Adresse ein, unter der JustAI aufgerufen wird.",
+  "Set by the server configuration (JUSTAI_PUBLIC_URL).":
+    "Durch die Serverkonfiguration festgelegt (JUSTAI_PUBLIC_URL).",
+  "Empty uses {value0}.": "Leer wird {value0} verwendet.",
+  Address: "Adresse",
+  "Try again.": "Versuche es erneut.",
+  "Record coming sittings automatically":
+    "Künftige Sitzungen automatisch aufnehmen",
+  "Subscribe to keywords such as “Digital”. JustAI plans matching topics of coming sittings and records them.":
+    "Abonniere Stichwörter wie „Digitales“. JustAI plant passende Themen kommender Sitzungen ein und nimmt sie auf.",
+  "Notifications for this transcript":
+    "Benachrichtigungen für dieses Transkript",
+  "JustAI tells you when a recorded topic is finished and when the whole transcript is done. Everyone it is shared with decides this for themselves.":
+    "JustAI sagt dir Bescheid, sobald ein aufgenommenes Thema fertig ist und wenn das ganze Transkript abgeschlossen ist. Alle, mit denen es geteilt ist, entscheiden das für sich selbst.",
+  "Notify me": "Mich benachrichtigen",
+  "Browser and e-mail are set in your profile.":
+    "Browser und E-Mail stellst du in deinem Profil ein.",
+  "Set reminder": "Erinnerung stellen",
+  "List reminders": "Erinnerungen anzeigen",
+  "Cancel reminder": "Erinnerung löschen",
+  "Sent to {value0} webhook(s).": "An {value0} Webhook(s) gesendet.",
+  "JSON (signed)": "JSON (signiert)",
+  "In Slack, add the Incoming Webhooks app to a channel and copy its URL (https://hooks.slack.com/…).":
+    "Füge in Slack einem Kanal die App „Incoming Webhooks“ hinzu und kopiere ihre URL (https://hooks.slack.com/…).",
+  "In a Teams channel, open Workflows, choose “Post to a channel when a webhook request is received” and copy the URL.":
+    "Öffne in einem Teams-Kanal „Workflows“, wähle „Bei Empfang einer Webhookanforderung in einem Kanal posten“ und kopiere die URL.",
+  "In Discord, open the channel settings, Integrations, Webhooks, create one and copy its URL.":
+    "Öffne in Discord die Kanaleinstellungen, dann Integrationen und Webhooks, lege einen an und kopiere seine URL.",
+  "JustAI posts JSON to this address. Each request is signed: X-JustAI-Signature is sha256= followed by the HMAC-SHA256 of “timestamp.body” with your secret, and X-JustAI-Timestamp holds the timestamp.":
+    "JustAI schickt JSON an diese Adresse. Jede Anfrage ist signiert: X-JustAI-Signature enthält sha256= und den HMAC-SHA256 von „Zeitstempel.Body“ mit deinem Geheimnis, X-JustAI-Timestamp den Zeitstempel.",
+  "The webhook could not be changed.":
+    "Der Webhook konnte nicht geändert werden.",
+  "Test sent to “{value0}”.": "Test an „{value0}“ gesendet.",
+  "The test failed.": "Der Test ist fehlgeschlagen.",
+  "The webhook could not be removed.":
+    "Der Webhook konnte nicht entfernt werden.",
+  "Turned off after repeated errors: {value0}":
+    "Nach wiederholten Fehlern ausgeschaltet: {value0}",
+  "Last delivery failed: {value0}":
+    "Letzte Zustellung fehlgeschlagen: {value0}",
+  "Last delivered {value0}": "Zuletzt zugestellt {value0}",
+  "Not used yet": "Noch nicht verwendet",
+  Webhooks: "Webhooks",
+  "Sends your notifications to other tools: Slack, Mattermost, Microsoft Teams, Discord, or as signed JSON to your own systems.":
+    "Schickt deine Benachrichtigungen an andere Dienste: Slack, Mattermost, Microsoft Teams, Discord oder als signiertes JSON an eigene Systeme.",
+  "In Mattermost, open Integrations, Incoming Webhooks, add one for a channel and copy its URL (https://your-server/hooks/…).":
+    "Öffne in Mattermost „Integrationen“ und dann „Eingehende Webhooks“, lege einen für einen Kanal an und kopiere seine URL (https://dein-server/hooks/…).",
+  "Add webhook": "Webhook hinzufügen",
+  "No webhooks yet.": "Noch keine Webhooks.",
+  "Send a test to “{value0}”": "Test an „{value0}“ senden",
+  "Remove “{value0}”": "„{value0}“ entfernen",
+  "“{value0}” on": "„{value0}“ an",
+  "Notifications will no longer be sent to this address.":
+    "An diese Adresse werden keine Benachrichtigungen mehr gesendet.",
+  "Remove “{value0}”?": "„{value0}“ entfernen?",
+  "Copy the signing secret": "Signatur-Geheimnis kopieren",
+  "Your system checks each request with this secret. It is shown only now.":
+    "Dein System prüft jede Anfrage mit diesem Geheimnis. Es wird nur jetzt angezeigt.",
+  "JustAI sends each of your notifications to this address.":
+    "JustAI schickt jede deiner Benachrichtigungen an diese Adresse.",
+  Service: "Dienst",
+  "Webhook URL": "Webhook-URL",
+  "Waiting for my approval": "Wartet auf meine Freigabe",
+  "So an action does not expire unnoticed.":
+    "Damit eine Aktion nicht unbemerkt abläuft.",
+  "Run failed": "Lauf fehlgeschlagen",
+  "With the error message.": "Mit der Fehlermeldung.",
+  "Run completed": "Lauf abgeschlossen",
+  "With a short summary of the result.":
+    "Mit einer kurzen Zusammenfassung des Ergebnisses.",
+  "The notification setting could not be saved.":
+    "Die Benachrichtigungseinstellung konnte nicht gespeichert werden.",
+  "Tell me about runs of this workflow. Agents can also notify you themselves when their instructions ask for it, for example “tell me only if a new bill on digital policy appears”.":
+    "Benachrichtige mich über Läufe dieses Workflows. Agents können dich auch selbst benachrichtigen, wenn ihre Anweisung das verlangt, zum Beispiel „melde dich nur, wenn ein neuer Gesetzentwurf zur Digitalpolitik auftaucht“.",
+  "Send notification": "Benachrichtigung senden",
+  "Topic change detected": "Themenwechsel erkannt",
+  "“{value0}” probably began at {value1}.":
+    "„{value0}“ hat vermutlich bei {value1} begonnen.",
+  "JustAI applies this in {value0} min unless you decide.":
+    "JustAI übernimmt das in {value0} Min., wenn du nicht entscheidest.",
+  "JustAI applies this now.": "JustAI übernimmt das jetzt.",
+  "Accept change": "Übernehmen",
+  "Reject change": "Ablehnen",
   "Running now": "Läuft gerade",
   "Finished · summary available": "Beendet · Zusammenfassung verfügbar",
   "planned {value0}": "geplant {value0}",
   "Connection problem, retrying…": "Verbindungsproblem, neuer Versuch…",
+  "Share transcript": "Transkript teilen",
+  "People with access": "Personen mit Zugriff",
+  "Workspace member email": "E-Mail-Adresse eines Workspace-Mitglieds",
+  "Can view": "Kann mitlesen",
+  "Remove access for {value0}": "Zugriff für {value0} entfernen",
+  "Could not remove access.": "Zugriff konnte nicht entfernt werden.",
+  "Anyone with the link can read": "Alle mit Link können mitlesen",
+  "Open invitation email": "Einladung im E-Mail-Programm öffnen",
+  "Copy member link": "Mitgliederlink kopieren",
+  "Access granted": "Zugriff erteilt",
+  "Grant access": "Freigeben",
+  "Copy link": "Link kopieren",
+  "Grant read access": "Lesezugriff erteilen",
+  "Could not load sharing settings.": "Freigaben konnten nicht geladen werden.",
+  "Could not grant access. Check that all addresses belong to active workspace members.":
+    "Freigabe fehlgeschlagen. Prüfe, ob alle Adressen zu aktiven Workspace-Mitgliedern gehören.",
   "Read-only link": "Link zum Mitlesen",
   "The link could not be loaded.": "Der Link konnte nicht geladen werden.",
   "The link could not be created.": "Der Link konnte nicht erstellt werden.",
@@ -5187,6 +5377,16 @@ export const de = {
   "Turn off": "Deaktivieren",
   "New link": "Neuer Link",
   "Create link": "Link erstellen",
+  "Reconnecting to the stream": "Stream wird erneut verbunden",
+  "JustAI is trying to reconnect.":
+    "JustAI versucht, die Verbindung wiederherzustellen.",
+  "Total downtime: {value0}": "Gesamte Ausfallzeit: {value0}",
+  "1 interruption": "1 Unterbrechung",
+  "{value0} interruptions": "{value0} Unterbrechungen",
+  "{value0} downtime": "{value0} Ausfallzeit",
+  "Interruption details": "Zeitpunkte der Unterbrechungen",
+  "Some earlier interruptions only have a total duration.":
+    "Für frühere Unterbrechungen ist teilweise nur die Gesamtdauer gespeichert.",
   "Stream interrupted since {value0}": "Stream unterbrochen seit {value0}",
   "JustAI keeps reconnecting. If the stream does not come back within 15 minutes, the capture ends.":
     "JustAI verbindet sich immer wieder neu. Kommt der Stream nicht innerhalb von 15 Minuten zurück, endet die Aufnahme.",

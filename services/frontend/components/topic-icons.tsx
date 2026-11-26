@@ -1,8 +1,8 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   BellIcon,
-  BellPlusIcon,
   BellRingIcon,
+  Radar01Icon,
   Tag01Icon,
 } from "@hugeicons/core-free-icons"
 import type { ComponentProps } from "react"
@@ -27,5 +27,5 @@ export const TopicIcon = make(Tag01Icon)
 export const TopicNotifyIcon = make(BellRingIcon)
 /** A topic without a notification. */
 export const TopicQuietIcon = make(BellIcon)
-/** Subscribe to topics. */
-export const TopicSubscribeIcon = make(BellPlusIcon)
+/** Subscribe to topics: JustAI watches coming agendas for keywords. */
+export const TopicSubscribeIcon = make(Radar01Icon)

@@ -172,6 +172,22 @@ func (a *App) getTranscriptionView(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("this link is not valid or was turned off"))
 		return
 	}
+	a.writeTranscriptView(c, sessionID)
+}
+
+func (a *App) getSharedTranscript(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	principal, _ := middleware.GetPrincipal(c)
+	org, _ := middleware.GetOrganizationID(c)
+	var allowed bool
+	if err != nil || a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM transcription_sessions s WHERE s.id=$1 AND s.organization_id=$2 AND s.archived_at IS NULL AND (s.user_id=$3 OR EXISTS (SELECT 1 FROM transcription_readers r WHERE r.session_id=s.id AND r.user_id=$3 AND r.organization_id=$2)))`, id, org, principal.UserID).Scan(&allowed) != nil || !allowed {
+		writeError(c, http.StatusNotFound, fmt.Errorf("transcript unavailable"))
+		return
+	}
+	a.writeTranscriptView(c, id)
+}
+
+func (a *App) writeTranscriptView(c *gin.Context, sessionID uuid.UUID) {
 	afterOffset := int64(-1)
 	if raw := c.Query("afterOffset"); raw != "" {
 		if value, err := strconv.ParseInt(raw, 10, 64); err == nil {
@@ -238,4 +254,82 @@ func (a *App) getTranscriptionView(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"session": session, "segments": segments, "speakers": speakers, "sources": sources, "topics": topics, "complete": afterOffset < 0})
+}
+
+func (a *App) transcriptionReaders(c *gin.Context) {
+	id, ok := a.authorizedSessionParam(c)
+	if !ok {
+		return
+	}
+	org, _ := middleware.GetOrganizationID(c)
+	principal, _ := middleware.GetPrincipal(c)
+	switch c.Request.Method {
+	case http.MethodPost:
+		var body struct {
+			Emails []string `json:"emails"`
+		}
+		if c.ShouldBindJSON(&body) != nil || len(body.Emails) == 0 || len(body.Emails) > 50 {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("provide between 1 and 50 workspace addresses"))
+			return
+		}
+		tx, err := a.DB.BeginTx(c, nil)
+		if err != nil {
+			writeError(c, 500, err)
+			return
+		}
+		defer tx.Rollback()
+		for _, email := range body.Emails {
+			var userID uuid.UUID
+			err = tx.QueryRowContext(c, `SELECT u.id FROM users u JOIN organization_members m ON m.user_id=u.id WHERE m.organization_id=$1 AND lower(u.email)=lower($2) AND u.status='active'`, org, strings.TrimSpace(email)).Scan(&userID)
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(c, 400, fmt.Errorf("address does not belong to an active workspace member"))
+				return
+			}
+			if err != nil {
+				writeError(c, 500, err)
+				return
+			}
+			if userID != principal.UserID {
+				if _, err = tx.ExecContext(c, `INSERT INTO transcription_readers(session_id,user_id,organization_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, id, userID, org); err != nil {
+					writeError(c, 500, err)
+					return
+				}
+			}
+		}
+		if err = tx.Commit(); err != nil {
+			writeError(c, 500, err)
+			return
+		}
+	case http.MethodDelete:
+		reader, err := uuid.Parse(c.Param("reader"))
+		if err != nil {
+			writeError(c, 400, err)
+			return
+		}
+		if _, err = a.DB.ExecContext(c, `DELETE FROM transcription_readers WHERE session_id=$1 AND user_id=$2`, id, reader); err != nil {
+			writeError(c, 500, err)
+			return
+		}
+	}
+	rows, err := a.DB.QueryContext(c, `SELECT u.id,u.display_name,u.email FROM transcription_readers r JOIN users u ON u.id=r.user_id WHERE r.session_id=$1 ORDER BY u.display_name,u.email`, id)
+	if err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	defer rows.Close()
+	readers := []gin.H{}
+	for rows.Next() {
+		var uid uuid.UUID
+		var name, email string
+		if err := rows.Scan(&uid, &name, &email); err != nil {
+			writeError(c, 500, err)
+			return
+		}
+		readers = append(readers, gin.H{"id": uid, "name": name, "email": email})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	c.JSON(200, gin.H{"readers": readers})
 }

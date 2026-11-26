@@ -19,18 +19,26 @@ import (
 	"justai-backend/provider"
 )
 
-const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at`
+const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at, transcript_session_id, boundary_status, boundary_topic_id, boundary_offset_ms, boundary_quote, boundary_reason, boundary_deadline`
 
 func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	var t models.TranscriptionTopic
-	var source uuid.NullUUID
-	var start, end sql.NullInt64
+	var source, transcript, boundaryTopic uuid.NullUUID
+	var start, end, boundaryOffset sql.NullInt64
+	var boundaryStatus, boundaryQuote, boundaryReason string
+	var boundaryDeadline sql.NullTime
 	var plannedStart, plannedEnd, originalStart, planChanged sql.NullTime
-	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged); err != nil {
+	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged, &transcript, &boundaryStatus, &boundaryTopic, &boundaryOffset, &boundaryQuote, &boundaryReason, &boundaryDeadline); err != nil {
 		return t, err
 	}
 	if source.Valid {
 		t.SourceID = &source.UUID
+	}
+	if transcript.Valid {
+		t.TranscriptSessionID = &transcript.UUID
+	}
+	if boundaryStatus == "pending" && boundaryTopic.Valid && boundaryOffset.Valid && boundaryDeadline.Valid {
+		t.BoundaryProposal = &models.TopicBoundaryProposal{TopicID: boundaryTopic.UUID, OffsetMs: boundaryOffset.Int64, Quote: boundaryQuote, Reason: boundaryReason, Deadline: boundaryDeadline.Time}
 	}
 	if plannedStart.Valid {
 		t.PlannedStartAt = &plannedStart.Time
@@ -145,25 +153,42 @@ func (m *TranscriptionManager) loadOpenTopics(ctx context.Context, sessionID, so
 
 // observeTopics reacts to a finished transcript segment: when the chair calls up an
 // item, the previous item is finished at that moment and the new one opened.
-func (m *TranscriptionManager) observeTopics(ctx context.Context, sessionID, sourceID uuid.UUID, text string, startOffsetMs int64) {
+func (m *TranscriptionManager) observeTopics(ctx context.Context, sessionID, sourceID uuid.UUID, text string, startOffsetMs int64) bool {
 	if !mightAnnounceTopic(text) {
-		return
+		return false
 	}
 	topics, err := m.loadOpenTopics(ctx, sessionID, sourceID)
 	if err != nil || len(topics) == 0 {
-		return
+		return false
 	}
 	if isSittingClosed(text) {
 		m.finishActiveTopics(ctx, sessionID, sourceID, startOffsetMs, "sitting_closed")
 		m.applyTopicScope(ctx, sessionID, sourceID)
-		return
+		m.endTopicCaptureAtSittingClose(ctx, sessionID, sourceID)
+		return false
 	}
 	idx := detectTopicAnnouncement(text, topics)
 	if idx < 0 || topics[idx].Status == "active" {
-		return
+		return false
 	}
 	m.switchTopic(ctx, sessionID, sourceID, topics[idx].ID, startOffsetMs, "announcement")
 	m.applyTopicScope(ctx, sessionID, sourceID)
+	return true
+}
+
+// endTopicCaptureAtSittingClose ends a capture of selected topics once the sitting is
+// closed: selected items that were not called up will not come today, so waiting for
+// them would keep the capture open for nothing. A missed call inside the recorded range
+// is still repaired afterwards (by rule when the topic finished, else by the AI check).
+func (m *TranscriptionManager) endTopicCaptureAtSittingClose(ctx context.Context, sessionID, sourceID uuid.UUID) {
+	var scope, status string
+	if err := m.DB.QueryRowContext(ctx, `SELECT capture_scope, status FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&scope, &status); err != nil || scope != "topics" || status == "stopped" {
+		return
+	}
+	liveStreamEvents.inc("topic_sitting_closed")
+	m.setStreamAlert(sessionID, sourceID, "sitting_closed", "The sitting was closed, so the capture has ended.")
+	m.finishLiveStream(sessionID, sourceID, "sitting closed")
+	m.stopStreamSource(sourceID)
 }
 
 // switchTopic finishes the active topic and opens another at the given offset.
@@ -268,6 +293,8 @@ func (a *App) listTranscriptionTopics(c *gin.Context) {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
+	// Repairs an item the live detection missed although its data is already there.
+	a.Live.repairTopicBoundaries(c, sessionID)
 	topics, err := loadTopics(c, a.DB, sessionID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -543,6 +570,12 @@ const topicAutoSummaryMinWords = 150
 // summarises it shortly after, so each agenda item can be read on its own right away.
 func (m *TranscriptionManager) topicFinished(sessionID, topicID uuid.UUID) {
 	liveStreamEvents.inc("topic_finished")
+	// A call the live detection missed splits the item that ran over it.
+	splitCtx, cancelSplit := context.WithTimeout(context.Background(), 30*time.Second)
+	if next := m.splitMissedAnnouncement(splitCtx, topicID); next != uuid.Nil {
+		defer m.topicFinished(sessionID, next)
+	}
+	cancelSplit()
 	m.broadcastTopic(sessionID, topicID)
 	if m.app == nil {
 		return
@@ -551,6 +584,13 @@ func (m *TranscriptionManager) topicFinished(sessionID, topicID uuid.UUID) {
 		time.Sleep(topicAutoSummaryDelay)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		// Every recorded topic becomes a transcript of its own. One opened right at the
+		// end may miss the last lines, so an untouched copy is rebuilt here.
+		if _, err := m.app.syncTopicTranscript(ctx, topicID, true); err == nil {
+			m.broadcastTopic(sessionID, topicID)
+		} else if !errors.Is(err, errTopicNotRecorded) {
+			slog.Warn("topic transcript failed", "topicId", topicID, "error", err)
+		}
 		topic, err := loadTopic(ctx, m.DB, topicID)
 		if err != nil || topic.Status != "done" || topic.DetectedBy == "missed" || topic.SummaryStatus == "completed" || topic.SummaryStatus == "processing" {
 			return

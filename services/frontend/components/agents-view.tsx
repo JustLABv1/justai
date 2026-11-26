@@ -1,4 +1,5 @@
 "use client"
+import { WorkflowNotifications } from "@/components/workflow-notifications"
 import { ToastFeedback } from "@/components/toast-feedback"
 
 import {
@@ -2760,20 +2761,28 @@ function WorkflowsPanel({
           onValidationDismiss={onValidationDismiss}
           saving={saving}
           schedulePanel={
-            <ScheduleEditor
-              schedule={draft.schedule}
-              enabled={draft.enabled}
-              nextRunAt={
-                draft.id
-                  ? workflows.find((workflow) => workflow.id === draft.id)
-                      ?.nextRunAt
-                  : null
-              }
-              timezone={draft.timezone}
-              onScheduleChange={(schedule) => onUpdate({ schedule })}
-              onEnabledChange={(enabled) => onUpdate({ enabled })}
-              disabled={disabled}
-            />
+            <>
+              <ScheduleEditor
+                schedule={draft.schedule}
+                enabled={draft.enabled}
+                nextRunAt={
+                  draft.id
+                    ? workflows.find((workflow) => workflow.id === draft.id)
+                        ?.nextRunAt
+                    : null
+                }
+                timezone={draft.timezone}
+                onScheduleChange={(schedule) => onUpdate({ schedule })}
+                onEnabledChange={(enabled) => onUpdate({ enabled })}
+                disabled={disabled}
+              />
+              {draft.id ? (
+                <WorkflowNotifications
+                  disabled={disabled}
+                  workflowId={draft.id}
+                />
+              ) : null}
+            </>
           }
           settingsPanel={
             <Inspector.Section>
@@ -2962,7 +2971,6 @@ function NodeInspector({
     })
   }
 
-
   return (
     <>
       <Inspector.Section>
@@ -2981,601 +2989,593 @@ function NodeInspector({
           </Button>
         </Inspector.SectionAction>
         <Inspector.SectionContent className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`agent-${node.id}`}>{t("Agent")}</FieldLabel>
-          <Select
-            value={node.agentId}
-            disabled={disabled}
-            onValueChange={(value) =>
-              onUpdate(node.id, {
-                agentId: value ?? undefined,
-              })
-            }
-          >
-            <SelectTrigger id={`agent-${node.id}`}>
-              <SelectValue>
-                {selectedAgent
-                  ? `${agentToSavedLabel(selectedAgent)} · ${
-                      t(selectedAgent.kind === "remote" ? "Remote" : "Native")
-                    }${
-                      selectedAgent.kind === "remote" && selectedConnection
-                        ? ` · ${t(connectionScopeLabel(selectedConnection.scopeType))}`
-                        : ""
-                    }`
-                  : t("Select an agent")}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {agents.map((agent) => {
-                  const connection = agent.connectionId
-                    ? connections.find(
-                        (candidate) => candidate.id === agent.connectionId
-                      )
-                    : undefined
-                  return (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name} ·{" "}
-                      {t(agent.kind === "remote" ? "Remote" : "Native")}
-                      {agent.kind === "remote" && connection
-                        ? ` · ${t(connectionScopeLabel(connection.scopeType))}`
-                        : ""}
-                    </SelectItem>
-                  )
-                })}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`instruction-${node.id}`}>
-            {t("Instruction")}
-          </FieldLabel>
-          <Textarea
-            id={`instruction-${node.id}`}
-            rows={5}
-            value={node.instruction}
-            disabled={disabled}
-            onChange={(event) =>
-              onUpdate(node.id, { instruction: event.target.value })
-            }
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`output-format-${node.id}`}>
-            {t("Output format")}
-          </FieldLabel>
-          <Select
-            value={node.outputFormat || "response"}
-            disabled={disabled}
-            onValueChange={(value) =>
-              onUpdate(node.id, {
-                outputFormat: (value === "response"
-                  ? ""
-                  : value) as AgentWorkflowNode["outputFormat"],
-              })
-            }
-          >
-            <SelectTrigger
-              aria-label={t("Output format")}
-              className="w-full"
-              id={`output-format-${node.id}`}
+          <Field>
+            <FieldLabel htmlFor={`agent-${node.id}`}>{t("Agent")}</FieldLabel>
+            <Select
+              value={node.agentId}
+              disabled={disabled}
+              onValueChange={(value) =>
+                onUpdate(node.id, {
+                  agentId: value ?? undefined,
+                })
+              }
             >
-              <SelectValue>
-                {t(outputFormatLabel(node.outputFormat))}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="response">{t("Response only")}</SelectItem>
-                {["pdf", "md", "txt", "json", "csv", "html"].map((format) => (
-                  <SelectItem key={format} value={format}>
-                    {format.toUpperCase()} file
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <FieldDescription>
-            {t(
-              "The final response is saved as a downloadable file. Agents can also create files when instructed."
-            )}
-          </FieldDescription>
-        </Field>
+              <SelectTrigger id={`agent-${node.id}`}>
+                <SelectValue>
+                  {selectedAgent
+                    ? `${agentToSavedLabel(selectedAgent)} · ${t(
+                        selectedAgent.kind === "remote" ? "Remote" : "Native"
+                      )}${
+                        selectedAgent.kind === "remote" && selectedConnection
+                          ? ` · ${t(connectionScopeLabel(selectedConnection.scopeType))}`
+                          : ""
+                      }`
+                    : t("Select an agent")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {agents.map((agent) => {
+                    const connection = agent.connectionId
+                      ? connections.find(
+                          (candidate) => candidate.id === agent.connectionId
+                        )
+                      : undefined
+                    return (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name} ·{" "}
+                        {t(agent.kind === "remote" ? "Remote" : "Native")}
+                        {agent.kind === "remote" && connection
+                          ? ` · ${t(connectionScopeLabel(connection.scopeType))}`
+                          : ""}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`instruction-${node.id}`}>
+              {t("Instruction")}
+            </FieldLabel>
+            <Textarea
+              id={`instruction-${node.id}`}
+              rows={5}
+              value={node.instruction}
+              disabled={disabled}
+              onChange={(event) =>
+                onUpdate(node.id, { instruction: event.target.value })
+              }
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`output-format-${node.id}`}>
+              {t("Output format")}
+            </FieldLabel>
+            <Select
+              value={node.outputFormat || "response"}
+              disabled={disabled}
+              onValueChange={(value) =>
+                onUpdate(node.id, {
+                  outputFormat: (value === "response"
+                    ? ""
+                    : value) as AgentWorkflowNode["outputFormat"],
+                })
+              }
+            >
+              <SelectTrigger
+                aria-label={t("Output format")}
+                className="w-full"
+                id={`output-format-${node.id}`}
+              >
+                <SelectValue>
+                  {t(outputFormatLabel(node.outputFormat))}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="response">{t("Response only")}</SelectItem>
+                  {["pdf", "md", "txt", "json", "csv", "html"].map((format) => (
+                    <SelectItem key={format} value={format}>
+                      {format.toUpperCase()} file
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <FieldDescription>
+              {t(
+                "The final response is saved as a downloadable file. Agents can also create files when instructed."
+              )}
+            </FieldDescription>
+          </Field>
         </Inspector.SectionContent>
       </Inspector.Section>
-        <InspectorSection title={t("Safety & execution")}>
-          {" "}
-          <div className="grid gap-3">
-            <Field>
-              <FieldLabel htmlFor={`approval-${node.id}`}>
-                {t("Approval")}
-              </FieldLabel>
-              <Select
-                value={node.approvalMode || "review"}
-                disabled={disabled}
-                onValueChange={(value) =>
-                  onUpdate(node.id, { approvalMode: value ?? "review" })
-                }
-              >
-                <SelectTrigger id={`approval-${node.id}`}>
-                  <SelectValue>
-                    {t(approvalModeLabel(node.approvalMode || "review"))}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="read_only_auto">
-                      {t("Auto trusted read-only")}
-                    </SelectItem>
-                    <SelectItem value="review">{t("Always review")}</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`max-attempts-${node.id}`}>
-                {t("Max attempts")}
-              </FieldLabel>
-              <Input
-                id={`max-attempts-${node.id}`}
-                type="number"
-                min={1}
-                max={3}
-                value={node.retry?.maxAttempts ?? 3}
-                disabled={disabled}
-                onChange={(event) =>
-                  onUpdate(node.id, {
-                    retry: {
-                      maxAttempts: Math.max(
-                        1,
-                        Math.min(3, Number(event.target.value) || 1)
-                      ),
-                    },
-                  })
-                }
-              />
-            </Field>
-          </div>
+      <InspectorSection title={t("Safety & execution")}>
+        {" "}
+        <div className="grid gap-3">
           <Field>
-            <FieldLabel htmlFor={`timeout-${node.id}`}>
-              {t("Node timeout (seconds)")}
+            <FieldLabel htmlFor={`approval-${node.id}`}>
+              {t("Approval")}
+            </FieldLabel>
+            <Select
+              value={node.approvalMode || "review"}
+              disabled={disabled}
+              onValueChange={(value) =>
+                onUpdate(node.id, { approvalMode: value ?? "review" })
+              }
+            >
+              <SelectTrigger id={`approval-${node.id}`}>
+                <SelectValue>
+                  {t(approvalModeLabel(node.approvalMode || "review"))}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="read_only_auto">
+                    {t("Auto trusted read-only")}
+                  </SelectItem>
+                  <SelectItem value="review">{t("Always review")}</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`max-attempts-${node.id}`}>
+              {t("Max attempts")}
             </FieldLabel>
             <Input
-              id={`timeout-${node.id}`}
+              id={`max-attempts-${node.id}`}
               type="number"
               min={1}
-              max={600}
-              value={node.timeoutSeconds ?? 600}
+              max={3}
+              value={node.retry?.maxAttempts ?? 3}
               disabled={disabled}
               onChange={(event) =>
                 onUpdate(node.id, {
-                  timeoutSeconds: Math.max(
-                    1,
-                    Math.min(600, Number(event.target.value) || 600)
-                  ),
+                  retry: {
+                    maxAttempts: Math.max(
+                      1,
+                      Math.min(3, Number(event.target.value) || 1)
+                    ),
+                  },
                 })
               }
             />
           </Field>
-        </InspectorSection>
-        <InspectorSection title={t("Input & output mappings")}>
-          {" "}
-          <FieldSet>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <FieldLegend variant="label">
-                  {t("Input and output mappings")}
-                </FieldLegend>
-                <FieldDescription>
-                  {t(
-                    "Give this node named values from the workflow run or a connected previous node."
-                  )}
-                </FieldDescription>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={addBinding}
-                disabled={disabled}
-              >
-                <Plus data-icon="inline-start" />
-                {t("Add mapping")}
-              </Button>
+        </div>
+        <Field>
+          <FieldLabel htmlFor={`timeout-${node.id}`}>
+            {t("Node timeout (seconds)")}
+          </FieldLabel>
+          <Input
+            id={`timeout-${node.id}`}
+            type="number"
+            min={1}
+            max={600}
+            value={node.timeoutSeconds ?? 600}
+            disabled={disabled}
+            onChange={(event) =>
+              onUpdate(node.id, {
+                timeoutSeconds: Math.max(
+                  1,
+                  Math.min(600, Number(event.target.value) || 600)
+                ),
+              })
+            }
+          />
+        </Field>
+      </InspectorSection>
+      <InspectorSection title={t("Input & output mappings")}>
+        {" "}
+        <FieldSet>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <FieldLegend variant="label">
+                {t("Input and output mappings")}
+              </FieldLegend>
+              <FieldDescription>
+                {t(
+                  "Give this node named values from the workflow run or a connected previous node."
+                )}
+              </FieldDescription>
             </div>
-            {inputBindings.length ? (
-              <div className="flex flex-col gap-3">
-                {inputBindings.map((binding, index) => {
-                  const source = binding.source.trim().toLowerCase()
-                  return (
-                    <div
-                      key={`${node.id}-binding-${index}`}
-                      className="rounded-xl bg-muted/50 p-3"
-                    >
-                      <div className="grid gap-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addBinding}
+              disabled={disabled}
+            >
+              <Plus data-icon="inline-start" />
+              {t("Add mapping")}
+            </Button>
+          </div>
+          {inputBindings.length ? (
+            <div className="flex flex-col gap-3">
+              {inputBindings.map((binding, index) => {
+                const source = binding.source.trim().toLowerCase()
+                return (
+                  <div
+                    key={`${node.id}-binding-${index}`}
+                    className="rounded-xl bg-muted/50 p-3"
+                  >
+                    <div className="grid gap-3">
+                      <Field>
+                        <FieldLabel
+                          htmlFor={`binding-name-${node.id}-${index}`}
+                        >
+                          {t("Name")}
+                        </FieldLabel>
+                        <Input
+                          id={`binding-name-${node.id}-${index}`}
+                          value={binding.name}
+                          disabled={disabled}
+                          onChange={(event) =>
+                            updateBinding(index, { name: event.target.value })
+                          }
+                          placeholder="research_question"
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel
+                          htmlFor={`binding-source-${node.id}-${index}`}
+                        >
+                          {t("Source")}
+                        </FieldLabel>
+                        <Select
+                          value={source === "node" ? "node" : "input"}
+                          disabled={disabled}
+                          onValueChange={(value) =>
+                            updateBinding(index, {
+                              source: value === "node" ? "node" : "input",
+                              nodeId:
+                                value === "node" ? binding.nodeId : undefined,
+                              path: value === "node" ? binding.path : undefined,
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            id={`binding-source-${node.id}-${index}`}
+                          >
+                            <SelectValue>
+                              {source === "node"
+                                ? t("Previous output")
+                                : t("Workflow input")}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="input">
+                                {t("Workflow input")}
+                              </SelectItem>
+                              <SelectItem value="node">
+                                {t("Previous output")}
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="self-end"
+                        onClick={() => removeBinding(index)}
+                        disabled={disabled}
+                        aria-label={t("Remove {value0} mapping", {
+                          value0: binding.name || "input",
+                        })}
+                      >
+                        <X data-icon="inline-start" />
+                      </Button>
+                    </div>
+                    {source === "node" && (
+                      <div className="mt-3 grid gap-3">
                         <Field>
                           <FieldLabel
-                            htmlFor={`binding-name-${node.id}-${index}`}
+                            htmlFor={`binding-node-${node.id}-${index}`}
                           >
-                            {t("Name")}
-                          </FieldLabel>
-                          <Input
-                            id={`binding-name-${node.id}-${index}`}
-                            value={binding.name}
-                            disabled={disabled}
-                            onChange={(event) =>
-                              updateBinding(index, { name: event.target.value })
-                            }
-                            placeholder="research_question"
-                          />
-                        </Field>
-                        <Field>
-                          <FieldLabel
-                            htmlFor={`binding-source-${node.id}-${index}`}
-                          >
-                            {t("Source")}
+                            {t("Previous node")}
                           </FieldLabel>
                           <Select
-                            value={source === "node" ? "node" : "input"}
-                            disabled={disabled}
+                            value={binding.nodeId ?? "none"}
+                            disabled={disabled || !otherNodes.length}
                             onValueChange={(value) =>
                               updateBinding(index, {
-                                source: value === "node" ? "node" : "input",
                                 nodeId:
-                                  value === "node" ? binding.nodeId : undefined,
-                                path:
-                                  value === "node" ? binding.path : undefined,
+                                  value === "none"
+                                    ? undefined
+                                    : (value ?? undefined),
                               })
                             }
                           >
                             <SelectTrigger
-                              id={`binding-source-${node.id}-${index}`}
+                              id={`binding-node-${node.id}-${index}`}
                             >
                               <SelectValue>
-                                {source === "node"
-                                  ? t("Previous output")
-                                  : t("Workflow input")}
+                                {otherNodes.find(
+                                  (candidate) => candidate.id === binding.nodeId
+                                )?.id ?? t("Choose a connected node")}
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
-                                <SelectItem value="input">
-                                  {t("Workflow input")}
+                                <SelectItem value="none">
+                                  {t("Choose a connected node")}
                                 </SelectItem>
-                                <SelectItem value="node">
-                                  {t("Previous output")}
-                                </SelectItem>
+                                {otherNodes.map((candidate) => (
+                                  <SelectItem
+                                    key={candidate.id}
+                                    value={candidate.id}
+                                  >
+                                    {candidate.id}
+                                  </SelectItem>
+                                ))}
                               </SelectGroup>
                             </SelectContent>
                           </Select>
                         </Field>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="self-end"
-                          onClick={() => removeBinding(index)}
-                          disabled={disabled}
-                          aria-label={t("Remove {value0} mapping", {
-                            value0: binding.name || "input",
-                          })}
-                        >
-                          <X data-icon="inline-start" />
-                        </Button>
+                        <Field>
+                          <FieldLabel
+                            htmlFor={`binding-path-${node.id}-${index}`}
+                          >
+                            {t("Output path (optional)")}
+                          </FieldLabel>
+                          <Input
+                            id={`binding-path-${node.id}-${index}`}
+                            value={binding.path ?? ""}
+                            disabled={disabled}
+                            onChange={(event) =>
+                              updateBinding(index, {
+                                path: event.target.value || undefined,
+                              })
+                            }
+                            placeholder="result.summary"
+                          />
+                        </Field>
                       </div>
-                      {source === "node" && (
-                        <div className="mt-3 grid gap-3">
-                          <Field>
-                            <FieldLabel
-                              htmlFor={`binding-node-${node.id}-${index}`}
-                            >
-                              {t("Previous node")}
-                            </FieldLabel>
-                            <Select
-                              value={binding.nodeId ?? "none"}
-                              disabled={disabled || !otherNodes.length}
-                              onValueChange={(value) =>
-                                updateBinding(index, {
-                                  nodeId:
-                                    value === "none"
-                                      ? undefined
-                                      : (value ?? undefined),
-                                })
-                              }
-                            >
-                              <SelectTrigger
-                                id={`binding-node-${node.id}-${index}`}
-                              >
-                                <SelectValue>
-                                  {otherNodes.find(
-                                    (candidate) =>
-                                      candidate.id === binding.nodeId
-                                  )?.id ?? t("Choose a connected node")}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  <SelectItem value="none">
-                                    {t("Choose a connected node")}
-                                  </SelectItem>
-                                  {otherNodes.map((candidate) => (
-                                    <SelectItem
-                                      key={candidate.id}
-                                      value={candidate.id}
-                                    >
-                                      {candidate.id}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                          </Field>
-                          <Field>
-                            <FieldLabel
-                              htmlFor={`binding-path-${node.id}-${index}`}
-                            >
-                              {t("Output path (optional)")}
-                            </FieldLabel>
-                            <Input
-                              id={`binding-path-${node.id}-${index}`}
-                              value={binding.path ?? ""}
-                              disabled={disabled}
-                              onChange={(event) =>
-                                updateBinding(index, {
-                                  path: event.target.value || undefined,
-                                })
-                              }
-                              placeholder="result.summary"
-                            />
-                          </Field>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  "No mappings yet. Nodes receive the workflow context by default."
-                )}
-              </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "No mappings yet. Nodes receive the workflow context by default."
+              )}
+            </p>
+          )}
+        </FieldSet>
+      </InspectorSection>
+      <InspectorSection title={t("Context & permissions")}>
+        {" "}
+        <FieldSet>
+          <FieldLegend variant="label">{t("Delegation allowlist")}</FieldLegend>
+          <FieldDescription>
+            {t(
+              "These agents may be selected by this node when it delegates work."
             )}
-          </FieldSet>
-        </InspectorSection>
-        <InspectorSection title={t("Context & permissions")}>
-          {" "}
-          <FieldSet>
-            <FieldLegend variant="label">
-              {t("Delegation allowlist")}
-            </FieldLegend>
-            <FieldDescription>
-              {t(
-                "These agents may be selected by this node when it delegates work."
-              )}
-            </FieldDescription>
-            <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
-              {agents.length ? (
-                agents
-                  .filter((agent) => agent.id !== node.agentId)
-                  .map((agent) => (
-                    <label
-                      key={agent.id}
-                      className="flex items-center gap-2 text-xs"
-                    >
-                      <Checkbox
-                        checked={
-                          node.delegationAgentIds?.includes(agent.id) ?? false
-                        }
-                        disabled={disabled}
-                        onCheckedChange={() => {
-                          const current = node.delegationAgentIds ?? []
-                          onUpdate(node.id, {
-                            delegationAgentIds: current.includes(agent.id)
-                              ? current.filter((id) => id !== agent.id)
-                              : [...current, agent.id],
-                          })
-                        }}
-                      />
-                      <span className="truncate">{agent.name}</span>
-                      <span className="text-muted-foreground">
-                        {t(agent.kind === "remote" ? "Remote" : "Native")}
-                      </span>
-                    </label>
-                  ))
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  {t("Add another agent to enable delegation.")}
-                </span>
-              )}
-            </div>
-          </FieldSet>
-          <FieldSet>
-            <FieldLegend variant="label">{t("MCP grants")}</FieldLegend>
-            <FieldDescription>
-              {t(
-                "Only selected servers and tools enter this node’s immutable context scope."
-              )}
-            </FieldDescription>
-            <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
-              {mcpServers.length ? (
-                mcpServers.map((server) => (
+          </FieldDescription>
+          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+            {agents.length ? (
+              agents
+                .filter((agent) => agent.id !== node.agentId)
+                .map((agent) => (
                   <label
-                    key={server.id}
+                    key={agent.id}
                     className="flex items-center gap-2 text-xs"
                   >
                     <Checkbox
                       checked={
-                        context.mcpServerIds?.includes(server.id) ?? false
+                        node.delegationAgentIds?.includes(agent.id) ?? false
                       }
                       disabled={disabled}
                       onCheckedChange={() => {
-                        const current = context.mcpServerIds ?? []
+                        const current = node.delegationAgentIds ?? []
                         onUpdate(node.id, {
-                          context: updateContext(context, {
-                            mcpServerIds: current.includes(server.id)
-                              ? current.filter((id) => id !== server.id)
-                              : [...current, server.id],
-                          }),
+                          delegationAgentIds: current.includes(agent.id)
+                            ? current.filter((id) => id !== agent.id)
+                            : [...current, agent.id],
                         })
                       }}
                     />
-                    <span className="truncate">{server.name}</span>
-                  </label>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  {t("No MCP servers connected.")}
-                </span>
-              )}
-            </div>
-            {mcpServers
-              .filter((server) => context.mcpServerIds?.includes(server.id))
-              .map((server) => (
-                <MCPToolPicker
-                  key={server.id}
-                  server={server}
-                  value={context.mcpTools}
-                  disabled={disabled}
-                  onChange={(mcpTools) =>
-                    onUpdate(node.id, {
-                      context: updateContext(context, { mcpTools }),
-                    })
-                  }
-                />
-              ))}
-          </FieldSet>
-          <FieldSet>
-            <FieldLegend variant="label">
-              {t("Storage folder grants")}
-            </FieldLegend>
-            <FieldDescription>
-              {t(
-                "Every run reads the current contents of the selected folder and all of its subfolders. The resolved files are frozen in the run snapshot for auditability."
-              )}
-            </FieldDescription>
-            <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
-              {knowledgeSpaces.length ? (
-                knowledgeSpaces.map((space) => (
-                  <label
-                    key={space.id}
-                    className="flex items-center gap-2 text-xs"
-                  >
-                    <Checkbox
-                      checked={
-                        context.knowledgeSpaceIds?.includes(space.id) ?? false
-                      }
-                      disabled={disabled}
-                      onCheckedChange={() => {
-                        const current = context.knowledgeSpaceIds ?? []
-                        onUpdate(node.id, {
-                          context: updateContext(context, {
-                            knowledgeSpaceIds: current.includes(space.id)
-                              ? current.filter((id) => id !== space.id)
-                              : [...current, space.id],
-                          }),
-                        })
-                      }}
-                    />
-                    <span className="truncate">
-                      {knowledgeSpacePath(space, knowledgeSpaces)}
-                    </span>
+                    <span className="truncate">{agent.name}</span>
                     <span className="text-muted-foreground">
-                      {space.itemCount}
+                      {t(agent.kind === "remote" ? "Remote" : "Native")}
                     </span>
                   </label>
                 ))
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  {t("Create a folder in Storage first.")}
-                </span>
-              )}
-            </div>
-          </FieldSet>
-          <FieldSet>
-            <FieldLegend variant="label">
-              {t("Individual file grants")}
-            </FieldLegend>
-            <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
-              {knowledgeSources.length ? (
-                knowledgeSources.map((source) => (
-                  <label
-                    key={source.id}
-                    className="flex items-center gap-2 text-xs"
-                  >
-                    <Checkbox
-                      checked={
-                        context.knowledgeSourceIds?.includes(source.id) ?? false
-                      }
-                      disabled={disabled}
-                      onCheckedChange={() => {
-                        const current = context.knowledgeSourceIds ?? []
-                        onUpdate(node.id, {
-                          context: updateContext(context, {
-                            knowledgeSourceIds: current.includes(source.id)
-                              ? current.filter((id) => id !== source.id)
-                              : [...current, source.id],
-                          }),
-                        })
-                      }}
-                    />
-                    <span className="truncate">{source.title}</span>
-                  </label>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  {t("No knowledge sources available.")}
-                </span>
-              )}
-            </div>
-          </FieldSet>
-          <FieldSet>
-            <FieldLegend variant="label">{t("More context")}</FieldLegend>
-            <FieldDescription>
-              {t(
-                "Access is checked at run time and stays limited to this node."
-              )}
-            </FieldDescription>
-            <FieldGroup>
-              <KnowledgeItemPicker
-                id={`repositories-${node.id}`}
-                type="repository"
-                value={context.repositoryIds}
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {t("Add another agent to enable delegation.")}
+              </span>
+            )}
+          </div>
+        </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">{t("MCP grants")}</FieldLegend>
+          <FieldDescription>
+            {t(
+              "Only selected servers and tools enter this node’s immutable context scope."
+            )}
+          </FieldDescription>
+          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+            {mcpServers.length ? (
+              mcpServers.map((server) => (
+                <label
+                  key={server.id}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <Checkbox
+                    checked={context.mcpServerIds?.includes(server.id) ?? false}
+                    disabled={disabled}
+                    onCheckedChange={() => {
+                      const current = context.mcpServerIds ?? []
+                      onUpdate(node.id, {
+                        context: updateContext(context, {
+                          mcpServerIds: current.includes(server.id)
+                            ? current.filter((id) => id !== server.id)
+                            : [...current, server.id],
+                        }),
+                      })
+                    }}
+                  />
+                  <span className="truncate">{server.name}</span>
+                </label>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {t("No MCP servers connected.")}
+              </span>
+            )}
+          </div>
+          {mcpServers
+            .filter((server) => context.mcpServerIds?.includes(server.id))
+            .map((server) => (
+              <MCPToolPicker
+                key={server.id}
+                server={server}
+                value={context.mcpTools}
                 disabled={disabled}
-                onChange={(repositoryIds) =>
+                onChange={(mcpTools) =>
                   onUpdate(node.id, {
-                    context: updateContext(context, { repositoryIds }),
+                    context: updateContext(context, { mcpTools }),
                   })
                 }
               />
-              <KnowledgeItemPicker
-                id={`notes-${node.id}`}
-                type="note"
-                value={context.noteIds}
-                disabled={disabled}
-                onChange={(noteIds) =>
-                  onUpdate(node.id, {
-                    context: updateContext(context, { noteIds }),
-                  })
-                }
-              />
-              <KnowledgeItemPicker
-                id={`transcriptions-${node.id}`}
-                type="transcript"
-                value={context.transcriptionSessionIds}
-                disabled={disabled}
-                onChange={(transcriptionSessionIds) =>
-                  onUpdate(node.id, {
-                    context: updateContext(context, {
-                      transcriptionSessionIds,
-                    }),
-                  })
-                }
-              />
-            </FieldGroup>
-          </FieldSet>
-        </InspectorSection>
+            ))}
+        </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">
+            {t("Storage folder grants")}
+          </FieldLegend>
+          <FieldDescription>
+            {t(
+              "Every run reads the current contents of the selected folder and all of its subfolders. The resolved files are frozen in the run snapshot for auditability."
+            )}
+          </FieldDescription>
+          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+            {knowledgeSpaces.length ? (
+              knowledgeSpaces.map((space) => (
+                <label
+                  key={space.id}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <Checkbox
+                    checked={
+                      context.knowledgeSpaceIds?.includes(space.id) ?? false
+                    }
+                    disabled={disabled}
+                    onCheckedChange={() => {
+                      const current = context.knowledgeSpaceIds ?? []
+                      onUpdate(node.id, {
+                        context: updateContext(context, {
+                          knowledgeSpaceIds: current.includes(space.id)
+                            ? current.filter((id) => id !== space.id)
+                            : [...current, space.id],
+                        }),
+                      })
+                    }}
+                  />
+                  <span className="truncate">
+                    {knowledgeSpacePath(space, knowledgeSpaces)}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {space.itemCount}
+                  </span>
+                </label>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {t("Create a folder in Storage first.")}
+              </span>
+            )}
+          </div>
+        </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">
+            {t("Individual file grants")}
+          </FieldLegend>
+          <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
+            {knowledgeSources.length ? (
+              knowledgeSources.map((source) => (
+                <label
+                  key={source.id}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <Checkbox
+                    checked={
+                      context.knowledgeSourceIds?.includes(source.id) ?? false
+                    }
+                    disabled={disabled}
+                    onCheckedChange={() => {
+                      const current = context.knowledgeSourceIds ?? []
+                      onUpdate(node.id, {
+                        context: updateContext(context, {
+                          knowledgeSourceIds: current.includes(source.id)
+                            ? current.filter((id) => id !== source.id)
+                            : [...current, source.id],
+                        }),
+                      })
+                    }}
+                  />
+                  <span className="truncate">{source.title}</span>
+                </label>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {t("No knowledge sources available.")}
+              </span>
+            )}
+          </div>
+        </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">{t("More context")}</FieldLegend>
+          <FieldDescription>
+            {t("Access is checked at run time and stays limited to this node.")}
+          </FieldDescription>
+          <FieldGroup>
+            <KnowledgeItemPicker
+              id={`repositories-${node.id}`}
+              type="repository"
+              value={context.repositoryIds}
+              disabled={disabled}
+              onChange={(repositoryIds) =>
+                onUpdate(node.id, {
+                  context: updateContext(context, { repositoryIds }),
+                })
+              }
+            />
+            <KnowledgeItemPicker
+              id={`notes-${node.id}`}
+              type="note"
+              value={context.noteIds}
+              disabled={disabled}
+              onChange={(noteIds) =>
+                onUpdate(node.id, {
+                  context: updateContext(context, { noteIds }),
+                })
+              }
+            />
+            <KnowledgeItemPicker
+              id={`transcriptions-${node.id}`}
+              type="transcript"
+              value={context.transcriptionSessionIds}
+              disabled={disabled}
+              onChange={(transcriptionSessionIds) =>
+                onUpdate(node.id, {
+                  context: updateContext(context, {
+                    transcriptionSessionIds,
+                  }),
+                })
+              }
+            />
+          </FieldGroup>
+        </FieldSet>
+      </InspectorSection>
     </>
   )
 }
@@ -3755,7 +3755,9 @@ function ScheduleEditor({
         )}
       </div>
       <div className="rounded-lg border bg-background/70 px-3 py-2 text-xs">
-        <p className="font-medium">{workflowScheduleDescription(schedule, t)}</p>
+        <p className="font-medium">
+          {workflowScheduleDescription(schedule, t)}
+        </p>
         {schedule.kind && schedule.kind !== "manual" ? (
           <p className="mt-1 text-muted-foreground">
             {t("Next run:")}{" "}
@@ -4163,7 +4165,9 @@ function RunsPanel({
                         )}
                       />
                     )}
-                    {status === "all" ? t("All statuses") : t(statusLabel(status))}
+                    {status === "all"
+                      ? t("All statuses")
+                      : t(statusLabel(status))}
                     <span className="text-muted-foreground tabular-nums">
                       {count}
                     </span>

@@ -178,7 +178,7 @@ func (a *App) prepareSelectedContext(ctx context.Context, endpoint provider.Endp
 
 func selectedContextToolAllowed(name string) bool {
 	switch name {
-	case "create_pdf", "create_file", "run_code", "generate_image", "edit_image":
+	case "create_pdf", "create_file", "run_code", "generate_image", "edit_image", "set_reminder", "list_reminders", "cancel_reminder":
 		return true
 	default:
 		return false

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"os"
 	"strconv"
@@ -37,6 +38,21 @@ type Config struct {
 	CodeRunner        CodeRunnerConfig
 	StreamRelay       StreamRelayConfig
 	StreamRelays      []StreamRelayConfig
+	// PublicURL is where people open JustAI; links in e-mails and push messages point
+	// there. Empty means the first frontend origin.
+	PublicURL string
+	SMTP      SMTPConfig
+}
+
+// SMTPConfig sends notification e-mails. E-mail is off while Host is empty.
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
+	// Security is "starttls" (default), "tls" (implicit, usually port 465) or "none".
+	Security string
 }
 
 // StreamRelayConfig points at an external livestream relay. For the single
@@ -113,6 +129,17 @@ type fileConfig struct {
 	CodeRunner          fileCodeRunnerConfig    `yaml:"code_runner"`
 	StreamRelay         fileStreamRelayConfig   `yaml:"stream_relay"`
 	StreamRelays        []fileStreamRelayConfig `yaml:"stream_relays"`
+	PublicURL           string                  `yaml:"public_url"`
+	SMTP                fileSMTPConfig          `yaml:"smtp"`
+}
+
+type fileSMTPConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	From     string `yaml:"from"`
+	Security string `yaml:"security"`
 }
 
 type fileStreamRelayConfig struct {
@@ -219,6 +246,16 @@ func Load(configPath string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	smtp, err := smtpConfig(fileValues.SMTP)
+	if err != nil {
+		return Config{}, err
+	}
+	publicURL := strings.TrimRight(getenvOrFile("JUSTAI_PUBLIC_URL", fileValues.PublicURL, ""), "/")
+	if publicURL != "" {
+		if parsed, err := url.Parse(publicURL); err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return Config{}, fmt.Errorf("JUSTAI_PUBLIC_URL must be an absolute http(s) URL")
+		}
+	}
 	metricsToken := getenvOrFile("JUSTAI_METRICS_TOKEN", fileValues.MetricsToken, "")
 	if metricsToken != "" && len(metricsToken) < 16 {
 		return Config{}, fmt.Errorf("JUSTAI_METRICS_TOKEN must be at least 16 characters")
@@ -251,7 +288,44 @@ func Load(configPath string) (Config, error) {
 		CodeRunner:          codeRunner,
 		StreamRelay:         streamRelayConfig(fileValues.StreamRelay),
 		StreamRelays:        streamRelays,
+		PublicURL:           publicURL,
+		SMTP:                smtp,
 	}, nil
+}
+
+func smtpConfig(values fileSMTPConfig) (SMTPConfig, error) {
+	result := SMTPConfig{
+		Host:     getenvOrFile("JUSTAI_SMTP_HOST", values.Host, ""),
+		Port:     intOrFile("JUSTAI_SMTP_PORT", values.Port, 587),
+		Username: getenvOrFile("JUSTAI_SMTP_USERNAME", values.Username, ""),
+		Password: getenvOrFile("JUSTAI_SMTP_PASSWORD", values.Password, ""),
+		From:     getenvOrFile("JUSTAI_SMTP_FROM", values.From, ""),
+		Security: strings.ToLower(getenvOrFile("JUSTAI_SMTP_SECURITY", values.Security, "starttls")),
+	}
+	if result.Host == "" {
+		return SMTPConfig{}, nil
+	}
+	if err := ValidateSMTP(result); err != nil {
+		return SMTPConfig{}, err
+	}
+	return result, nil
+}
+
+// ValidateSMTP checks an SMTP setup, from the configuration or from the admin settings.
+func ValidateSMTP(result SMTPConfig) error {
+	if strings.TrimSpace(result.Host) == "" || strings.ContainsAny(result.Host, " /\\\r\n") {
+		return fmt.Errorf("the SMTP host is required and must be a host name")
+	}
+	if result.Port < 1 || result.Port > 65535 {
+		return fmt.Errorf("the SMTP port must be between 1 and 65535")
+	}
+	if result.Security != "starttls" && result.Security != "tls" && result.Security != "none" {
+		return fmt.Errorf("the SMTP security must be starttls, tls or none")
+	}
+	if _, err := mail.ParseAddress(result.From); err != nil {
+		return fmt.Errorf("the sender must be an e-mail address, for example JustAI <justai@example.org>")
+	}
+	return nil
 }
 
 func streamRelayConfig(v fileStreamRelayConfig) StreamRelayConfig {

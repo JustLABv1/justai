@@ -33,6 +33,7 @@ export type AdminTab =
   | "mcp"
   | "controls"
   | "authentication"
+  | "email"
   | "announcements"
   | "health"
   | "analytics"
@@ -899,6 +900,7 @@ export type TranscriptionSource = {
   alert?: string
   signalLevel: number
   /** Set while a connected stream is reconnecting. */
+  outageHistory?: { startedAt: string; endedAt: string }[]
   interruptedAt?: string | null
   outageCount?: number
   outageSeconds?: number
@@ -929,7 +931,20 @@ export type TranscriptionTopic = {
   summary?: string
   summaryStatus: "none" | "processing" | "completed" | "failed"
   summaryError?: string
+  /** The topic's own transcript, made once the topic finished. */
+  transcriptSessionId?: string
+  /** An AI suggestion, waiting for the user, that a later item began inside this one. */
+  boundaryProposal?: TopicBoundaryProposal
   updatedAt: string
+}
+
+/** The item `topicId` began at `offsetMs`; applied at `deadline` unless decided first. */
+export type TopicBoundaryProposal = {
+  topicId: string
+  offsetMs: number
+  quote: string
+  reason: string
+  deadline: string
 }
 
 /** A session announced by the broadcaster, with the watch window derived from it. */

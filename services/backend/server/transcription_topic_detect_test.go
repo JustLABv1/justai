@@ -34,11 +34,14 @@ func TestDetectTopicAnnouncement(t *testing.T) {
 		{"Ich rufe den Zusatzpunkt 1 auf", 6},
 		{"Ich rufe nun den Geschäftsbereich des Bundesministeriums für Verkehr auf.", 3},
 		{"Kommen wir zu Umwelt, Klimaschutz und Naturschutz.", 4},
+		{"Der Einzelplan 10 ist damit angenommen. Wir kommen jetzt zum Einzelplan 15.", 2},
+		{"Kommen wir damit zum Tagesordnungspunkt 3.", 5},
 		// Not announcements.
 		{"Das war ein Zwischenruf aus der Fraktion, den ich rügen muss.", -1},
 		{"Der Einzelplan 15 ist ein wichtiger Haushalt für uns alle.", -1},
 		{"Ich rufe Einzelplan 99 auf.", -1},
 		{"Wir müssen beim Verkehr dringend mehr tun.", -1},
+		{"Wir kommen zur Abstimmung über den Einzelplan 15.", -1},
 	}
 	for _, c := range cases {
 		if got := detectTopicAnnouncement(c.text, topics); got != c.want {
@@ -59,10 +62,68 @@ func TestSittingCloseAndPrecheck(t *testing.T) {
 	if !isSittingClosed("Damit ist die Tagesordnung erledigt. Ich schließe die Sitzung.") || !isSittingClosed("Die Sitzung ist geschlossen") {
 		t.Error("closing not detected")
 	}
-	if isSittingClosed("Wir schließen die Aussprache") {
-		t.Error("closing a debate must not close the sitting")
+	for _, text := range []string{
+		"Wir sind nun am Ende unserer heutigen Tagesordnung.",
+		"Wir sind nun am Ende unserer heutigen Tagesordnungspunkt", // sitting 112, as transcribed
+		"Damit sind wir am Schluss der Tagesordnung.",
+		"Die Tagesordnung ist damit erschöpft.",
+		"Ich berufe die nächste Sitzung des Deutschen Bundestages auf morgen ein.",
+		"Ich rufe die nächste Sitzung des Deutschen Bundestages ein.", // sitting 112, as transcribed
+		"Die nächste Sitzung des Deutschen Bundestages berufe ich ein auf Freitag.",
+	} {
+		if !isSittingClosed(text) {
+			t.Errorf("closing not detected: %q", text)
+		}
+	}
+	for _, text := range []string{
+		"Wir schließen die Aussprache",
+		"Am Ende der Tagesordnung steht heute die Abstimmung.",
+		"Ich rufe den Tagesordnungspunkt 4 auf",
+		"In der nächsten Sitzungswoche beraten wir das weiter.",
+	} {
+		if isSittingClosed(text) {
+			t.Errorf("not a close of the sitting: %q", text)
+		}
 	}
 	if mightAnnounceTopic("Das Wort hat der Kollege Müller.") || !mightAnnounceTopic("Ich rufe den Tagesordnungspunkt 4 auf") {
 		t.Error("precheck wrong")
+	}
+}
+
+func TestHousingBudgetCallAcrossFinalSegments(t *testing.T) {
+	topics := []topicRef{{Kind: "EPL", Numbers: []int{25}, Title: "Wohnen, Stadtentwicklung und Bauwesen", Status: "planned"}}
+	for _, segments := range [][]string{
+		{"Ich rufe auf: den Einzelplan 25. Bundesministerium für Wohnen, Stadtentwicklung, und Bauwesen mit dem Beschluss mit den Beschlussempfehlungen des Haushaltsausschusses auf ist auf Drucksache 19-9061. und 9062."},
+		{"Vielen Dank. Ich rufe auf:", "den Einzelplan", "25. Bundesministerium für Wohnen, Stadtentwicklung, und Bauwesen."},
+	} {
+		var pending topicCallBuffer
+		for i, text := range segments {
+			offset := int64(i * 2000)
+			got := detectTopicAnnouncement(pending.candidate(text, offset, offset+2000), topics)
+			if (got == 0) != (i == len(segments)-1) {
+				t.Fatalf("segment %q: match %d", text, got)
+			}
+		}
+	}
+	var pending topicCallBuffer
+	pending.candidate("Ich rufe auf:", 0, 2000)
+	if detectTopicAnnouncement(pending.candidate("den Einzelplan 25.", 30000, 32000), topics) != -1 {
+		t.Fatal("an expired call matched a later mention")
+	}
+}
+
+// Sitting 112: the chair's "Wir kommen" was finalised on its own line.
+func TestCallSplitAfterWirKommen(t *testing.T) {
+	topics := []topicRef{
+		{Kind: "EPL", Numbers: []int{10}, Title: "Landwirtschaft, Ernährung und Heimat", Status: "active"},
+		{Kind: "EPL", Numbers: []int{17}, Title: "Bildung, Familie, Senioren, Frauen und Jugend", Status: "planned"},
+	}
+	var pending topicCallBuffer
+	lines := []string{"Keiner der Einzelplan 10 ist da.", "ist damit angenommen. Wir kommen", "jetzt zum Einzelplan 17.", "Bundesministerium für Bildung, Familie, Senioren,"}
+	for i, text := range lines {
+		got := detectTopicAnnouncement(pending.candidate(text, int64(i)*2000, int64(i)*2000+2000), topics)
+		if want := map[bool]int{true: 1, false: -1}[i == 2]; got != want {
+			t.Fatalf("line %q: got %d, want %d", text, got, want)
+		}
 	}
 }

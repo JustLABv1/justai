@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -216,6 +217,8 @@ func streamOpenAIOnce(ctx context.Context, endpoint Endpoint, options ChatOption
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	var finalUsage *Usage
 	seenContent := false
+	seenReasoning := false
+	finishReason, streamError := "", ""
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || line == "data: [DONE]" {
@@ -227,9 +230,15 @@ func streamOpenAIOnce(ctx context.Context, endpoint Endpoint, options ChatOption
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
 				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
 			Usage *struct {
 				PromptTokens     int64 `json:"prompt_tokens"`
 				CompletionTokens int64 `json:"completion_tokens"`
@@ -241,6 +250,17 @@ func streamOpenAIOnce(ctx context.Context, endpoint Endpoint, options ChatOption
 		}
 		if chunk.Usage != nil {
 			finalUsage = &Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens}
+		}
+		if chunk.Error != nil && chunk.Error.Message != "" {
+			streamError = chunk.Error.Message
+		}
+		if len(chunk.Choices) > 0 {
+			if reason := chunk.Choices[0].FinishReason; reason != "" {
+				finishReason = reason
+			}
+			if chunk.Choices[0].Delta.ReasoningContent != "" || chunk.Choices[0].Delta.Reasoning != "" {
+				seenReasoning = true
+			}
 		}
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 			seenContent = true
@@ -258,9 +278,31 @@ func streamOpenAIOnce(ctx context.Context, endpoint Endpoint, options ChatOption
 		return err
 	}
 	if !seenContent {
-		return fmt.Errorf("provider returned no chat content")
+		return emptyChatError(finishReason, streamError, seenReasoning)
 	}
 	return nil
+}
+
+// ErrNoChatContent marks a call that ended without any answer text. It is often
+// transient, so callers may retry it.
+var ErrNoChatContent = errors.New("provider returned no chat content")
+
+// emptyChatError explains why a stream ended without answer text, so the cause can be
+// fixed (for example a reasoning model that used up its output budget).
+func emptyChatError(finishReason, streamError string, reasoning bool) error {
+	switch {
+	case streamError != "":
+		return fmt.Errorf("%w: %s", ErrNoChatContent, streamError)
+	case finishReason == "length" && reasoning:
+		return fmt.Errorf("%w: the model used its whole output budget on reasoning; raise the endpoint's max output tokens", ErrNoChatContent)
+	case finishReason == "length":
+		return fmt.Errorf("%w: the output budget was exhausted", ErrNoChatContent)
+	case finishReason == "content_filter":
+		return fmt.Errorf("%w: the provider's content filter blocked the answer", ErrNoChatContent)
+	case finishReason != "":
+		return fmt.Errorf("%w (finish reason: %s)", ErrNoChatContent, finishReason)
+	}
+	return ErrNoChatContent
 }
 
 func embedOpenAI(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {

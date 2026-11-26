@@ -1,11 +1,17 @@
 "use client"
 
 import {
+  Bell,
+  BellOff,
+  CalendarClock,
+  ChevronDown,
   Check,
   Copy,
   FileText,
   Play,
+  Settings2,
   Sparkles,
+  X,
   Square,
 } from "lucide-react"
 import {
@@ -13,12 +19,23 @@ import {
   TopicNotifyIcon,
   TopicQuietIcon,
 } from "@/components/topic-icons"
-import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useId, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
+import { Micro } from "@/components/panelui/micro"
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Checkbox } from "@/components/panelui/checkbox"
+import { Switch } from "@/components/panelui/switch"
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Dialog,
   DialogBody,
@@ -31,11 +48,12 @@ import {
 import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
 import { api } from "@/lib/api"
-import type { TranscriptionTopic } from "@/lib/types"
+import type { TopicBoundaryProposal, TranscriptionTopic } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { workspacePath } from "@/lib/workspace-routes"
 import { topicMoved } from "@/components/scheduled-capture-card"
 import { TopicExportMenu } from "@/components/topic-export-menu"
-import { TopicSubscriptionButton } from "@/components/topic-subscriptions"
+import { TopicSubscriptionCard } from "@/components/topic-subscriptions"
 
 function formatOffset(ms?: number) {
   if (ms === undefined) return ""
@@ -45,6 +63,14 @@ function formatOffset(ms?: number) {
   const s = total % 60
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${h}:${pad(m)}:${pad(s)}`
+}
+
+/** The topic passed without being captured, so it has no transcript. */
+function notRecorded(topic: TranscriptionTopic) {
+  return (
+    topic.status === "done" &&
+    (topic.detectedBy === "missed" || topic.startedOffsetMs == null)
+  )
 }
 
 /**
@@ -74,6 +100,9 @@ export function LiveTranscriptionTopics({
   topicsOnly?: boolean
 }) {
   const { t, locale } = useTranslations()
+  const router = useRouter()
+  const agendaId = useId()
+  const [agendaOpen, setAgendaOpen] = useState(true)
   const [openId, setOpenId] = useState<string | null>(null)
   const [sittingNo, setSittingNo] = useState(
     defaultSittingNo ? String(defaultSittingNo) : ""
@@ -93,7 +122,28 @@ export function LiveTranscriptionTopics({
     [onTopics, topics]
   )
 
+  const activeTopic = topics.find((topic) => topic.status === "active")
+  // The agenda has moved past an item once a later one has started; its slot time is
+  // no guide, since sittings often run late.
+  const reachedOrder = Math.max(
+    -1,
+    ...topics
+      .filter(
+        (topic) =>
+          (topic.status === "active" || topic.status === "done") &&
+          !notRecorded(topic)
+      )
+      .map((topic) => topic.order)
+  )
+  const passed = (topic: TranscriptionTopic) =>
+    topic.status === "planned" && topic.order < reachedOrder
+  const nextSelectedTopic = topicsOnly
+    ? topics
+        .filter((topic) => topic.starred && topic.status === "planned")
+        .sort((a, b) => a.order - b.order)[0]
+    : undefined
   const time = new Intl.DateTimeFormat(locale, {
+    ...(topicsOnly ? { timeZone: "Europe/Berlin" } : {}),
     hour: "2-digit",
     minute: "2-digit",
   })
@@ -141,24 +191,40 @@ export function LiveTranscriptionTopics({
       upsert(result.topic)
     })
 
+  // A finished topic opens as a transcript of its own, with speakers, summaries and
+  // export. A running topic still grows, so it opens as a live text preview.
+  const openTranscript = (topic: TranscriptionTopic) => {
+    if (topic.status !== "done") {
+      setOpenId(topic.id)
+      return
+    }
+    void run(topic.id, async () => {
+      const sessionId =
+        topic.transcriptSessionId ??
+        (
+          await api.post<{ sessionId: string }>(
+            `/api/v1/transcription/topics/${topic.id}/transcript-session`
+          )
+        ).sessionId
+      router.push(workspacePath("transcription", null, sessionId))
+    })
+  }
+
   const statusBadge = (topic: TranscriptionTopic) =>
-    topic.status === "active" ? (
-      <Badge variant="default">{t("Running")}</Badge>
+    notRecorded(topic) ? (
+      <Badge variant="outline">{t("Not recorded")}</Badge>
+    ) : topic.status === "active" ? (
+      <Badge variant={topicsOnly && !topic.starred ? "secondary" : "default"}>
+        {t("Topic in progress")}
+      </Badge>
     ) : topic.status === "done" ? (
       <Badge variant="secondary">{t("Finished")}</Badge>
+    ) : passed(topic) ? (
+      <Badge variant="outline">{t("Skipped")}</Badge>
     ) : topicsOnly ? (
       topic.starred ? (
-        <Badge variant="default">{t("Selected for recording")}</Badge>
-      ) : (
-        <span className="text-xs text-muted-foreground">
-          {t("Not selected")}
-        </span>
-      )
-    ) : topic.starred ? (
-      <Badge variant="outline">
-        <TopicNotifyIcon aria-hidden="true" className="size-3" />
-        {t("Notify when finished")}
-      </Badge>
+        <Badge variant="secondary">{t("Selected for recording")}</Badge>
+      ) : null
     ) : (
       <Badge variant="outline">{t("Planned")}</Badge>
     )
@@ -170,18 +236,41 @@ export function LiveTranscriptionTopics({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 font-medium">
-          <TopicIcon className="size-4" /> {t("Topics")}
+          {topics.length > 0 ? (
+            <Button
+              aria-controls={agendaId}
+              aria-expanded={agendaOpen}
+              aria-label={
+                agendaOpen ? t("Collapse agenda") : t("Expand agenda")
+              }
+              onClick={() => setAgendaOpen((open) => !open)}
+              size="sm"
+              variant="ghost"
+            >
+              <TopicIcon aria-hidden="true" className="size-4" />
+              {t("Topics")}
+              <ChevronDown
+                aria-hidden="true"
+                className={cn("size-4", !agendaOpen && "-rotate-90")}
+              />
+            </Button>
+          ) : (
+            <>
+              <TopicIcon className="size-4" /> {t("Topics")}
+            </>
+          )}
         </h3>
         {topics.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              {t("{value0} of {value1} finished", {
-                value0: topics.filter((topic) => topic.status === "done")
-                  .length,
-                value1: topics.length,
-              })}
-            </span>
-            <TopicSubscriptionButton sessionId={sessionId} />
+            <Micro size="sm">
+              <Micro.Progress
+                label={t("Finished")}
+                max={topics.length}
+                value={topics.filter((topic) => topic.status === "done").length}
+                tone="info"
+              />
+            </Micro>
+            <SessionNotifyToggle sessionId={sessionId} />
             {topics.some((topic) => topic.startedOffsetMs !== undefined) ? (
               <TopicExportMenu
                 fileName={t("Topics")}
@@ -193,6 +282,67 @@ export function LiveTranscriptionTopics({
           </div>
         ) : null}
       </div>
+
+      {topics.map((topic) =>
+        topic.boundaryProposal ? (
+          <BoundaryProposalCard
+            busy={busyId === topic.id}
+            key={`proposal-${topic.id}`}
+            nextTitle={
+              topics.find((item) => item.id === topic.boundaryProposal?.topicId)
+                ?.title ?? ""
+            }
+            onDecide={(decision) =>
+              void run(topic.id, async () => {
+                const result = await api.post<{
+                  topics: TranscriptionTopic[]
+                }>(`/api/v1/transcription/topics/${topic.id}/boundary`, {
+                  decision,
+                })
+                onTopics(result.topics)
+              })
+            }
+            proposal={topic.boundaryProposal}
+          />
+        ) : null
+      )}
+
+      {nextSelectedTopic ? (
+        <div className="flex items-start gap-3 rounded-lg bg-muted/60 px-4 py-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <CalendarClock aria-hidden="true" className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t("Next selected topic")}
+            </p>
+            {agendaOpen ? (
+              <a
+                className="font-medium underline-offset-4 hover:underline"
+                href={`#agenda-topic-${nextSelectedTopic.id}`}
+              >
+                {nextSelectedTopic.title}
+              </a>
+            ) : (
+              <p className="font-medium">{nextSelectedTopic.title}</p>
+            )}
+            {nextSelectedTopic.plannedStartAt ? (
+              <p className="text-xs text-muted-foreground">
+                {t("Planned for {value0} (Berlin time)", {
+                  value0: time.format(
+                    new Date(nextSelectedTopic.plannedStartAt)
+                  ),
+                })}
+              </p>
+            ) : null}
+            {!activeTopic?.starred ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("Transcription begins when a selected topic is called.")}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {finishedNotice ? (
         <div
@@ -207,7 +357,7 @@ export function LiveTranscriptionTopics({
           <span className="flex gap-2">
             <Button
               onClick={() => {
-                setOpenId(finishedNotice.id)
+                openTranscript(finishedNotice)
                 onDismissNotice()
               }}
               size="sm"
@@ -228,47 +378,64 @@ export function LiveTranscriptionTopics({
       ) : null}
 
       {topics.length === 0 ? (
-        <div className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3">
+        <form
+          className="space-y-3 rounded-lg bg-muted/40 p-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!loading) void loadTopics()
+          }}
+        >
           <p className="text-xs text-muted-foreground">
-            {t(
-              "Load the agenda items of a Bundestag sitting. JustAI then recognises each item from the chair’s announcements and makes its transcript available as soon as it is finished."
-            )}
+            {t("Load the Bundestag agenda to follow individual topics live.")}
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              aria-label={t("Sitting number")}
-              className="w-32"
-              inputMode="numeric"
-              onChange={(event) =>
-                setSittingNo(event.target.value.replace(/\D/g, ""))
-              }
-              placeholder={t("e.g. 110")}
-              value={sittingNo}
-            />
-            <Button
-              disabled={loading}
-              onClick={() => void loadTopics()}
-              size="sm"
-              variant="outline"
+          <div className="space-y-1.5">
+            <label
+              htmlFor={`${agendaId}-sitting`}
+              className="block text-xs font-medium"
             >
-              {loading ? <Spinner /> : null}
-              {t("Load agenda items")}
-            </Button>
+              {t("Sitting number")}
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                id={`${agendaId}-sitting`}
+                className="h-8 w-20"
+                inputMode="numeric"
+                onChange={(event) =>
+                  setSittingNo(event.target.value.replace(/\D/g, ""))
+                }
+                placeholder="110"
+                value={sittingNo}
+              />
+              <Button disabled={loading} size="sm" type="submit">
+                {loading ? <Spinner /> : null}
+                {t("Load agenda")}
+              </Button>
+            </div>
           </div>
-        </div>
+        </form>
       ) : (
-        <ul className="flex flex-col divide-y divide-border/60 rounded-lg bg-muted/40">
+        <ul
+          id={agendaId}
+          hidden={!agendaOpen}
+          className="divide-y divide-border/60 overflow-hidden rounded-lg bg-muted/40"
+        >
           {topics.map((topic) => (
             <li
               className={cn(
                 "flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2",
-                topic.status === "active" && "bg-primary/5",
+                (topic.status === "active" ||
+                  (topicsOnly &&
+                    topic.starred &&
+                    topic.status === "planned")) &&
+                  "bg-primary/5",
                 topicsOnly &&
                   !topic.starred &&
                   topic.status === "planned" &&
                   "text-muted-foreground"
               )}
+              id={`agenda-topic-${topic.id}`}
               key={topic.id}
+              tabIndex={-1}
             >
               {topicsOnly && topic.status === "planned" ? (
                 <Checkbox
@@ -279,7 +446,18 @@ export function LiveTranscriptionTopics({
                     toggleStarred(topic, Boolean(next))
                   }
                 />
-              ) : topicsOnly ? null : (
+              ) : topicsOnly ? (
+                <span
+                  className="grid size-4 shrink-0 place-items-center"
+                  aria-hidden="true"
+                >
+                  {topic.status === "active" ? (
+                    <span className="size-2 rounded-full bg-primary" />
+                  ) : (
+                    <Check className="size-3.5 text-muted-foreground" />
+                  )}
+                </span>
+              ) : (
                 <Button
                   aria-label={
                     topic.starred
@@ -304,8 +482,8 @@ export function LiveTranscriptionTopics({
                   )}
                 </Button>
               )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{topic.title}</p>
+              <div className="min-w-0 flex-[1_1_12rem]">
+                <p className="font-medium">{topic.title}</p>
                 <p className="text-xs text-muted-foreground">
                   {topic.label}
                   {topic.plannedStartAt
@@ -332,8 +510,8 @@ export function LiveTranscriptionTopics({
                 </p>
               </div>
               {statusBadge(topic)}
-              <div className="flex gap-1">
-                {topic.status === "planned" && capturing ? (
+              <div className="ml-auto flex shrink-0 gap-1.5">
+                {topic.status === "planned" && capturing && !passed(topic) ? (
                   <Button
                     disabled={busyId === topic.id}
                     onClick={() =>
@@ -363,16 +541,17 @@ export function LiveTranscriptionTopics({
                       })
                     }
                     size="sm"
-                    variant="ghost"
+                    variant="secondary"
                   >
                     <Square data-icon="inline-start" /> {t("Finish")}
                   </Button>
                 ) : null}
-                {topic.status !== "planned" ? (
+                {topic.status !== "planned" && !notRecorded(topic) ? (
                   <Button
-                    onClick={() => setOpenId(topic.id)}
+                    disabled={busyId === topic.id}
+                    onClick={() => openTranscript(topic)}
                     size="sm"
-                    variant={topic.status === "done" ? "default" : "outline"}
+                    variant="secondary"
                   >
                     <FileText data-icon="inline-start" /> {t("Transcript")}
                   </Button>
@@ -383,6 +562,10 @@ export function LiveTranscriptionTopics({
         </ul>
       )}
 
+      {topics.length > 0 ? (
+        <TopicSubscriptionCard sessionId={sessionId} />
+      ) : null}
+
       {openTopic ? (
         <TopicTranscriptDialog
           onClose={() => setOpenId(null)}
@@ -391,6 +574,177 @@ export function LiveTranscriptionTopics({
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Notifications about this transcript (each finished topic and the end), for the
+ * current user. Opens a popover that explains them and has the switch.
+ */
+function SessionNotifyToggle({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslations()
+  const router = useRouter()
+  const [muted, setMuted] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void api
+      .get<{ muted: boolean }>(
+        `/api/v1/transcription/sessions/${sessionId}/notifications`
+      )
+      .then((result) => {
+        if (!cancelled) setMuted(result.muted)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+  if (muted === null) return null
+  const label = muted
+    ? t("Notifications for this transcript are off")
+    : t("Notifications for this transcript are on")
+  const setOn = (on: boolean) => {
+    setBusy(true)
+    void api
+      .put<{ muted: boolean }>(
+        `/api/v1/transcription/sessions/${sessionId}/notifications`,
+        { muted: !on }
+      )
+      .then((result) => setMuted(result.muted))
+      .catch(() => undefined)
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button
+            aria-label={label}
+            size="icon-sm"
+            title={label}
+            variant="ghost"
+          >
+            {muted ? (
+              <BellOff className="text-muted-foreground" />
+            ) : (
+              <Bell className="text-primary" />
+            )}
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className="w-80 gap-3 p-4">
+        <PopoverHeader>
+          <PopoverTitle>{t("Notifications for this transcript")}</PopoverTitle>
+          <PopoverDescription className="text-sm">
+            {t(
+              "JustAI tells you when a recorded topic is finished and when the whole transcript is done. Everyone it is shared with decides this for themselves."
+            )}
+          </PopoverDescription>
+        </PopoverHeader>
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2.5">
+          <label
+            className="text-sm font-medium"
+            htmlFor={`notify-${sessionId}`}
+          >
+            {t("Notify me")}
+          </label>
+          <Switch
+            checked={!muted}
+            disabled={busy}
+            id={`notify-${sessionId}`}
+            onCheckedChange={(checked) => setOn(checked)}
+            pending={busy}
+            size="sm"
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{t("Browser and e-mail are set in your profile.")}</span>
+          <Button
+            onClick={() => router.push("/profile?tab=notifications")}
+            size="sm"
+            variant="ghost"
+          >
+            <Settings2 data-icon="inline-start" />
+            {t("Settings")}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * Live detection missed an agenda change and an AI model found it in the transcript.
+ * The user can accept or reject; otherwise JustAI applies it when the time is up.
+ */
+function BoundaryProposalCard({
+  proposal,
+  nextTitle,
+  busy,
+  onDecide,
+}: {
+  proposal: TopicBoundaryProposal
+  nextTitle: string
+  busy: boolean
+  onDecide: (decision: "accept" | "reject") => void
+}) {
+  const { t } = useTranslations()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const minutes = Math.ceil(
+    (new Date(proposal.deadline).getTime() - now) / 60_000
+  )
+
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3"
+      role="status"
+    >
+      <p className="flex items-center gap-2 text-xs font-medium text-primary">
+        <Sparkles aria-hidden="true" className="size-4" />
+        {t("Topic change detected")}
+      </p>
+      <p className="font-medium">
+        {t("“{value0}” probably began at {value1}.", {
+          value0: nextTitle,
+          value1: formatOffset(proposal.offsetMs),
+        })}
+      </p>
+      {proposal.quote ? (
+        <blockquote className="border-l-2 border-primary/40 pl-2 text-xs text-muted-foreground italic">
+          „{proposal.quote}“
+        </blockquote>
+      ) : null}
+      {proposal.reason ? (
+        <p className="text-xs text-muted-foreground">{proposal.reason}</p>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {minutes > 0
+            ? t("JustAI applies this in {value0} min unless you decide.", {
+                value0: minutes,
+              })
+            : t("JustAI applies this now.")}
+        </p>
+        <div className="ml-auto flex shrink-0 gap-1.5">
+          <Button
+            disabled={busy}
+            onClick={() => onDecide("reject")}
+            size="sm"
+            variant="ghost"
+          >
+            <X data-icon="inline-start" /> {t("Reject change")}
+          </Button>
+          <Button disabled={busy} onClick={() => onDecide("accept")} size="sm">
+            <Check data-icon="inline-start" /> {t("Accept change")}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 

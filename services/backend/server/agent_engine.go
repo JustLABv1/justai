@@ -853,6 +853,7 @@ func (executor *nativeAgentExecutor) Execute(ctx context.Context, request agentE
 		return agentExecutionResult{}, err
 	}
 	definitions = append(definitions, agentFileTool())
+	definitions = append(definitions, agentNotifyTool())
 	definitions = append(definitions, templateTools()...)
 	if request.ConversationID != nil {
 		definitions = append(definitions, attachmentReadTools()...)

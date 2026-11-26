@@ -17,15 +17,25 @@ type topicRef struct {
 	Status  string // planned, active, done
 }
 
+// Words the chair puts between "wir kommen" and "zu".
+const topicCallFillers = `(?:(?:nun|jetzt|damit|dann|nunmehr|zunächst|abschließend|als\s+nächstes)\s+)*`
+
 var (
 	// The chair calls an item up with "Ich rufe ... auf" or "Wir kommen zu ...". Word
 	// boundaries keep "Zwischenrufe" and "rufen" from counting.
-	topicTrigger = regexp.MustCompile(`\b(rufe|rufen\s+wir|kommen\s+wir\s+(?:nun\s+|jetzt\s+)?zu|wir\s+kommen\s+(?:nun\s+|jetzt\s+)?zu|treten\s+wir\s+ein)\b`)
-	topicEPL     = regexp.MustCompile(`\beinzelpl(?:an|ans|äne|änen)\s+((?:\d{1,2}(?:\s*(?:,|und|bis)\s*)?)+)`)
-	topicTOP     = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
-	topicZP      = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
-	topicClose   = regexp.MustCompile(`\b(ich\s+schließe\s+die\s+sitzung|die\s+sitzung\s+ist\s+geschlossen|schließe\s+ich\s+die\s+sitzung)\b`)
-	topicWords   = regexp.MustCompile(`[a-zäöüß]{5,}`)
+	// "Wir kommen jetzt zum Einzelplan 17" and "Kommen wir damit zur ..." count too.
+	topicTrigger = regexp.MustCompile(`(?i)\b((?:ich\s+)?rufe|rufen\s+wir|(?:kommen\s+wir|wir\s+kommen)\s+` + topicCallFillers + `(?:zu|zum|zur)|treten\s+wir\s+ein)\b`)
+	// A vote on an item ("Wir kommen zur Abstimmung über den Einzelplan 10") ends it.
+	topicVote = regexp.MustCompile(`^[[:punct:]\s]*abstimmung\b`)
+	topicEPL  = regexp.MustCompile(`\beinzelpl(?:an|ans|äne|änen)\s+((?:\d{1,2}(?:\s*(?:,|und|bis)\s*)?)+)`)
+	topicTOP  = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
+	topicZP   = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
+	// The chair closes the sitting ("Ich schließe die Sitzung"), says the agenda is done
+	// ("Wir sind nun am Ende unserer heutigen Tagesordnung") or calls the next sitting
+	// ("Ich berufe die nächste Sitzung ... ein"). Speech recognition often writes
+	// "Tagesordnungspunkt" for "Tagesordnung" and "rufe" for "berufe".
+	topicClose = regexp.MustCompile(`\b(ich\s+schließe\s+die\s+sitzung|die\s+sitzung\s+ist\s+geschlossen|schließe\s+ich\s+die\s+sitzung|(?:wir\s+sind|sind\s+wir)\s+(?:(?:nun|jetzt|damit|somit)\s+)*am\s+(?:ende|schluss)\s+(?:unserer|der)\s+(?:heutigen\s+)?tagesordnung\w*|(?:die\s+)?tagesordnung\s+ist\s+(?:(?:damit|somit|nun)\s+)*(?:erschöpft|abgearbeitet|erledigt)|(?:be)?rufe\s+(?:ich\s+)?(?:die\s+)?nächste\s+sitzung|nächste\s+sitzung\s+(?:des\s+deutschen\s+bundestages\s+)?berufe\s+ich)`)
+	topicWords = regexp.MustCompile(`[a-zäöüß]{5,}`)
 )
 
 // Common words that carry no topic meaning in an agenda title.
@@ -73,12 +83,41 @@ func titleTokens(title string) []string {
 	return out
 }
 
+// Providers may finalize the chair's introductory phrase before the item number.
+// Carry only an unfinished call, never a whole preceding speech.
+var unfinishedTopicCall = regexp.MustCompile(`(?i)\b(?:ich\s+rufe|wir\s+kommen|kommen\s+wir)(?:[[:punct:]\s]+(?:jetzt|nun|damit|dann|nunmehr|auf|zu|zum|zur|den|die|das|dem|einzelplan|einzelplänen|tagesordnungspunkt|zusatzpunkt))*[[:punct:]\s]*$`)
+
+type topicCallBuffer struct {
+	text  string
+	endMs int64
+}
+
+func (b *topicCallBuffer) candidate(text string, startMs, endMs int64) string {
+	candidate := text
+	if b.text != "" && startMs <= b.endMs+10000 && !topicTrigger.MatchString(text) {
+		candidate = b.text + " " + text
+	}
+	b.text = ""
+	if suffix := unfinishedTopicCall.FindString(candidate); suffix != "" && len(suffix) <= 160 {
+		b.text = suffix
+		b.endMs = endMs
+	}
+	return candidate
+}
+
 // detectTopicAnnouncement finds which unfinished agenda item the chair just called up.
 // It returns the index into topics, or -1. Items already done are never matched again,
 // which keeps a repeated mention (for example after a recess) from reopening them.
 func detectTopicAnnouncement(text string, topics []topicRef) int {
 	lower := strings.ToLower(text)
-	if !topicTrigger.MatchString(lower) {
+	calls := topicTrigger.FindAllStringIndex(lower, -1)
+	if len(calls) == 0 {
+		return -1
+	}
+	// Only what follows the last call names the item; earlier words belong to the
+	// previous item (for example the vote that just closed it).
+	lower = lower[calls[len(calls)-1][1]:]
+	if topicVote.MatchString(lower) {
 		return -1
 	}
 	var epl, top, zp []int

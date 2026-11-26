@@ -17,10 +17,12 @@ export const initialRealtimeState: SSEConnectionState = {
 
 export function RealtimeConnectionStatus({
   status,
+  connectedLabel,
   interruptionAt,
   className,
 }: {
   status: SSEConnectionState
+  connectedLabel?: string
   interruptionAt?: Date | null
   className?: string
 }) {
@@ -37,7 +39,7 @@ export function RealtimeConnectionStatus({
         ? t("Disconnected")
         : status.state === "connecting"
           ? t("Connecting")
-          : t("Live")
+          : (connectedLabel ?? t("Live"))
   const Icon = reconnecting
     ? RefreshCw
     : degraded

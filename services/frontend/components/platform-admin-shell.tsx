@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   UsersRound,
   Wrench,
+  Mail,
 } from "lucide-react"
 
 import { APIError, api } from "@/lib/api"
@@ -48,6 +49,7 @@ import { MCPView } from "@/components/mcp-view"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
+import { PlatformEmailView } from "@/components/platform-email-view"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
 import { Tabs } from "@/components/panelui/tabs"
 import { Button as PanelButton } from "@/components/panelui/button"
@@ -65,6 +67,7 @@ const tabsMessages: Array<{
   { id: "mcp", label: "MCP", icon: Wrench },
   { id: "controls", label: "Platform controls", icon: ShieldCheck },
   { id: "authentication", label: "Authentication", icon: KeyRound },
+  { id: "email", label: "E-mail", icon: Mail },
   { id: "announcements", label: "Announcements", icon: Megaphone },
   { id: "health", label: "Health", icon: Database },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
@@ -469,6 +472,7 @@ export function PlatformAdminShell({
               createRequest={authenticationCreateRequest}
             />
           )}
+          {activeTab === "email" && <PlatformEmailView />}
           {activeTab === "announcements" && (
             <PlatformAnnouncementsView
               createRequest={announcementCreateRequest}

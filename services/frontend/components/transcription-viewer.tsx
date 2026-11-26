@@ -9,7 +9,7 @@ import { useTranslations } from "@/components/locale-provider"
 import { Badge } from "@/components/panelui/badge"
 import { Spinner } from "@/components/panelui/spinner"
 import { Switch } from "@/components/panelui/switch"
-import { api } from "@/lib/api"
+import { api, APIError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type ViewSegment = {
@@ -83,7 +83,10 @@ function mergeSegments(current: ViewSegment[], incoming: ViewSegment[]) {
  */
 export function TranscriptionViewer() {
   const { t, locale } = useTranslations()
-  const token = useSearchParams().get("token") ?? ""
+  const params = useSearchParams()
+  const token = params.get("token") ?? ""
+  const org = params.get("org")
+  const session = params.get("session") ?? ""
   const [snapshot, setSnapshot] = useState<ViewSnapshot | null>(null)
   const [error, setError] = useState("")
   const [follow, setFollow] = useState(true)
@@ -97,7 +100,12 @@ export function TranscriptionViewer() {
     async (full: boolean) => {
       const query = full ? "" : `?afterOffset=${lastOffset.current}`
       const result = await api.get<ViewSnapshot>(
-        `/api/v1/transcription/view/${encodeURIComponent(token)}${query}`
+        token
+          ? `/api/v1/transcription/view/${encodeURIComponent(token)}${query}`
+          : `/api/v1/transcription/sessions/${encodeURIComponent(session)}/read-only${query}`,
+        session && org && !token
+          ? { headers: { "X-Organization-ID": org } }
+          : undefined
       )
       setSnapshot((current) => {
         const segments =
@@ -110,21 +118,40 @@ export function TranscriptionViewer() {
       })
       setError("")
     },
-    [token]
+    [token, session, org]
   )
 
   useEffect(() => {
-    if (!token) return
+    if (!token && !session) return
     let cancelled = false
     let ticks = 0
     const run = (full: boolean) =>
       load(full).catch((caught) => {
-        if (!cancelled)
-          setError(
-            caught instanceof Error
-              ? caught.message
-              : t("The transcript could not be loaded.")
+        if (cancelled) return
+        if (
+          session &&
+          !token &&
+          caught instanceof APIError &&
+          caught.status === 401
+        ) {
+          window.location.assign(
+            "/login?next=" +
+              encodeURIComponent(
+                window.location.pathname + window.location.search
+              )
           )
+          return
+        }
+        if (
+          caught instanceof APIError &&
+          [401, 403, 404].includes(caught.status)
+        )
+          setSnapshot(null)
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : t("The transcript could not be loaded.")
+        )
       })
     void run(true)
     if (finished) return
@@ -136,7 +163,7 @@ export function TranscriptionViewer() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [finished, load, t, token])
+  }, [finished, load, t, token, session])
 
   const segmentCount = snapshot?.segments.length ?? 0
   useEffect(() => {
@@ -159,7 +186,7 @@ export function TranscriptionViewer() {
     return out
   }, [snapshot?.segments])
 
-  if (!token)
+  if (!token && !session)
     return (
       <ViewerMessage
         text={t("This link is incomplete. Ask for a new read-only link.")}

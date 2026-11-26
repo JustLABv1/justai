@@ -39,6 +39,7 @@ export function parseJustAIAction(value: unknown) {
       "mcp",
       "controls",
       "authentication",
+      "email",
       "announcements",
       "health",
       "analytics",
