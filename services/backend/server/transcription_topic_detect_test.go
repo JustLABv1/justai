@@ -62,8 +62,28 @@ func TestSittingCloseAndPrecheck(t *testing.T) {
 	if !isSittingClosed("Damit ist die Tagesordnung erledigt. Ich schließe die Sitzung.") || !isSittingClosed("Die Sitzung ist geschlossen") {
 		t.Error("closing not detected")
 	}
-	if isSittingClosed("Wir schließen die Aussprache") {
-		t.Error("closing a debate must not close the sitting")
+	for _, text := range []string{
+		"Wir sind nun am Ende unserer heutigen Tagesordnung.",
+		"Wir sind nun am Ende unserer heutigen Tagesordnungspunkt", // sitting 112, as transcribed
+		"Damit sind wir am Schluss der Tagesordnung.",
+		"Die Tagesordnung ist damit erschöpft.",
+		"Ich berufe die nächste Sitzung des Deutschen Bundestages auf morgen ein.",
+		"Ich rufe die nächste Sitzung des Deutschen Bundestages ein.", // sitting 112, as transcribed
+		"Die nächste Sitzung des Deutschen Bundestages berufe ich ein auf Freitag.",
+	} {
+		if !isSittingClosed(text) {
+			t.Errorf("closing not detected: %q", text)
+		}
+	}
+	for _, text := range []string{
+		"Wir schließen die Aussprache",
+		"Am Ende der Tagesordnung steht heute die Abstimmung.",
+		"Ich rufe den Tagesordnungspunkt 4 auf",
+		"In der nächsten Sitzungswoche beraten wir das weiter.",
+	} {
+		if isSittingClosed(text) {
+			t.Errorf("not a close of the sitting: %q", text)
+		}
 	}
 	if mightAnnounceTopic("Das Wort hat der Kollege Müller.") || !mightAnnounceTopic("Ich rufe den Tagesordnungspunkt 4 auf") {
 		t.Error("precheck wrong")

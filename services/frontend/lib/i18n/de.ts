@@ -5016,6 +5016,8 @@ export const de = {
   "Choose at least one topic.": "Wähle mindestens ein Thema.",
   "A selected topic was called up before the capture window began, so it was not recorded. The capture continues with the remaining topics.":
     "Ein ausgewähltes Thema wurde aufgerufen, bevor das Aufnahmefenster begann, und wurde daher nicht aufgenommen. Die Aufnahme läuft mit den übrigen Themen weiter.",
+  "The sitting was closed, so the capture has ended.":
+    "Die Sitzung wurde geschlossen, daher wurde die Aufnahme beendet.",
   "All selected topics are finished. The capture has ended.":
     "Alle ausgewählten Themen sind abgeschlossen. Die Aufnahme wurde beendet.",
   "Paused until {value0} (Berlin time), shortly before the next selected topic: {value1}.":
@@ -5189,7 +5191,6 @@ export const de = {
     "Das Transkript erscheint hier, sobald jemand spricht.",
   "Agenda items": "Tagesordnungspunkte",
   "Not recorded": "Nicht aufgenommen",
-  "Skipped": "Übersprungen",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

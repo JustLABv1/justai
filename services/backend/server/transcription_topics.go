@@ -164,6 +164,7 @@ func (m *TranscriptionManager) observeTopics(ctx context.Context, sessionID, sou
 	if isSittingClosed(text) {
 		m.finishActiveTopics(ctx, sessionID, sourceID, startOffsetMs, "sitting_closed")
 		m.applyTopicScope(ctx, sessionID, sourceID)
+		m.endTopicCaptureAtSittingClose(ctx, sessionID, sourceID)
 		return false
 	}
 	idx := detectTopicAnnouncement(text, topics)
@@ -173,6 +174,21 @@ func (m *TranscriptionManager) observeTopics(ctx context.Context, sessionID, sou
 	m.switchTopic(ctx, sessionID, sourceID, topics[idx].ID, startOffsetMs, "announcement")
 	m.applyTopicScope(ctx, sessionID, sourceID)
 	return true
+}
+
+// endTopicCaptureAtSittingClose ends a capture of selected topics once the sitting is
+// closed: selected items that were not called up will not come today, so waiting for
+// them would keep the capture open for nothing. A missed call inside the recorded range
+// is still repaired afterwards (by rule when the topic finished, else by the AI check).
+func (m *TranscriptionManager) endTopicCaptureAtSittingClose(ctx context.Context, sessionID, sourceID uuid.UUID) {
+	var scope, status string
+	if err := m.DB.QueryRowContext(ctx, `SELECT capture_scope, status FROM transcription_stream_sources WHERE source_id = $1`, sourceID).Scan(&scope, &status); err != nil || scope != "topics" || status == "stopped" {
+		return
+	}
+	liveStreamEvents.inc("topic_sitting_closed")
+	m.setStreamAlert(sessionID, sourceID, "sitting_closed", "The sitting was closed, so the capture has ended.")
+	m.finishLiveStream(sessionID, sourceID, "sitting closed")
+	m.stopStreamSource(sourceID)
 }
 
 // switchTopic finishes the active topic and opens another at the given offset.

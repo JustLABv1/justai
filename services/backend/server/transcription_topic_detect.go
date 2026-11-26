@@ -26,11 +26,15 @@ var (
 	// "Wir kommen jetzt zum Einzelplan 17" and "Kommen wir damit zur ..." count too.
 	topicTrigger = regexp.MustCompile(`(?i)\b((?:ich\s+)?rufe|rufen\s+wir|(?:kommen\s+wir|wir\s+kommen)\s+` + topicCallFillers + `(?:zu|zum|zur)|treten\s+wir\s+ein)\b`)
 	// A vote on an item ("Wir kommen zur Abstimmung über den Einzelplan 10") ends it.
-	topicVote  = regexp.MustCompile(`^[[:punct:]\s]*abstimmung\b`)
-	topicEPL   = regexp.MustCompile(`\beinzelpl(?:an|ans|äne|änen)\s+((?:\d{1,2}(?:\s*(?:,|und|bis)\s*)?)+)`)
-	topicTOP   = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
-	topicZP    = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
-	topicClose = regexp.MustCompile(`\b(ich\s+schließe\s+die\s+sitzung|die\s+sitzung\s+ist\s+geschlossen|schließe\s+ich\s+die\s+sitzung)\b`)
+	topicVote = regexp.MustCompile(`^[[:punct:]\s]*abstimmung\b`)
+	topicEPL  = regexp.MustCompile(`\beinzelpl(?:an|ans|äne|änen)\s+((?:\d{1,2}(?:\s*(?:,|und|bis)\s*)?)+)`)
+	topicTOP  = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
+	topicZP   = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
+	// The chair closes the sitting ("Ich schließe die Sitzung"), says the agenda is done
+	// ("Wir sind nun am Ende unserer heutigen Tagesordnung") or calls the next sitting
+	// ("Ich berufe die nächste Sitzung ... ein"). Speech recognition often writes
+	// "Tagesordnungspunkt" for "Tagesordnung" and "rufe" for "berufe".
+	topicClose = regexp.MustCompile(`\b(ich\s+schließe\s+die\s+sitzung|die\s+sitzung\s+ist\s+geschlossen|schließe\s+ich\s+die\s+sitzung|(?:wir\s+sind|sind\s+wir)\s+(?:(?:nun|jetzt|damit|somit)\s+)*am\s+(?:ende|schluss)\s+(?:unserer|der)\s+(?:heutigen\s+)?tagesordnung\w*|(?:die\s+)?tagesordnung\s+ist\s+(?:(?:damit|somit|nun)\s+)*(?:erschöpft|abgearbeitet|erledigt)|(?:be)?rufe\s+(?:ich\s+)?(?:die\s+)?nächste\s+sitzung|nächste\s+sitzung\s+(?:des\s+deutschen\s+bundestages\s+)?berufe\s+ich)`)
 	topicWords = regexp.MustCompile(`[a-zäöüß]{5,}`)
 )
 
