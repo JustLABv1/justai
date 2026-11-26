@@ -1,5 +1,6 @@
 "use client"
 
+import { Micro } from "@/components/panelui/micro"
 import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
@@ -172,6 +173,27 @@ export function LiveTranscriptionConversationView({
       })
     : undefined
   const sourceConnected = primarySource?.status === "connected"
+  const streamFailed =
+    primarySource?.transportStatus === "failed" ||
+    primarySource?.endReason === "aborted"
+  const reconnecting = primarySource?.transportStatus === "reconnecting"
+  const streamTone = streamFailed
+    ? "destructive"
+    : reconnecting
+      ? "warning"
+      : sourceConnected
+        ? "success"
+        : "default"
+  const streamLabel = streamFailed
+    ? t("Capture failed")
+    : reconnecting
+      ? t("Reconnecting to the stream")
+      : sourceConnected
+        ? t("Connected")
+        : t("Waiting")
+  const streamPercent = Math.round(
+    Math.max(0, Math.min(1, primarySource?.signalLevel ?? level)) * 100
+  )
   const hasSignal = level > 0.06 || (primarySource?.signalLevel || 0) > 0.06
   const isMicRoom = mode === "microphone"
   const pendingRequests = joinRequests.filter(
@@ -324,7 +346,11 @@ export function LiveTranscriptionConversationView({
               <Share2 data-icon="inline-start" /> {t("Invite participants")}
             </Button>
           ) : (
-            <ViewLinkButton sessionId={snapshot.session.id} />
+            <ViewLinkButton
+              key={snapshot.session.id}
+              sessionId={snapshot.session.id}
+              owner={user}
+            />
           )}
           {!capturing && mode === "browser-system" && canStartCapture ? (
             <Button onClick={() => void onStartCapture()} size="sm">
@@ -390,7 +416,13 @@ export function LiveTranscriptionConversationView({
           </AlertDialog>
         </div>
       </header>
-      <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
+      <div
+        className={`grid gap-5 p-5 sm:p-6 ${
+          mode === "stream"
+            ? "lg:grid-cols-[minmax(0,1fr)_12rem]"
+            : "lg:grid-cols-[minmax(0,1fr)_19rem]"
+        }`}
+      >
         <section className="flex min-w-0 flex-col self-start rounded-xl border bg-background p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div>
@@ -539,11 +571,41 @@ export function LiveTranscriptionConversationView({
         </section>
 
         <aside className="min-w-0 space-y-3">
-          <RealtimeConnectionStatus
-            interruptionAt={interruptionAt}
-            status={transportStatus}
-            connectedLabel={waitingForTopic ? t("Connected") : undefined}
-          />
+          {mode === "stream" && (
+            <div className="flex flex-wrap gap-2 lg:flex-col lg:items-start">
+              <Micro size="sm" className="max-w-full">
+                <Micro.Pulse
+                  live={streamTone === "success" && live && hasSignal}
+                  tone={streamTone}
+                />
+                <Micro.Text
+                  label={primarySource?.name || config.shortLabel}
+                  value={streamLabel}
+                />
+              </Micro>
+              <Micro size="sm">
+                <Micro.Ring
+                  label={t("Audio level")}
+                  value={streamPercent}
+                  tone="info"
+                />
+                <Micro.Text
+                  label={t("Audio level")}
+                  value={streamPercent + "%"}
+                />
+              </Micro>
+            </div>
+          )}
+          {(mode !== "stream" ||
+            transportStatus.state !== "live" ||
+            transportStatus.audioQuality !== "good" ||
+            interruptionAt) && (
+            <RealtimeConnectionStatus
+              interruptionAt={interruptionAt}
+              status={transportStatus}
+              connectedLabel={waitingForTopic ? t("Connected") : undefined}
+            />
+          )}
           <StreamHealthNotice sources={snapshot.sources} />
           {alerts.length > 0 ? (
             <div
@@ -681,7 +743,7 @@ export function LiveTranscriptionConversationView({
                 </div>
               ) : null}
             </section>
-          ) : (
+          ) : mode !== "stream" ? (
             <section className="rounded-xl border bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -716,40 +778,44 @@ export function LiveTranscriptionConversationView({
                 </div>
               </dl>
             </section>
+          ) : null}
+          {mode !== "stream" && (
+            <section className="rounded-xl border bg-background p-4">
+              <div className="flex items-center justify-between">
+                <h2 className="flex items-center gap-2 text-sm font-semibold">
+                  <Activity className="size-4" /> {t("Room health")}
+                </h2>
+                <Badge variant="secondary">
+                  {transportStatus.audioQuality === "good"
+                    ? t("Good")
+                    : t("Needs attention")}
+                </Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {t(
+                  "Connection status and signal level are measured separately."
+                )}
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
+                <div>
+                  <span className="block text-muted-foreground">
+                    {t("Connection")}
+                  </span>
+                  <strong className="mt-1 block capitalize">
+                    {transportStatus.state}
+                  </strong>
+                </div>
+                <div>
+                  <span className="block text-muted-foreground">
+                    {t("Signal level")}
+                  </span>
+                  <strong className="mt-1 block">
+                    {Math.round(level * 100)}%
+                  </strong>
+                </div>
+              </div>
+            </section>
           )}
-          <section className="rounded-xl border bg-background p-4">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <Activity className="size-4" /> {t("Room health")}
-              </h2>
-              <Badge variant="secondary">
-                {transportStatus.audioQuality === "good"
-                  ? t("Good")
-                  : t("Needs attention")}
-              </Badge>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {t("Connection status and signal level are measured separately.")}
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
-              <div>
-                <span className="block text-muted-foreground">
-                  {t("Connection")}
-                </span>
-                <strong className="mt-1 block capitalize">
-                  {transportStatus.state}
-                </strong>
-              </div>
-              <div>
-                <span className="block text-muted-foreground">
-                  {t("Signal level")}
-                </span>
-                <strong className="mt-1 block">
-                  {Math.round(level * 100)}%
-                </strong>
-              </div>
-            </div>
-          </section>
         </aside>
       </div>
       {topicsPanel ? (

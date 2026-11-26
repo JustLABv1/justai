@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useId, useState } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
+import { Micro } from "@/components/panelui/micro"
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Checkbox } from "@/components/panelui/checkbox"
@@ -205,13 +206,14 @@ export function LiveTranscriptionTopics({
         </h3>
         {topics.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              {t("{value0} of {value1} finished", {
-                value0: topics.filter((topic) => topic.status === "done")
-                  .length,
-                value1: topics.length,
-              })}
-            </span>
+            <Micro size="sm">
+              <Micro.Progress
+                label={t("Finished")}
+                max={topics.length}
+                value={topics.filter((topic) => topic.status === "done").length}
+                tone="info"
+              />
+            </Micro>
             <TopicSubscriptionButton sessionId={sessionId} />
             {topics.some((topic) => topic.startedOffsetMs !== undefined) ? (
               <TopicExportMenu

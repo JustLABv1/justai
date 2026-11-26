@@ -16,7 +16,9 @@ import {
 } from "@/components/panelui/dialog"
 import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
-import { api } from "@/lib/api"
+import { Share } from "@/components/panelui/share"
+import type { User } from "@/lib/types"
+import { api, resolveAPIURL } from "@/lib/api"
 
 type ViewLink = { token: string; createdAt: string }
 
@@ -28,17 +30,206 @@ function viewURL(token: string) {
  * A read-only link: colleagues follow the live transcript, speakers and agenda items
  * without an account, and cannot change anything.
  */
-export function ViewLinkButton({ sessionId }: { sessionId: string }) {
+type Reader = { id: string; name: string; email: string }
+
+export function ViewLinkButton({
+  sessionId,
+  owner,
+}: {
+  sessionId: string
+  owner: User
+}) {
   const { t } = useTranslations()
   const [open, setOpen] = useState(false)
+  const [manageLink, setManageLink] = useState(false)
+  const [readers, setReaders] = useState<Reader[]>([])
+  const [hasLink, setHasLink] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [recipients, setRecipients] = useState<string[]>([])
+  const base = `/api/v1/transcription/sessions/${sessionId}`
+  const privateURL =
+    typeof window === "undefined"
+      ? ""
+      : `${window.location.origin}/transcription/view?session=${sessionId}&org=${encodeURIComponent(api.getOrganizationId() ?? "")}`
+  useEffect(() => {
+    if (manageLink) return
+    let cancelled = false
+    setReady(false)
+    setError("")
+    Promise.all([
+      api.get<{ readers: Reader[] }>(base + "/readers"),
+      open
+        ? api.get<{ link: ViewLink | null }>(base + "/view-link")
+        : Promise.resolve({ link: null }),
+    ])
+      .then(([people, access]) => {
+        if (cancelled) return
+        setReaders(people.readers)
+        setHasLink(Boolean(access.link))
+        setReady(true)
+      })
+      .catch(() => {
+        if (!cancelled) setError(t("Could not load sharing settings."))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [base, open, manageLink, t])
+
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm" variant="outline">
-        <Eye data-icon="inline-start" /> {t("Read-only link")}
-      </Button>
-      {open ? (
-        <ViewLinkDialog onClose={() => setOpen(false)} sessionId={sessionId} />
-      ) : null}
+      <Share
+        open={open}
+        onOpenChange={setOpen}
+        link={privateURL}
+        onInvite={async ({ emails }) => {
+          setBusy(true)
+          setError("")
+          try {
+            const result = await api.post<{ readers: Reader[] }>(
+              base + "/readers",
+              { emails }
+            )
+            setReaders(result.readers)
+            setRecipients(emails)
+          } catch (err) {
+            setError(
+              t(
+                "Could not grant access. Check that all addresses belong to active workspace members."
+              )
+            )
+            throw err
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <Share.Trigger
+          aria-label={t("Share transcript")}
+          people={[
+            {
+              name: owner.displayName || owner.email,
+              src: owner.avatarUrl ? resolveAPIURL(owner.avatarUrl) : undefined,
+            },
+            ...readers.map((reader) => ({ name: reader.name || reader.email })),
+          ]}
+        >
+          {t("Share")}
+        </Share.Trigger>
+        <Share.Content title={t("Share transcript")}>
+          {ready ? (
+            <>
+              <Share.Invite
+                roles={[]}
+                placeholder={t("Workspace member email")}
+              />
+              <Share.People label={t("People with access")}>
+                <Share.Person
+                  name={owner.displayName || owner.email}
+                  src={
+                    owner.avatarUrl ? resolveAPIURL(owner.avatarUrl) : undefined
+                  }
+                  description={owner.email}
+                  role={t("Owner")}
+                />
+                {readers.map((reader) => (
+                  <Share.Person
+                    key={reader.id}
+                    name={reader.name}
+                    role={t("Can view")}
+                    description={
+                      <>
+                        {reader.email}{" "}
+                        <button
+                          type="button"
+                          className="underline"
+                          disabled={busy}
+                          aria-label={t("Remove access for {value0}", {
+                            value0: reader.email,
+                          })}
+                          onClick={async () => {
+                            setBusy(true)
+                            try {
+                              const result = await api.delete<{
+                                readers: Reader[]
+                              }>(base + "/readers/" + reader.id)
+                              setReaders(result.readers)
+                              setRecipients((prev) =>
+                                prev.filter(
+                                  (email) =>
+                                    email.toLowerCase() !==
+                                    reader.email.toLowerCase()
+                                )
+                              )
+                            } catch {
+                              setError(t("Could not remove access."))
+                            } finally {
+                              setBusy(false)
+                            }
+                          }}
+                        >
+                          {t("Remove")}
+                        </button>
+                      </>
+                    }
+                  />
+                ))}
+              </Share.People>
+              <div className="px-4 py-2 text-xs text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => setManageLink(true)}
+                  className="underline"
+                >
+                  {t("Read-only link")}
+                </button>
+                {" · "}
+                {hasLink ? t("Anyone with the link can read") : t("Off")}
+              </div>
+              {recipients.length > 0 && (
+                <a
+                  className="mx-4 text-sm underline"
+                  href={`mailto:?bcc=${encodeURIComponent(recipients.join(","))}&subject=${encodeURIComponent(t("Share transcript"))}&body=${encodeURIComponent(privateURL)}`}
+                >
+                  {t("Open invitation email")}
+                </a>
+              )}
+            </>
+          ) : (
+            !error && <Spinner />
+          )}
+          {error && (
+            <p className="px-4 py-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+          {ready && (
+            <Share.Footer className="flex-wrap gap-2 *:min-w-32 *:whitespace-nowrap">
+              <Share.CopyLink
+                title={t("Copy member link")}
+                copiedLabel={t("Copied")}
+              >
+                {t("Copy link")}
+              </Share.CopyLink>
+              <Share.Send
+                {...(busy ? { disabled: true } : {})}
+                pendingLabel={t("Saving…")}
+                successLabel={t("Access granted")}
+              >
+                {t("Grant access")}
+              </Share.Send>
+            </Share.Footer>
+          )}
+        </Share.Content>
+      </Share>
+      {manageLink && (
+        <ViewLinkDialog
+          sessionId={sessionId}
+          onClose={() => setManageLink(false)}
+        />
+      )}
     </>
   )
 }
