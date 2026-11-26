@@ -5336,6 +5336,80 @@ export const de = {
   "Tell me about runs of this workflow. Agents can also notify you themselves when their instructions ask for it, for example “tell me only if a new bill on digital policy appears”.":
     "Benachrichtige mich über Läufe dieses Workflows. Agents können dich auch selbst benachrichtigen, wenn ihre Anweisung das verlangt, zum Beispiel „melde dich nur, wenn ein neuer Gesetzentwurf zur Digitalpolitik auftaucht“.",
   "Send notification": "Benachrichtigung senden",
+  "Explore JustAI": "Entdecken",
+  "Skip tour": "Tour überspringen",
+  "Continue: {value0}": "Weiter: {value0}",
+  "What JustAI can do": "Was JustAI kann",
+  "Here’s what JustAI can do": "Das kann JustAI für dich tun",
+  "JustAI and what it brings together": "JustAI und was es zusammenbringt",
+  "For example": "Zum Beispiel",
+  "“{value0}”": "„{value0}“",
+  "Where would you like to start?": "Womit möchtest du anfangen?",
+  "Ask your first question": "Stell deine erste Frage",
+  "Open a chat and try one of the examples.":
+    "Öffne einen Chat und probier eines der Beispiele aus.",
+  "Start a live transcription": "Starte eine Live-Transkription",
+  "A meeting, a call or a livestream.":
+    "Ein Meeting, ein Anruf oder ein Livestream.",
+  "Build your first agent": "Richte deinen ersten Agent ein",
+  "Let recurring work run by itself.":
+    "Lass wiederkehrende Arbeit von allein laufen.",
+  "Choose how you are notified": "Leg fest, wie du benachrichtigt wirst",
+  "Browser, e-mail or your team chat.": "Browser, E-Mail oder euer Team-Chat.",
+  "Chat with AI": "Chat mit KI",
+  "Ask, write, analyse": "Fragen, schreiben, auswerten",
+  "Ask questions, draft texts and work through documents. JustAI searches the web, reads attachments, creates images, PDFs and files, and runs code for calculations and charts.":
+    "Stell Fragen, entwirf Texte und arbeite Dokumente durch. JustAI sucht im Web, liest Anhänge, erstellt Bilder, PDFs und Dateien und führt Code für Berechnungen und Diagramme aus.",
+  "Summarise this PDF in five points":
+    "Fass dieses PDF in fünf Punkten zusammen",
+  "Search the web for the latest news on the topic":
+    "Such im Web nach den neuesten Nachrichten zum Thema",
+  "Turn this table into a chart": "Mach aus dieser Tabelle ein Diagramm",
+  "Meetings and livestreams": "Meetings und Livestreams",
+  "Transcribe meetings, calls and livestreams as they happen, with speakers. For Bundestag debates JustAI follows the agenda, records only the topics you pick and gives each one its own transcript.":
+    "Transkribiere Meetings, Anrufe und Livestreams in Echtzeit, mit Sprechern. Bei Bundestagsdebatten folgt JustAI der Tagesordnung, nimmt nur deine Themen auf und gibt jedem ein eigenes Transkript.",
+  "Record only the topics on digital policy":
+    "Nimm nur die Themen zur Digitalpolitik auf",
+  "Share the transcript with my team while it runs":
+    "Teile das Transkript schon während der Aufnahme mit meinem Team",
+  "Summarise each agenda item when it ends":
+    "Fass jeden Tagesordnungspunkt zusammen, sobald er endet",
+  "Upload and evaluate": "Hochladen und auswerten",
+  "Upload a recording and get a transcript with speakers, chapters and a summary. Correct names, then export it as a document.":
+    "Lade eine Aufnahme hoch und bekomme ein Transkript mit Sprechern, Kapiteln und Zusammenfassung. Korrigiere Namen und exportiere es als Dokument.",
+  "Name the speakers in this interview":
+    "Benenne die Sprecher in diesem Interview",
+  "Write minutes of this meeting recording":
+    "Schreib ein Protokoll zu dieser Meeting-Aufnahme",
+  "Export the transcript as a Word file":
+    "Exportiere das Transkript als Word-Datei",
+  "Agents and workflows": "Agents und Workflows",
+  "Work that runs by itself": "Arbeit, die von allein läuft",
+  "Build agents for recurring work and chain them into workflows that run on a schedule. Actions with consequences wait for your approval.":
+    "Richte Agents für wiederkehrende Arbeit ein und verbinde sie zu Workflows, die nach Zeitplan laufen. Folgenreiche Aktionen warten auf deine Freigabe.",
+  "Every morning, check new documents and brief me":
+    "Prüf jeden Morgen neue Dokumente und brief mich",
+  "Research, then let a second agent write the report":
+    "Recherchiere, dann schreibt ein zweiter Agent den Bericht",
+  "Ask me before anything is sent": "Frag mich, bevor etwas verschickt wird",
+  "Storage and knowledge": "Speicher und Wissen",
+  "Your files, searchable": "Deine Dateien, durchsuchbar",
+  "Keep files and notes in your storage and in shared knowledge spaces. JustAI finds the right passages and cites them in its answers.":
+    "Bewahre Dateien und Notizen in deinem Speicher und in geteilten Wissensräumen auf. JustAI findet die passenden Stellen und zitiert sie in seinen Antworten.",
+  "Answer from our handbook only": "Antworte nur aus unserem Handbuch",
+  "Which contract mentions the notice period?":
+    "In welchem Vertrag steht die Kündigungsfrist?",
+  "Compare these two drafts": "Vergleich diese beiden Entwürfe",
+  "Notifications and reminders": "Benachrichtigungen und Erinnerungen",
+  "Stay informed": "Auf dem Laufenden bleiben",
+  "Hear when a transcript or topic is finished, a run needs you or something goes wrong: in the app, as browser push, by e-mail or in Slack, Teams, Mattermost and Discord. Or just ask JustAI to remind you.":
+    "Erfahre, wenn ein Transkript oder Thema fertig ist, ein Lauf dich braucht oder etwas schiefgeht: in der App, als Browser-Push, per E-Mail oder in Slack, Teams, Mattermost und Discord. Oder bitte JustAI einfach, dich zu erinnern.",
+  "Remind me in 20 minutes to call back":
+    "Erinnere mich in 20 Minuten an den Rückruf",
+  "Tell me tomorrow at 9 about the deadline":
+    "Sag mir morgen um 9 wegen der Frist Bescheid",
+  "Notify me when the debate on the budget is over":
+    "Sag mir Bescheid, wenn die Haushaltsdebatte vorbei ist",
   "Topic change detected": "Themenwechsel erkannt",
   "“{value0}” probably began at {value1}.":
     "„{value0}“ hat vermutlich bei {value1} begonnen.",

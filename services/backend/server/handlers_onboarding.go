@@ -44,7 +44,7 @@ func (a *App) getOnboarding(c *gin.Context) {
 
 func validOnboardingStep(step string, installation bool) bool {
 	switch step {
-	case "welcome", "workspace", "ready":
+	case "welcome", "tour", "workspace", "ready":
 		return true
 	case "authentication", "endpoints":
 		return installation

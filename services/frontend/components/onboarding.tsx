@@ -40,6 +40,9 @@ import {
 import { Field, FieldLabel, FieldDescription } from "@/components/panelui/field"
 import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
+import { motion, useReducedMotion } from "motion/react"
+import { FeatureSketch, WelcomeSketch } from "@/components/onboarding-sketches"
+import { OnboardingTour, tourFeatures } from "@/components/onboarding-tour"
 
 type OnboardingState = {
   installation: boolean
@@ -48,6 +51,7 @@ type OnboardingState = {
 }
 const installationStepsMessages = [
   { id: "welcome", title: "Welcome" },
+  { id: "tour", title: "Explore JustAI" },
   { id: "workspace", title: "Workspace" },
   { id: "authentication", title: "Sign-in" },
   { id: "endpoints", title: "AI models" },
@@ -55,6 +59,7 @@ const installationStepsMessages = [
 ]
 const userStepsMessages = [
   { id: "welcome", title: "Welcome" },
+  { id: "tour", title: "Explore JustAI" },
   { id: "workspace", title: "Your workspace" },
   { id: "ready", title: "Get started" },
 ]
@@ -66,6 +71,7 @@ export function Onboarding() {
   const { t } = useTranslations()
 
   const router = useRouter()
+  const reduceMotion = useReducedMotion()
   const [state, setState] = useState<OnboardingState | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const [organization, setOrganization] = useState<Organization | null>(null)
@@ -74,6 +80,9 @@ export function Onboarding() {
   const [providers, setProviders] = useState<AdminOIDCProvider[]>([])
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  // The capability the tour shows; Next and Back walk through them before leaving it.
+  const [tourIndex, setTourIndex] = useState(0)
+  const lastTour = tourFeatures.length - 1
   const [reload, setReload] = useState(0)
   const headingRef = useRef<HTMLHeadingElement>(null)
 
@@ -154,12 +163,13 @@ export function Onboarding() {
     steps.findIndex((step) => step.id === state?.step)
   )
   const current = steps[index]
+  const inTour = current?.id === "tour"
   const hasChat = endpoints.some(
     (endpoint) =>
       endpoint.enabled && endpoint.capabilities.chat && endpoint.chatModel
   )
 
-  async function navigate(next: number, complete = false) {
+  async function navigate(next: number, complete = false, destination = "/") {
     if (!state || busy) return
     setBusy(true)
     setError("")
@@ -195,9 +205,11 @@ export function Onboarding() {
       const step = steps[next].id
       await api.put("/api/v1/onboarding", { step, complete })
       if (complete) {
-        router.replace("/")
+        router.replace(destination)
         return
       }
+      // Coming back to the tour from a later step resumes at its end.
+      if (step === "tour") setTourIndex(next < index ? lastTour : 0)
       setState({ ...state, step })
       requestAnimationFrame(() => headingRef.current?.focus())
     } catch (caught) {
@@ -282,15 +294,17 @@ export function Onboarding() {
                     {t(
                       step.id === "welcome"
                         ? "What we’ll set up"
-                        : step.id === "workspace"
-                          ? state.installation
-                            ? "Name and identity"
-                            : "Your profile and access"
-                          : step.id === "authentication"
-                            ? "OIDC · optional"
-                            : step.id === "endpoints"
-                              ? "Provider and model"
-                              : "Check and launch"
+                        : step.id === "tour"
+                          ? "What JustAI can do"
+                          : step.id === "workspace"
+                            ? state.installation
+                              ? "Name and identity"
+                              : "Your profile and access"
+                            : step.id === "authentication"
+                              ? "OIDC · optional"
+                              : step.id === "endpoints"
+                                ? "Provider and model"
+                                : "Check and launch"
                     )}
                   </Steps.Description>
                 </Steps.Trigger>
@@ -324,19 +338,26 @@ export function Onboarding() {
                   ? state.installation
                     ? t("Your workspace starts here.")
                     : t("Welcome, {value0}.", { value0: user.displayName })
-                  : current.id === "workspace"
-                    ? state.installation
-                      ? t("Make this workspace yours")
-                      : t("A space for your work")
-                    : current.id === "authentication"
-                      ? t("Choose how your team signs in")
-                      : current.id === "endpoints"
-                        ? t("Connect your first AI model")
-                        : t("Ready for your first conversation")}
+                  : current.id === "tour"
+                    ? t("Here’s what JustAI can do")
+                    : current.id === "workspace"
+                      ? state.installation
+                        ? t("Make this workspace yours")
+                        : t("A space for your work")
+                      : current.id === "authentication"
+                        ? t("Choose how your team signs in")
+                        : current.id === "endpoints"
+                          ? t("Connect your first AI model")
+                          : t("Ready for your first conversation")}
               </h1>
             </div>
-            <SetupStep current={index} step={0}>
+            <SetupStep current={current.id} step="welcome">
               <div className="flex flex-col gap-6">
+                <div className="mx-auto w-full max-w-md text-foreground">
+                  <WelcomeSketch
+                    label={t("JustAI and what it brings together")}
+                  />
+                </div>
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   {state.installation
                     ? t(
@@ -405,7 +426,13 @@ export function Onboarding() {
                 )}
               </div>
             </SetupStep>
-            <SetupStep current={index} step={1}>
+            <SetupStep current={current.id} step="tour">
+              <OnboardingTour
+                active={tourIndex}
+                onActiveChange={setTourIndex}
+              />
+            </SetupStep>
+            <SetupStep current={current.id} step="workspace">
               <Card>
                 <CardHeader>
                   <CardTitle>
@@ -464,7 +491,7 @@ export function Onboarding() {
               </Card>
             </SetupStep>
             {state.installation && (
-              <SetupStep current={index} step={2}>
+              <SetupStep current={current.id} step="authentication">
                 <div className="flex flex-col gap-4">
                   <p className="text-sm text-muted-foreground">
                     {t(
@@ -481,7 +508,7 @@ export function Onboarding() {
               </SetupStep>
             )}
             {state.installation && (
-              <SetupStep current={index} step={3}>
+              <SetupStep current={current.id} step="endpoints">
                 <div className="flex flex-col gap-4">
                   <p className="text-sm text-muted-foreground">
                     {t(
@@ -505,7 +532,7 @@ export function Onboarding() {
                 </div>
               </SetupStep>
             )}
-            <SetupStep current={index} step={steps.length - 1}>
+            <SetupStep current={current.id} step="ready">
               <div className="flex flex-col gap-4">
                 <Card>
                   <CardHeader>
@@ -568,6 +595,41 @@ export function Onboarding() {
                     </Alert.Description>
                   </Alert>
                 )}
+                <div className="flex flex-col gap-2">
+                  <h2 className="text-sm font-medium">
+                    {t("Where would you like to start?")}
+                  </h2>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {starters.map((starter, position) => (
+                      <motion.button
+                        animate={{ opacity: 1, y: 0 }}
+                        className="group flex items-center gap-3 rounded-2xl bg-muted p-3 text-left transition-colors outline-none [--iso-face:var(--muted)] hover:bg-accent hover:[--iso-face:var(--accent)] focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                        disabled={busy}
+                        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                        key={starter.id}
+                        onClick={() => void navigate(index, true, starter.href)}
+                        transition={{ delay: 0.1 + position * 0.07 }}
+                        type="button"
+                      >
+                        <span className="w-24 shrink-0 text-foreground transition-transform duration-300 group-hover:-translate-y-0.5">
+                          <FeatureSketch label="" name={starter.id} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium">
+                            {t(starter.title)}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {t(starter.text)}
+                          </span>
+                        </span>
+                        <ArrowRight
+                          aria-hidden="true"
+                          className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                        />
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
                 <p className="text-sm text-muted-foreground">
                   {state.installation
                     ? t(
@@ -586,31 +648,53 @@ export function Onboarding() {
               disabled={busy || index === 0}
               className={index === 0 ? "invisible" : undefined}
               variant="ghost"
-              onClick={() => void navigate(index - 1)}
+              onClick={() => {
+                if (inTour && tourIndex > 0) setTourIndex(tourIndex - 1)
+                else void navigate(index - 1)
+              }}
             >
               <ArrowLeft /> {t("Back")}
             </Button>
-            <Button
-              disabled={busy}
-              loading={busy}
-              onClick={() =>
-                void navigate(
-                  Math.min(index + 1, steps.length - 1),
-                  index === steps.length - 1
-                )
-              }
-            >
-              {index === steps.length - 1
-                ? hasChat
-                  ? t("Open JustAI")
-                  : state.installation
-                    ? t("Finish without AI")
-                    : t("Open workspace")
-                : index === 0
-                  ? t("Let’s get started")
-                  : t("Continue")}
-              <ArrowRight />
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {inTour && tourIndex < lastTour ? (
+                <Button
+                  disabled={busy}
+                  onClick={() => void navigate(index + 1)}
+                  variant="ghost"
+                >
+                  {t("Skip tour")}
+                </Button>
+              ) : null}
+              <Button
+                disabled={busy}
+                loading={busy}
+                onClick={() => {
+                  if (inTour && tourIndex < lastTour) {
+                    setTourIndex(tourIndex + 1)
+                    return
+                  }
+                  void navigate(
+                    Math.min(index + 1, steps.length - 1),
+                    index === steps.length - 1
+                  )
+                }}
+              >
+                {index === steps.length - 1
+                  ? hasChat
+                    ? t("Open JustAI")
+                    : state.installation
+                      ? t("Finish without AI")
+                      : t("Open workspace")
+                  : index === 0
+                    ? t("Let’s get started")
+                    : inTour && tourIndex < lastTour
+                      ? t("Continue: {value0}", {
+                          value0: t(tourFeatures[tourIndex + 1].title),
+                        })
+                      : t("Continue")}
+                <ArrowRight />
+              </Button>
+            </div>
           </footer>
         </section>
       </div>
@@ -618,14 +702,53 @@ export function Onboarding() {
   )
 }
 
+/** One step's content; it slides in when the step opens. */
 function SetupStep({
   current,
   step,
   children,
 }: {
-  current: number
-  step: number
+  current: string
+  step: string
   children: ReactNode
 }) {
-  return current === step ? <div>{children}</div> : null
+  const reduce = useReducedMotion()
+  if (current !== step) return null
+  return (
+    <motion.div
+      animate={{ opacity: 1, x: 0 }}
+      initial={reduce ? { opacity: 0 } : { opacity: 0, x: 16 }}
+      key={step}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  )
 }
+
+const starters = [
+  {
+    id: "chat" as const,
+    title: "Ask your first question",
+    text: "Open a chat and try one of the examples.",
+    href: "/",
+  },
+  {
+    id: "live" as const,
+    title: "Start a live transcription",
+    text: "A meeting, a call or a livestream.",
+    href: "/live-transcription?create=1",
+  },
+  {
+    id: "agents" as const,
+    title: "Build your first agent",
+    text: "Let recurring work run by itself.",
+    href: "/agents",
+  },
+  {
+    id: "notifications" as const,
+    title: "Choose how you are notified",
+    text: "Browser, e-mail or your team chat.",
+    href: "/profile?tab=notifications",
+  },
+]
