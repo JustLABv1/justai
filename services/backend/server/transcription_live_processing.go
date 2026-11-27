@@ -209,68 +209,9 @@ func (m *TranscriptionManager) diarizeLiveRecordings(ctx context.Context, id uui
 			if err = finalizeLiveWAV(output, stat.Size()); err != nil {
 				return err
 			}
-			var turns []provider.DiarizationSegment
-			if endpoint.ProviderType == "pyannote" {
-				storage, err := newS3Storage(m.Config)
-				if err != nil {
-					return fmt.Errorf("whole-recording speaker separation requires configured S3 processing storage: %w", err)
-				}
-				prefix := "transcription-processing/" + id.String() + "/"
-				if err = storage.deletePrefix(ctx, prefix); err != nil {
-					return err
-				}
-				key := prefix + uuid.NewString() + ".wav"
-				if _, err = output.Seek(0, 0); err != nil {
-					return err
-				}
-				hash := sha256.New()
-				if _, err = io.Copy(hash, output); err != nil {
-					return err
-				}
-				output.Seek(0, 0)
-				response, err := storage.requestReader(ctx, http.MethodPut, key, nil, output, stat.Size(), "audio/wav", fmt.Sprintf("%x", hash.Sum(nil)))
-				if err != nil {
-					return err
-				}
-				err = readS3Response(response)
-				response.Body.Close()
-				if err != nil {
-					return err
-				}
-				defer func() {
-					cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-					defer cancel()
-					_ = storage.delete(cleanup, key)
-				}()
-				turns, err = provider.DiarizeMediaURL(ctx, endpoint, storage.presignProcessingURL(http.MethodGet, key, nil, videoProcessingURLLifetime), language)
-				if err != nil {
-					return err
-				}
-			} else {
-				output.Seek(44, 0)
-				buffer := make([]byte, 60*16000*2)
-				offset := float64(0)
-				for {
-					n, readErr := io.ReadFull(output, buffer)
-					if n > 0 {
-						part, err := provider.Diarize(ctx, endpoint, buffer[:n], language)
-						if err != nil {
-							return err
-						}
-						for _, turn := range part {
-							turn.Start += offset
-							turn.End += offset
-							turns = append(turns, turn)
-						}
-						offset += float64(n) / 32000
-					}
-					if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
-						break
-					}
-					if readErr != nil {
-						return readErr
-					}
-				}
+			turns, err := m.diarizeWAVFile(ctx, id, endpoint, output, stat.Size(), language)
+			if err != nil {
+				return err
 			}
 			// Prefix source-local labels so simultaneous sources do not get merged.
 			for i := range turns {
@@ -301,6 +242,75 @@ func (m *TranscriptionManager) diarizeLiveRecordings(ctx context.Context, id uui
 		return fmt.Errorf("audio recording contains no samples")
 	}
 	return nil
+}
+
+// diarizeWAVFile separates the speakers of a finalized 16 kHz mono WAV file. Turns are
+// in seconds from the start of the file. id names the S3 processing prefix.
+func (m *TranscriptionManager) diarizeWAVFile(ctx context.Context, id uuid.UUID, endpoint provider.Endpoint, output *os.File, size int64, language string) ([]provider.DiarizationSegment, error) {
+	var turns []provider.DiarizationSegment
+	if endpoint.ProviderType == "pyannote" {
+		storage, err := newS3Storage(m.Config)
+		if err != nil {
+			return nil, fmt.Errorf("whole-recording speaker separation requires configured S3 processing storage: %w", err)
+		}
+		prefix := "transcription-processing/" + id.String() + "/"
+		if err = storage.deletePrefix(ctx, prefix); err != nil {
+			return nil, err
+		}
+		key := prefix + uuid.NewString() + ".wav"
+		if _, err = output.Seek(0, 0); err != nil {
+			return nil, err
+		}
+		hash := sha256.New()
+		if _, err = io.Copy(hash, output); err != nil {
+			return nil, err
+		}
+		output.Seek(0, 0)
+		response, err := storage.requestReader(ctx, http.MethodPut, key, nil, output, size, "audio/wav", fmt.Sprintf("%x", hash.Sum(nil)))
+		if err != nil {
+			return nil, err
+		}
+		err = readS3Response(response)
+		response.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_ = storage.delete(cleanup, key)
+		}()
+		turns, err = provider.DiarizeMediaURL(ctx, endpoint, storage.presignProcessingURL(http.MethodGet, key, nil, videoProcessingURLLifetime), language)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		output.Seek(44, 0)
+		buffer := make([]byte, 60*16000*2)
+		offset := float64(0)
+		for {
+			n, readErr := io.ReadFull(output, buffer)
+			if n > 0 {
+				part, err := provider.Diarize(ctx, endpoint, buffer[:n], language)
+				if err != nil {
+					return nil, err
+				}
+				for _, turn := range part {
+					turn.Start += offset
+					turn.End += offset
+					turns = append(turns, turn)
+				}
+				offset += float64(n) / 32000
+			}
+			if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+				break
+			}
+			if readErr != nil {
+				return nil, readErr
+			}
+		}
+	}
+	return turns, nil
 }
 
 var (
