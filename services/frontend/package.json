@@ -65,7 +65,7 @@
     "@tailwindcss/postcss": "^4.3.5",
     "@types/katex": "^0.16.8",
     "@types/node": "^26.6.10",
-    "@types/react": "^19.3.2",
+    "@types/react": "^19.3.3",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
