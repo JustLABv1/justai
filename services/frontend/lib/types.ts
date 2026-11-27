@@ -882,6 +882,9 @@ export type TranscriptionSource = {
   protocol?: string
   platform?: string
   transportStatus?: string
+  /** A bot that joined the meeting automatically: starting, connecting, joining, in_call, ended or failed. */
+  botJoinStatus?: string
+  botJoinError?: string
   reconnectCount?: number
   lastError?: string
   status: "pending" | "connected" | "paused" | "disconnected" | "stopped"

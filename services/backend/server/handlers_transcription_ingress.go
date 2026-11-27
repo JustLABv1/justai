@@ -51,6 +51,11 @@ type transcriptionBotSourceRequest struct {
 	Name       string `json:"name"`
 	Platform   string `json:"platform"`
 	MeetingURL string `json:"meetingUrl"`
+	// Join asks the meeting-bot service to join the meeting now. MeetingID and
+	// Passcode are passed to the bot for the join form and are not stored.
+	Join      bool   `json:"join"`
+	MeetingID string `json:"meetingId"`
+	Passcode  string `json:"passcode"`
 }
 
 func (a *App) createTranscriptionStreamSource(c *gin.Context) {
@@ -292,7 +297,7 @@ func (a *App) createTranscriptionBotSource(c *gin.Context) {
 	}
 	platform := normalizeBotPlatform(request.Platform)
 	if platform == "" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("platform must be generic, zoom, google-meet, or microsoft-teams"))
+		writeError(c, http.StatusBadRequest, fmt.Errorf("platform must be generic, zoom, google-meet, microsoft-teams, or cisco-meeting-server"))
 		return
 	}
 	meetingURL := strings.TrimSpace(request.MeetingURL)
@@ -303,6 +308,22 @@ func (a *App) createTranscriptionBotSource(c *gin.Context) {
 		}
 		if err := provider.ValidateRequestURL(meetingURL, false); err != nil {
 			writeError(c, http.StatusBadRequest, fmt.Errorf("meeting URL is invalid: %w", err))
+			return
+		}
+	}
+	if request.Join {
+		switch {
+		case !a.meetingBotEnabled():
+			writeError(c, http.StatusBadRequest, fmt.Errorf("automatic joining is not configured on this server"))
+			return
+		case !meetingBotPlatforms[platform]:
+			writeError(c, http.StatusBadRequest, fmt.Errorf("the bot can join Cisco Meeting Server and other browser meetings only"))
+			return
+		case !strings.HasPrefix(strings.ToLower(meetingURL), "https://"):
+			writeError(c, http.StatusBadRequest, fmt.Errorf("an https meeting link is required for the bot to join"))
+			return
+		case len(request.MeetingID) > 256 || len(request.Passcode) > 256:
+			writeError(c, http.StatusBadRequest, fmt.Errorf("meeting ID and passcode must be 256 characters or fewer"))
 			return
 		}
 	}
@@ -345,7 +366,11 @@ func (a *App) createTranscriptionBotSource(c *gin.Context) {
 	bot := models.TranscriptionBotSource{SourceID: source.ID, Platform: platform, Status: "pending"}
 	source.Platform = bot.Platform
 	source.TransportStatus = bot.Status
-	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_bot_sources (source_id, platform, meeting_url_ciphertext, ingest_token_hash) VALUES ($1, $2, $3, $4)`, source.ID, platform, encryptedMeetingURL, tokenHash); err != nil {
+	joinStatus := ""
+	if request.Join {
+		joinStatus = "starting"
+	}
+	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_bot_sources (source_id, platform, meeting_url_ciphertext, ingest_token_hash, join_status) VALUES ($1, $2, $3, $4, $5)`, source.ID, platform, encryptedMeetingURL, tokenHash, joinStatus); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -354,9 +379,28 @@ func (a *App) createTranscriptionBotSource(c *gin.Context) {
 		return
 	}
 	a.activateTranscriptionIngressSession(sessionID)
+	var botJoin gin.H
+	if request.Join {
+		launchCtx, cancel := context.WithTimeout(c, meetingBotRequestTimeout)
+		launched, err := a.launchMeetingBot(launchCtx, source.ID, botToken, platform, meetingURL, strings.TrimSpace(request.MeetingID), strings.TrimSpace(request.Passcode))
+		cancel()
+		if err != nil {
+			slog.Warn("meeting bot launch failed", "sourceId", source.ID, "error", err)
+			a.setMeetingBotStatus(sessionID, source.ID, "failed", err.Error())
+			source.BotJoinStatus, source.BotJoinError = "failed", err.Error()
+		} else {
+			if launched.Status != joinStatus {
+				a.setMeetingBotStatus(sessionID, source.ID, launched.Status, "")
+			}
+			source.BotJoinStatus = launched.Status
+			go a.watchMeetingBot(sessionID, source.ID, launched.Status)
+		}
+		botJoin = gin.H{"status": source.BotJoinStatus, "error": source.BotJoinError}
+	}
 	c.JSON(http.StatusCreated, gin.H{
 		"source":     source,
 		"bot":        bot,
+		"botJoin":    botJoin,
 		"token":      botToken,
 		"meetingUrl": meetingURL,
 		"protocol":   transcriptionBotProtocol,
@@ -413,6 +457,7 @@ func (a *App) stopTranscriptionBotSource(c *gin.Context) {
 	}
 	a.Live.stopStreamSource(sourceID)
 	a.Live.closeSource(sessionID, sourceID)
+	a.stopMeetingBot(c, sourceID)
 	_, _ = a.DB.ExecContext(c, `UPDATE transcription_bot_sources SET status = 'stopped', updated_at = now() WHERE source_id = $1`, sourceID)
 	a.Live.markSource(sessionID, sourceID, "stopped")
 	a.Live.broadcast(sessionID, "transcription.bot", ginData{"sourceId": sourceID, "status": "stopped"})
@@ -526,6 +571,8 @@ func normalizeBotPlatform(value string) string {
 		return "google-meet"
 	case "microsoft-teams", "microsoft teams", "teams":
 		return "microsoft-teams"
+	case "cisco-meeting-server", "cisco meeting server", "cisco", "cms":
+		return "cisco-meeting-server"
 	default:
 		return ""
 	}
@@ -539,6 +586,8 @@ func botPlatformName(platform string) string {
 		return "Google Meet"
 	case "microsoft-teams":
 		return "Microsoft Teams"
+	case "cisco-meeting-server":
+		return "Cisco Meeting Server"
 	default:
 		return "Meeting"
 	}

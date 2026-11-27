@@ -292,6 +292,7 @@ func (a *App) Router() *gin.Engine {
 	org.PUT("/transcription/sessions/:id/processing", a.platformFeature("transcription"), a.configureLiveProcessing)
 	org.POST("/transcription/sessions/:id/processing", a.platformFeature("transcription"), a.controlLiveProcessing)
 	org.GET("/transcription/stream-relay/sources", a.platformFeature("transcription"), a.listStreamRelaySources)
+	org.GET("/transcription/meeting-bot", a.platformFeature("transcription"), a.meetingBotAvailability)
 	org.POST("/transcription/stream-sources/resolve", a.platformFeature("transcription"), a.resolveTranscriptionStream)
 	org.POST("/transcription/sessions/:id/stream-sources", a.platformFeature("transcription"), a.createTranscriptionStreamSource)
 	org.POST("/transcription/sessions/:id/bot-sources", a.platformFeature("transcription"), a.createTranscriptionBotSource)

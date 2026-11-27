@@ -34,5 +34,12 @@ enforces at most the "baseline" Pod Security standard and a CNI that enforces
 NetworkPolicy; see the "Optional code runner" section of the chart README.
 {{- end }}
 
+{{- if .Values.meetingBot.enabled }}
+
+The meeting bot joins browser meetings for meeting-bot sources with "join
+automatically". It needs outbound internet access (HTTPS and UDP) to the meeting
+servers; see the "Optional meeting bot" section of the chart README.
+{{- end }}
+
 Check rollout status with:
   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}

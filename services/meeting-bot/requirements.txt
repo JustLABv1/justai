@@ -1,0 +1,2 @@
+aiohttp>=3.14.5,<4
+playwright==1.65.2

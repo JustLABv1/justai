@@ -5606,4 +5606,21 @@ export const de = {
     "An dieser Stelle ist keine Rede einem Sprecher zugeordnet. Wähle einen Moment, in dem die Person spricht.",
   "this speaker already has a manually assigned name; rename them in the speaker list instead":
     "Dieser Sprecher hat bereits einen manuell vergebenen Namen. Ändere ihn stattdessen in der Sprecherliste.",
+  "The bot could not join the meeting: {value0}":
+    "Der Bot konnte der Besprechung nicht beitreten: {value0}",
+  "unknown error": "unbekannter Fehler",
+  "Join the meeting automatically": "Bot tritt der Besprechung automatisch bei",
+  "JustAI’s bot joins as a visible guest and transcribes what the other participants say. Use it only with the organizer’s consent.":
+    "Der JustAI-Bot tritt als sichtbarer Gast bei und transkribiert, was die anderen Teilnehmenden sagen. Nur mit Zustimmung der Organisation verwenden.",
+  "Meeting ID": "Meeting-ID",
+  Passcode: "Kenncode",
+  "Only passed to the bot for joining; not stored.":
+    "Wird nur zum Beitreten an den Bot übergeben und nicht gespeichert.",
+  "The bot opens this link to join the meeting.":
+    "Über diesen Link tritt der Bot der Besprechung bei.",
+  "Bot could not join": "Bot konnte nicht beitreten",
+  "Bot is joining": "Bot tritt bei",
+  "Joining the meeting": "Tritt der Besprechung bei",
+  "In the meeting": "In der Besprechung",
+  "Left the meeting": "Hat die Besprechung verlassen",
 } as const

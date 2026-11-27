@@ -511,6 +511,44 @@ capabilities dropped except `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`,
 Scale with `codeRunner.replicaCount`, `codeRunner.maxConcurrent` and the
 resource limits; a replica rejects work with "busy" when all slots are in use.
 
+## Optional meeting bot
+
+The meeting bot joins browser meetings (built for the Cisco Meeting Server web
+app) as a visible guest and forwards what the other participants say to a live
+transcription. With it enabled, a meeting-bot source created with **Join the meeting
+automatically** makes the bot join; stopping the source or the session makes it
+leave. It is disabled by default. Only use it in meetings whose organizer agrees.
+
+```sh
+kubectl create secret generic justai-meeting-bot \
+  --from-literal=meeting-bot-token="$(openssl rand -hex 32)"
+
+helm upgrade --install justai ./charts/justai \
+  --set meetingBot.enabled=true \
+  --set secrets.refs.meetingBotToken.name=justai-meeting-bot
+```
+
+The backend finds the service automatically (`JUSTAI_MEETING_BOT_URL` and the shared
+token are set in both deployment modes), and the bot reaches the backend over its
+cluster service. What the chart enforces:
+
+- **One replica, replaced on upgrade.** Running bots live in the service's memory,
+  so it never runs twice; an upgrade ends running bots (they leave and finalise the
+  transcript first). Capacity comes from `meetingBot.maxBots` and the resource
+  limits: each bot is a headless Chromium needing roughly 0.5-1 CPU and 500-800 MiB.
+- **No Kubernetes credentials, non-root, read-only root file system,** with a
+  size-limited `/tmp` for the browser profile.
+- **Network.** A `NetworkPolicy` lets only the JustAI backend connect. The bot may
+  reach DNS, the backend and the internet (meetings need HTTPS and WebRTC media over
+  UDP), but no private range (`meetingBot.networkPolicy.blockedCidrs`), so a meeting
+  link cannot be used to reach cluster or internal services. Allow an on-premise
+  meeting server or a proxy with `meetingBot.networkPolicy.extraEgress`. This needs a
+  CNI that enforces NetworkPolicy.
+
+`services/meeting-bot/README.md` describes how the bot joins, captures and leaves,
+and how to pin the join steps with a selectors file when a meeting's web app needs
+it.
+
 ## Chart configuration checks
 
 Run `helm lint charts/justai` and each test in `charts/justai/tests` from the

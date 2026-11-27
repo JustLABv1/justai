@@ -1146,6 +1146,8 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 	started := time.Now()
 	var latestCaptureOffset atomic.Int64
 	_ = a.Live.send(client, "transcription.ready", ginData{"sessionId": info.SessionID, "sourceId": info.SourceID, "provider": endpoint.ProviderType, "model": endpoint.TranscriptionModel, "mode": mode})
+	recorder := a.Live.newCaptureRecorder(ctx, info.SessionID, info.SourceID)
+	defer recorder.close()
 	providerDone := make(chan struct{})
 	voiceActive := false
 	forwardSilence := false
@@ -1252,6 +1254,10 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 			}
 		}
 		if sessionStatus == "paused" {
+			if recorder != nil {
+				frame := parseAudioFrame(payload)
+				recorder.silence(len(frame.PCM)/2*16000/max(1, frame.SampleRate)*2, frame.CaptureTimestamp)
+			}
 			continue
 		}
 		frame := parseAudioFrame(payload)
@@ -1260,6 +1266,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 			continue
 		}
 		pcm16 := provider.ResamplePCM16(pcm, frame.SampleRate, 16000)
+		recorder.write(pcm16, frame.CaptureTimestamp)
 		hasSpeech := provider.PCM16HasSpeech(pcm16)
 		if hasSpeech {
 			voiceActive = true
@@ -1948,7 +1955,8 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
 		       COALESCE(bot.platform, ''), stream.scheduled_start_at, stream.scheduled_end_at,
 		       COALESCE(stream.start_mode, ''), COALESCE(stream.silence_stop_seconds, 0), COALESCE(stream.plan_follow, FALSE), COALESCE(stream.plan_key, ''), COALESCE(stream.alert, ''), COALESCE(stream.capture_scope, ''),
-		       stream.interrupted_at, COALESCE(stream.outage_count, 0), COALESCE(stream.outage_seconds, 0), COALESCE(stream.end_reason, ''), COALESCE(stream.outage_history, '[]'::jsonb)
+		       stream.interrupted_at, COALESCE(stream.outage_count, 0), COALESCE(stream.outage_seconds, 0), COALESCE(stream.end_reason, ''), COALESCE(stream.outage_history, '[]'::jsonb),
+		       COALESCE(bot.join_status, ''), COALESCE(bot.join_error, '')
 		FROM transcription_sources source
 		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
 		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
@@ -1961,7 +1969,7 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 	result := make([]models.TranscriptionSource, 0)
 	for rows.Next() {
 		var item models.TranscriptionSource
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform, &item.ScheduledStartAt, &item.ScheduledEndAt, &item.StartMode, &item.SilenceStopSeconds, &item.PlanFollow, &item.PlanKey, &item.Alert, &item.CaptureScope, &item.InterruptedAt, &item.OutageCount, &item.OutageSeconds, &item.EndReason, &item.OutageHistory); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform, &item.ScheduledStartAt, &item.ScheduledEndAt, &item.StartMode, &item.SilenceStopSeconds, &item.PlanFollow, &item.PlanKey, &item.Alert, &item.CaptureScope, &item.InterruptedAt, &item.OutageCount, &item.OutageSeconds, &item.EndReason, &item.OutageHistory, &item.BotJoinStatus, &item.BotJoinError); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

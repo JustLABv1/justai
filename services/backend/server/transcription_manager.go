@@ -109,6 +109,9 @@ func (m *TranscriptionManager) Start(ctx context.Context) {
 	go m.streamSourceSchedulerLoop(ctx)
 	go m.liveProcessingLoop(ctx)
 	go m.topicBoundaryLoop(ctx)
+	if m.app != nil {
+		go m.app.resumeMeetingBotWatchers(ctx)
+	}
 	go m.notificationLoop(ctx)
 }
 
@@ -262,6 +265,10 @@ func (m *TranscriptionManager) broadcast(sessionID uuid.UUID, eventType string, 
 // audio into a provider after the UI has stopped it.
 func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
 	m.stopStreamSources(sessionID)
+	if m.app != nil && m.DB != nil {
+		// Bots that joined a meeting for this session leave it.
+		go m.app.stopMeetingBotsOfSession(sessionID)
+	}
 	if m.DB != nil {
 		// External sources have a durable worker state in addition to their
 		// stream/source state. Mark them terminal before the worker's

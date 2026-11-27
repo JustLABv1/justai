@@ -36,6 +36,7 @@ type Config struct {
 	BackupStagingPath string
 	Transcription     TranscriptionConfig
 	CodeRunner        CodeRunnerConfig
+	MeetingBot        MeetingBotConfig
 	StreamRelay       StreamRelayConfig
 	StreamRelays      []StreamRelayConfig
 	// PublicURL is where people open JustAI; links in e-mails and push messages point
@@ -69,6 +70,13 @@ type StreamRelayConfig struct {
 // CodeRunnerConfig points at the isolated code-runner service. The run_code
 // chat tool is only offered when URL is set.
 type CodeRunnerConfig struct {
+	URL   string
+	Token string
+}
+
+// MeetingBotConfig points at the meeting-bot service (services/meeting-bot). Bots
+// can only join meetings automatically when URL is set.
+type MeetingBotConfig struct {
 	URL   string
 	Token string
 }
@@ -127,6 +135,7 @@ type fileConfig struct {
 	BackupStagingPath   string                  `yaml:"backup_staging_path"`
 	Transcription       fileTranscriptionConfig `yaml:"transcription"`
 	CodeRunner          fileCodeRunnerConfig    `yaml:"code_runner"`
+	MeetingBot          fileMeetingBotConfig    `yaml:"meeting_bot"`
 	StreamRelay         fileStreamRelayConfig   `yaml:"stream_relay"`
 	StreamRelays        []fileStreamRelayConfig `yaml:"stream_relays"`
 	PublicURL           string                  `yaml:"public_url"`
@@ -150,6 +159,11 @@ type fileStreamRelayConfig struct {
 }
 
 type fileCodeRunnerConfig struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
+}
+
+type fileMeetingBotConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 }
@@ -246,6 +260,10 @@ func Load(configPath string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	meetingBot, err := meetingBotConfig(fileValues.MeetingBot)
+	if err != nil {
+		return Config{}, err
+	}
 	smtp, err := smtpConfig(fileValues.SMTP)
 	if err != nil {
 		return Config{}, err
@@ -286,6 +304,7 @@ func Load(configPath string) (Config, error) {
 		BackupStagingPath:   getenvOrFile("JUSTAI_BACKUP_STAGING_PATH", fileValues.BackupStagingPath, ""),
 		Transcription:       transcriptionConfig(fileValues.Transcription),
 		CodeRunner:          codeRunner,
+		MeetingBot:          meetingBot,
 		StreamRelay:         streamRelayConfig(fileValues.StreamRelay),
 		StreamRelays:        streamRelays,
 		PublicURL:           publicURL,
@@ -378,6 +397,24 @@ func codeRunnerConfig(values fileCodeRunnerConfig) (CodeRunnerConfig, error) {
 	}
 	if len(result.Token) < 16 {
 		return CodeRunnerConfig{}, fmt.Errorf("JUSTAI_CODE_RUNNER_TOKEN must be at least 16 characters when the code runner is enabled")
+	}
+	return result, nil
+}
+
+func meetingBotConfig(values fileMeetingBotConfig) (MeetingBotConfig, error) {
+	result := MeetingBotConfig{
+		URL:   strings.TrimRight(getenvOrFile("JUSTAI_MEETING_BOT_URL", values.URL, ""), "/"),
+		Token: getenvOrFile("JUSTAI_MEETING_BOT_TOKEN", values.Token, ""),
+	}
+	if result.URL == "" {
+		return MeetingBotConfig{}, nil
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return MeetingBotConfig{}, fmt.Errorf("JUSTAI_MEETING_BOT_URL must be an absolute http(s) URL")
+	}
+	if len(result.Token) < 16 {
+		return MeetingBotConfig{}, fmt.Errorf("JUSTAI_MEETING_BOT_TOKEN must be at least 16 characters when the meeting bot is enabled")
 	}
 	return result, nil
 }

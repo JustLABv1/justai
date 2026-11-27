@@ -197,6 +197,8 @@ const liveSessionSourceOptionsMessages: Array<{
 type BotSetup = {
   source: TranscriptionSource
   bot?: { platform?: string; status?: string }
+  /** Present when the meeting-bot service was asked to join the meeting. */
+  botJoin?: { status?: string; error?: string } | null
   token: string
   protocol: string
   ticketPath: string
@@ -486,6 +488,104 @@ export function LiveTranscriptionView({
   const [botName, setBotName] = useState(t("Meeting bot"))
   const [botPlatform, setBotPlatform] = useState("generic")
   const [botMeetingURL, setBotMeetingURL] = useState("")
+  const [botAutoJoin, setBotAutoJoin] = useState(true)
+  const [botMeetingId, setBotMeetingId] = useState("")
+  const [botPasscode, setBotPasscode] = useState("")
+  const [meetingBotAvailable, setMeetingBotAvailable] = useState(false)
+  useEffect(() => {
+    let active = true
+    api
+      .get<{ available?: boolean }>("/api/v1/transcription/meeting-bot")
+      .then((result) => {
+        if (active) setMeetingBotAvailable(Boolean(result.available))
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+  // The bot service joins browser meetings (Cisco Meeting Server and similar).
+  const botCanJoin =
+    meetingBotAvailable &&
+    (botPlatform === "cisco-meeting-server" || botPlatform === "generic")
+  const botJoins = botCanJoin && botAutoJoin
+  const botSourcePayload = () => ({
+    name: botName.trim() || t("Meeting bot"),
+    platform: botPlatform,
+    meetingUrl: botMeetingURL.trim() || undefined,
+    ...(botJoins
+      ? {
+          join: true,
+          meetingId: botMeetingId.trim() || undefined,
+          passcode: botPasscode || undefined,
+        }
+      : {}),
+  })
+  // A bot that joins needs no token handed to an adapter; a failed join is an error.
+  const afterBotSourceCreated = (setup: BotSetup) => {
+    setBotPasscode("")
+    if (!setup.botJoin) return true
+    if (setup.botJoin.status === "failed") {
+      setError(
+        t("The bot could not join the meeting: {value0}", {
+          value0: setup.botJoin.error || t("unknown error"),
+        })
+      )
+    }
+    return false
+  }
+  const botJoinFields = botCanJoin ? (
+    <>
+      <Field>
+        <div className="flex items-center justify-between gap-3">
+          <FieldLabel>{t("Join the meeting automatically")}</FieldLabel>
+          <Switch
+            aria-label={t("Join the meeting automatically")}
+            checked={botAutoJoin}
+            id="bot-auto-join"
+            onCheckedChange={(on) => setBotAutoJoin(Boolean(on))}
+          />
+        </div>
+        <FieldDescription>
+          {t(
+            "JustAI’s bot joins as a visible guest and transcribes what the other participants say. Use it only with the organizer’s consent."
+          )}
+        </FieldDescription>
+      </Field>
+      {botJoins ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel>
+              {t("Meeting ID")}{" "}
+              <span className="text-muted-foreground">{t("(optional)")}</span>
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="bot-meeting-id"
+              onChange={(event) => setBotMeetingId(event.target.value)}
+              value={botMeetingId}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>
+              {t("Passcode")}{" "}
+              <span className="text-muted-foreground">{t("(optional)")}</span>
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="bot-meeting-passcode"
+              onChange={(event) => setBotPasscode(event.target.value)}
+              type="password"
+              value={botPasscode}
+            />
+            <FieldDescription>
+              {t("Only passed to the bot for joining; not stored.")}
+            </FieldDescription>
+          </Field>
+        </div>
+      ) : null}
+    </>
+  ) : null
   const [botStarting, setBotStarting] = useState(false)
   const [botSetup, setBotSetup] = useState<BotSetup | null>(null)
   const [workspaceTimeMs, setWorkspaceTimeMs] = useState(0)
@@ -815,6 +915,14 @@ export function LiveTranscriptionView({
                       typeof data.alert === "string"
                         ? data.alert
                         : source.alert,
+                    botJoinStatus:
+                      typeof data.botJoinStatus === "string"
+                        ? data.botJoinStatus
+                        : source.botJoinStatus,
+                    botJoinError:
+                      typeof data.botJoinError === "string"
+                        ? data.botJoinError
+                        : source.botJoinError,
                     // A moved plan or a changed topic selection reschedules the capture.
                     scheduledStartAt:
                       typeof data.scheduledStartAt === "string"
@@ -1654,11 +1762,7 @@ export function LiveTranscriptionView({
       ) {
         createdBotSetup = await api.post<BotSetup>(
           `/api/v1/transcription/sessions/${result.session.id}/bot-sources`,
-          {
-            name: botName.trim() || t("Meeting bot"),
-            platform: botPlatform,
-            meetingUrl: botMeetingURL.trim() || undefined,
-          }
+          botSourcePayload()
         )
         createdSource = {
           ...createdBotSetup.source,
@@ -1701,7 +1805,7 @@ export function LiveTranscriptionView({
           `/api/v1/transcription/sessions/${result.session.id}/resume`
         )
       }
-      if (createdBotSetup) {
+      if (createdBotSetup && afterBotSourceCreated(createdBotSetup)) {
         setBotSetup(createdBotSetup)
         setBotDialogOpen(true)
       }
@@ -2069,15 +2173,15 @@ export function LiveTranscriptionView({
     try {
       const result = await api.post<BotSetup>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/bot-sources`,
-        {
-          name: botName.trim() || t("Meeting bot"),
-          platform: botPlatform,
-          meetingUrl: botMeetingURL.trim() || undefined,
-        }
+        botSourcePayload()
       )
-      setBotSetup(result)
       setBotMeetingURL("")
-      setBotDialogOpen(true)
+      if (afterBotSourceCreated(result)) {
+        setBotSetup(result)
+        setBotDialogOpen(true)
+      } else {
+        setBotDialogOpen(false)
+      }
       const source = {
         ...result.source,
         platform: result.bot?.platform,
@@ -2685,6 +2789,9 @@ export function LiveTranscriptionView({
                           <SelectItem value="microsoft-teams">
                             Microsoft Teams
                           </SelectItem>
+                          <SelectItem value="cisco-meeting-server">
+                            Cisco Meeting Server
+                          </SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -2692,9 +2799,11 @@ export function LiveTranscriptionView({
                   <Field>
                     <FieldLabel>
                       {t("Meeting URL")}{" "}
-                      <span className="text-muted-foreground">
-                        {t("(optional)")}
-                      </span>
+                      {botJoins ? null : (
+                        <span className="text-muted-foreground">
+                          {t("(optional)")}
+                        </span>
+                      )}
                     </FieldLabel>
                     <Input
                       id="session-bot-url"
@@ -2704,11 +2813,14 @@ export function LiveTranscriptionView({
                       value={botMeetingURL}
                     />
                     <FieldDescription>
-                      {t(
-                        "Stored encrypted for your adapter. JustAI will not sign in to a third-party meeting for you."
-                      )}
+                      {botJoins
+                        ? t("The bot opens this link to join the meeting.")
+                        : t(
+                            "Stored encrypted for your adapter. JustAI will not sign in to a third-party meeting for you."
+                          )}
                     </FieldDescription>
                   </Field>
+                  {botJoinFields}
                 </FieldGroup>
               )}
             </div>
@@ -3287,6 +3399,9 @@ export function LiveTranscriptionView({
                           <SelectItem value="microsoft-teams">
                             Microsoft Teams
                           </SelectItem>
+                          <SelectItem value="cisco-meeting-server">
+                            Cisco Meeting Server
+                          </SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -3294,9 +3409,11 @@ export function LiveTranscriptionView({
                   <Field>
                     <FieldLabel>
                       {t("Meeting URL")}{" "}
-                      <span className="text-muted-foreground">
-                        {t("(optional)")}
-                      </span>
+                      {botJoins ? null : (
+                        <span className="text-muted-foreground">
+                          {t("(optional)")}
+                        </span>
+                      )}
                     </FieldLabel>
                     <Input
                       id="bot-meeting-url"
@@ -3306,11 +3423,14 @@ export function LiveTranscriptionView({
                       value={botMeetingURL}
                     />
                     <FieldDescription>
-                      {t(
-                        "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
-                      )}
+                      {botJoins
+                        ? t("The bot opens this link to join the meeting.")
+                        : t(
+                            "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
+                          )}
                     </FieldDescription>
                   </Field>
+                  {botJoinFields}
                 </FieldGroup>
               </DialogBody>
               <DialogFooter>

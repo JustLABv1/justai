@@ -2,6 +2,7 @@
 {{- include "justai.validateStreamRelay" . -}}
 {{- include "justai.validateStreamRelays" . -}}
 {{- include "justai.validateCodeRunner" . -}}
+{{- include "justai.validateMeetingBot" . -}}
 {{- $root := . -}}
 {{- $databaseURLName := include "justai.secretRefName" (dict "root" . "ref" "databaseURL") -}}
 {{- $databaseURLKey := include "justai.secretRefKey" (dict "root" . "ref" "databaseURL") -}}
@@ -129,6 +130,7 @@ spec:
             {{- include "justai.streamRelayEnv" . | nindent 12 }}
             {{- include "justai.streamRelaysEnv" . | nindent 12 }}
             {{- include "justai.codeRunnerEnv" . | nindent 12 }}
+            {{- include "justai.meetingBotEnv" . | nindent 12 }}
             {{- with .Values.monolith.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -295,6 +297,7 @@ spec:
             {{- include "justai.streamRelayEnv" . | nindent 12 }}
             {{- include "justai.streamRelaysEnv" . | nindent 12 }}
             {{- include "justai.codeRunnerEnv" . | nindent 12 }}
+            {{- include "justai.meetingBotEnv" . | nindent 12 }}
             {{- with .Values.backend.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

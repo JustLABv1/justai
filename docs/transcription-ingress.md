@@ -216,12 +216,17 @@ POST /api/v1/streams/:streamId/events
   -> JSON controls
 ```
 
-The platform field accepts `generic`, `zoom`, `google-meet`, and
-`microsoft-teams`. These labels select the adapter configuration and source
-identity; they do not make the backend log in to a third-party meeting.
-Actual Zoom/Google Meet/Teams joining still belongs in a separately deployed
-adapter or desktop companion with the organization's platform credentials and
-consent flow.
+The platform field accepts `generic`, `zoom`, `google-meet`,
+`microsoft-teams`, and `cisco-meeting-server`. These labels select the adapter
+configuration and source identity; they do not make the backend log in to a
+third-party meeting. Joining belongs in a separately deployed adapter or desktop
+companion with the organization's platform credentials and consent flow.
+
+[`services/meeting-bot`](../services/meeting-bot/README.md) is such an adapter for
+meetings that guests can join in a browser, built for the Cisco Meeting Server
+web app: it joins with headless Chromium under a visible bot name, forwards the
+other participants' WebRTC audio through this ingress, and leaves when the
+meeting ends. It has been tested against local stand-ins only so far.
 
 After the SSE stream emits `transport.ready`, the adapter POSTs this JSON to
 the returned stream's `/events` endpoint:
