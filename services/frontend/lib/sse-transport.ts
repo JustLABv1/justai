@@ -7,7 +7,7 @@ export type SSEConnectionState = {
   state: "connecting" | "live" | "reconnecting" | "degraded" | "disconnected"
   audioQuality: "good" | "delayed" | "dropping"
   attempt: number
-  maxAttempts: number
+  maxAttempts: number | null
 }
 
 export class SSETransportError extends Error {

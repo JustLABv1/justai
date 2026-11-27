@@ -79,7 +79,7 @@ import {
 import { Switch } from "@/components/panelui/switch"
 import { languageItemsFor } from "@/lib/transcription-languages"
 import { cn } from "@/lib/utils"
-import { api, eventStreamURL } from "@/lib/api"
+import { APIError, api, eventStreamURL } from "@/lib/api"
 import { SSETransport } from "@/lib/sse-transport"
 import type { SSEConnectionState } from "@/lib/sse-transport"
 import { initialRealtimeState } from "@/components/realtime-connection-status"
@@ -471,12 +471,8 @@ export function LiveTranscriptionView({
 
   const viewerSocketRef = useRef<SSETransport | null>(null)
   const captureSocketRef = useRef<SSETransport | null>(null)
-  const connectViewerRef = useRef<
-    (id: string, reconnect?: boolean) => Promise<void>
-  >(() => Promise.resolve())
   const viewerAttemptRef = useRef(0)
   const viewerReconnectTimerRef = useRef<number | null>(null)
-  const viewerReconnectAttemptsRef = useRef(0)
   const captureAttemptRef = useRef(0)
   const captureSourceIdRef = useRef<string | null>(null)
   const sessionLoadRef = useRef(0)
@@ -618,13 +614,12 @@ export function LiveTranscriptionView({
     setLevel(0)
   }, [completeRecording])
 
-  const closeViewer = useCallback((resetReconnect = true) => {
+  const closeViewer = useCallback(() => {
     viewerAttemptRef.current += 1
     if (viewerReconnectTimerRef.current !== null) {
       window.clearTimeout(viewerReconnectTimerRef.current)
       viewerReconnectTimerRef.current = null
     }
-    if (resetReconnect) viewerReconnectAttemptsRef.current = 0
     viewerSocketRef.current?.close()
     viewerSocketRef.current = null
   }, [])
@@ -978,24 +973,84 @@ export function LiveTranscriptionView({
   )
 
   const connectViewer = useCallback(
-    async (id: string, reconnect = false) => {
-      if (!reconnect) viewerReconnectAttemptsRef.current = 0
-      closeViewer(!reconnect)
+    async function connectViewer(id: string, retry = 0): Promise<void> {
+      closeViewer()
       const attempt = viewerAttemptRef.current
-      const ticketResponse = await api.post<{ ticket: string }>(
-        "/api/v1/stream-tickets",
-        { kind: "transcription-viewer", sessionId: id }
-      )
-      if (viewerAttemptRef.current !== attempt) return
+      const isCurrent = () => viewerAttemptRef.current === attempt
+      let opened = false
+      if (retry === 0) {
+        setTransportStatus(initialRealtimeState)
+        setInterruptionAt(null)
+      }
+
+      const scheduleReconnect = () => {
+        const nextRetry = opened ? 1 : retry + 1
+        setTransportStatus({
+          state: "reconnecting",
+          audioQuality: "good",
+          attempt: nextRetry,
+          maxAttempts: null,
+        })
+        setInterruptionAt((current) => current ?? new Date())
+        viewerReconnectTimerRef.current = window.setTimeout(
+          () => {
+            viewerReconnectTimerRef.current = null
+            if (isCurrent()) {
+              void connectViewer(id, nextRetry).catch((caught) => {
+                setError(
+                  caught instanceof Error
+                    ? caught.message
+                    : "The live transcription connection could not be established."
+                )
+              })
+            }
+          },
+          Math.min(15_000, 1000 * 2 ** (nextRetry - 1))
+        )
+      }
+
+      let ticketResponse: { ticket: string }
+      try {
+        ticketResponse = await api.post<{ ticket: string }>(
+          "/api/v1/stream-tickets",
+          { kind: "transcription-viewer", sessionId: id }
+        )
+      } catch (caught) {
+        if (!isCurrent()) return
+        if (
+          retry > 0 &&
+          caught instanceof APIError &&
+          (caught.status === 0 ||
+            caught.status === 408 ||
+            caught.status === 429 ||
+            caught.status >= 500)
+        ) {
+          scheduleReconnect()
+          return
+        }
+        setTransportStatus({ ...initialRealtimeState, state: "disconnected" })
+        if (retry === 0) throw caught
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "The live transcription connection could not be established."
+        )
+        return
+      }
+      if (!isCurrent()) return
       const socket = new SSETransport(
         eventStreamURL("/api/v1/streams/transcription", ticketResponse.ticket)
       )
       socket.onconnectionstatechange = (next) => {
+        if (!isCurrent()) return
+        if (next.state === "disconnected" && (opened || retry > 0)) return
         setTransportStatus(next)
         if (next.state === "reconnecting" || next.audioQuality !== "good")
-          setInterruptionAt(new Date())
+          setInterruptionAt((current) => current ?? new Date())
+        else if (next.state === "live") setInterruptionAt(null)
       }
       socket.ontransporterror = (transportError) => {
+        if (!isCurrent()) return
         if (
           !["stream_reconnecting", "audio_backpressure"].includes(
             transportError.code
@@ -1004,21 +1059,13 @@ export function LiveTranscriptionView({
           setError(transportError.message)
       }
       viewerSocketRef.current = socket
-      let opened = false
       let openTimer: number | null = null
       socket.onmessage = (message) => {
-        if (viewerAttemptRef.current !== attempt) return
+        if (!isCurrent()) return
         try {
           handleSocketEvent(JSON.parse(message.data) as SocketEvent)
         } catch {
           setError("Received an invalid event from the transcription server.")
-        }
-      }
-      socket.onerror = () => {
-        if (viewerAttemptRef.current === attempt) {
-          setError(
-            "The live transcription connection could not be established."
-          )
         }
       }
       await new Promise<void>((resolve, reject) => {
@@ -1031,27 +1078,14 @@ export function LiveTranscriptionView({
         socket.onclose = () => {
           if (openTimer !== null) window.clearTimeout(openTimer)
           if (viewerSocketRef.current === socket) viewerSocketRef.current = null
-          if (viewerAttemptRef.current !== attempt) {
+          if (!isCurrent()) {
             resolve()
             return
           }
-          if (opened) {
-            setError("The live transcription connection dropped; reconnecting…")
-            const retry = viewerReconnectAttemptsRef.current
-            if (retry < 5) {
-              viewerReconnectAttemptsRef.current = retry + 1
-              viewerReconnectTimerRef.current = window.setTimeout(
-                () => {
-                  viewerReconnectTimerRef.current = null
-                  if (viewerAttemptRef.current === attempt) {
-                    void connectViewerRef
-                      .current(id, true)
-                      .catch(() => undefined)
-                  }
-                },
-                Math.min(15_000, 1000 * 2 ** retry)
-              )
-            }
+          if (opened || retry > 0) {
+            scheduleReconnect()
+            resolve()
+            return
           }
           reject(new Error("The live transcription connection closed."))
         }
@@ -1062,10 +1096,7 @@ export function LiveTranscriptionView({
           )
         }, 15_000)
       })
-      if (
-        viewerAttemptRef.current !== attempt ||
-        socket.readyState !== SSETransport.OPEN
-      ) {
+      if (!isCurrent() || socket.readyState !== SSETransport.OPEN) {
         socket.close()
         return
       }
@@ -1073,10 +1104,6 @@ export function LiveTranscriptionView({
     },
     [closeViewer, handleSocketEvent]
   )
-
-  useEffect(() => {
-    connectViewerRef.current = connectViewer
-  }, [connectViewer])
 
   const downsample = (
     input: Float32Array,

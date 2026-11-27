@@ -32,7 +32,9 @@ export function RealtimeConnectionStatus({
   const degraded = status.state === "degraded"
   const disconnected = status.state === "disconnected"
   const label = reconnecting
-    ? `Reconnecting · attempt ${status.attempt} of ${status.maxAttempts}`
+    ? status.maxAttempts === null
+      ? t("Reconnecting")
+      : `Reconnecting · attempt ${status.attempt} of ${status.maxAttempts}`
     : degraded
       ? t("Connection degraded")
       : disconnected
@@ -80,7 +82,7 @@ export function RealtimeConnectionStatus({
           </Badge>
         </div>
       </div>
-      {reconnecting ? (
+      {reconnecting && status.maxAttempts !== null ? (
         <Progress
           className="mt-2 h-1"
           value={(status.attempt / status.maxAttempts) * 100}

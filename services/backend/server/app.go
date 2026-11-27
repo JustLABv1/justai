@@ -372,6 +372,9 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/transcription/sessions/:id/recordings", a.platformFeature("transcription"), a.listTranscriptionRecordings)
 	org.GET("/transcription/recordings/:id", a.platformFeature("transcription"), a.streamTranscriptionRecording)
 	org.DELETE("/transcription/recordings/:id", a.platformFeature("transcription"), a.deleteTranscriptionRecording)
+	// The handler takes session and source from the body; the browser posts to
+	// the id-less path, the older :id form stays for existing clients.
+	org.POST("/transcription/recordings/start", a.platformFeature("transcription"), a.startTranscriptionRecording)
 	org.POST("/transcription/recordings/:id/start", a.platformFeature("transcription"), a.startTranscriptionRecording)
 	org.PUT("/transcription/recordings/:id/parts/:part", a.platformFeature("transcription"), a.appendTranscriptionRecordingPart)
 	org.POST("/transcription/recordings/:id/complete", a.platformFeature("transcription"), a.completeTranscriptionRecording)

@@ -1,16 +1,20 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -162,6 +166,10 @@ func (m *TranscriptionManager) diarizeLiveRecordings(ctx context.Context, id uui
 	if err != nil {
 		return err
 	}
+	// One unreadable recording (for example an empty part left behind by an
+	// interrupted capture) must not discard speaker separation for the rest.
+	var audioErr error
+	diarizedSources := 0
 	for sourceIndex, sourceID := range sourceOrder {
 		recordings := groups[sourceID]
 		file, err := os.CreateTemp("", "justai-live-diarization-*.wav")
@@ -180,17 +188,15 @@ func (m *TranscriptionManager) diarizeLiveRecordings(ctx context.Context, id uui
 				return err
 			}
 			for _, r := range recordings {
-				reader, _, err := m.recordingReader(ctx, r.ID)
-				if err != nil {
-					return err
-				}
-				cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
-				cmd.Stdin = reader
-				cmd.Stdout = output
-				err = cmd.Run()
-				reader.Close()
-				if err != nil {
-					return fmt.Errorf("recorded audio could not be decoded: %w", err)
+				written, decodeErr := m.decodeRecordingPCM(ctx, r.ID, output)
+				if decodeErr != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					// Partially decoded audio is still aligned with its segments,
+					// so it stays; only the failure is recorded.
+					slog.Warn("live recording skipped for speaker separation", "sessionId", id, "recordingId", r.ID, "decodedBytes", written, "error", decodeErr)
+					audioErr = decodeErr
 				}
 			}
 			stat, err := output.Stat()
@@ -198,7 +204,7 @@ func (m *TranscriptionManager) diarizeLiveRecordings(ctx context.Context, id uui
 				return err
 			}
 			if stat.Size() <= 44 {
-				return fmt.Errorf("audio recording contains no samples")
+				return errLiveSourceWithoutAudio
 			}
 			if err = finalizeLiveWAV(output, stat.Size()); err != nil {
 				return err
@@ -279,11 +285,130 @@ func (m *TranscriptionManager) diarizeLiveRecordings(ctx context.Context, id uui
 			}
 			return m.applyVideoDiarizationTurns(ctx, id, selected, turns)
 		}()
+		if errors.Is(err, errLiveSourceWithoutAudio) {
+			slog.Warn("source has no decodable audio for speaker separation", "sessionId", id, "sourceId", sourceID)
+			continue
+		}
 		if err != nil {
 			return err
 		}
+		diarizedSources++
+	}
+	if diarizedSources == 0 {
+		if audioErr != nil {
+			return audioErr
+		}
+		return fmt.Errorf("audio recording contains no samples")
 	}
 	return nil
+}
+
+var (
+	errLiveSourceWithoutAudio = errors.New("source recording contains no decodable audio")
+	errRecordingWithoutData   = errors.New("the stored recording contains no audio data; its parts may be missing from storage")
+)
+
+// decodeRecordingPCM streams one stored recording through ffmpeg and appends
+// 16 kHz mono s16le samples to output. It returns how many PCM bytes were
+// written, even on failure, so callers can keep partially decoded audio.
+func (m *TranscriptionManager) decodeRecordingPCM(ctx context.Context, recordingID uuid.UUID, output io.Writer) (int64, error) {
+	reader, _, err := m.recordingReader(ctx, recordingID)
+	if err != nil {
+		return 0, fmt.Errorf("recorded audio could not be opened: %w", err)
+	}
+	defer reader.Close()
+	return decodePCMStream(ctx, reader, output)
+}
+
+func decodePCMStream(ctx context.Context, reader io.Reader, output io.Writer) (int64, error) {
+	// ffmpeg reports empty input only as a generic "invalid data" exit status
+	// (183), so check for data up front to name the real problem.
+	buffered := bufio.NewReaderSize(reader, 64*1024)
+	source := &trackingReader{reader: buffered}
+	if _, err := buffered.Peek(1); err != nil {
+		if errors.Is(err, io.EOF) {
+			return 0, errRecordingWithoutData
+		}
+		return 0, fmt.Errorf("recorded audio could not be read: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return 0, err
+	}
+	written := &countingWriter{writer: output}
+	stderr := &cappedBuffer{limit: 4096}
+	cmd.Stdout = written
+	cmd.Stderr = stderr
+	if err = cmd.Start(); err != nil {
+		return 0, fmt.Errorf("ffmpeg could not be started: %w", err)
+	}
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		// Write errors only mean ffmpeg exited early; Wait reports why.
+		_, _ = io.Copy(stdin, source)
+		_ = stdin.Close()
+	}()
+	waitErr := cmd.Wait()
+	<-copied
+	// A storage or decryption failure would otherwise surface only as
+	// ffmpeg's reaction to truncated input.
+	if source.err != nil {
+		return written.n, fmt.Errorf("recorded audio could not be read: %w", source.err)
+	}
+	if waitErr != nil {
+		if detail := lastLine(stderr.String()); detail != "" {
+			return written.n, fmt.Errorf("recorded audio could not be decoded: %s (%w)", detail, waitErr)
+		}
+		return written.n, fmt.Errorf("recorded audio could not be decoded: %w", waitErr)
+	}
+	return written.n, nil
+}
+
+type trackingReader struct {
+	reader io.Reader
+	err    error
+}
+
+func (r *trackingReader) Read(target []byte) (int, error) {
+	n, err := r.reader.Read(target)
+	if err != nil && !errors.Is(err, io.EOF) && r.err == nil {
+		r.err = err
+	}
+	return n, err
+}
+
+type countingWriter struct {
+	writer io.Writer
+	n      int64
+}
+
+func (w *countingWriter) Write(data []byte) (int, error) {
+	n, err := w.writer.Write(data)
+	w.n += int64(n)
+	return n, err
+}
+
+type cappedBuffer struct {
+	bytes.Buffer
+	limit int
+}
+
+func (b *cappedBuffer) Write(data []byte) (int, error) {
+	if room := b.limit - b.Len(); room > 0 {
+		if len(data) > room {
+			_, _ = b.Buffer.Write(data[:room])
+		} else {
+			_, _ = b.Buffer.Write(data)
+		}
+	}
+	return len(data), nil
+}
+
+func lastLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func (a *App) controlLiveProcessing(c *gin.Context) {
