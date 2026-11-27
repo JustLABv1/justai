@@ -5642,4 +5642,14 @@ export const de = {
   "Meeting {value0}": "Besprechung {value0}",
   "The room starts first, then JustAI's bot joins the meeting as a visible guest and transcribes what the others say.":
     "Zuerst wird der Raum gestartet. Danach tritt der JustAI-Bot der Besprechung als sichtbarer Gast bei und transkribiert, was die anderen sagen.",
+  "Live now": "Läuft gerade",
+  "Earlier this week": "Diese Woche",
+  "Kind of session": "Art der Sitzung",
+  Meetings: "Besprechungen",
+  Livestreams: "Livestreams",
+  "Only open": "Nur offene",
+  "{value0} of {value1} topics": "{value0} von {value1} Themen",
+  "Post-processing…": "Wird nachbearbeitet…",
+  "Speakers not recognized": "Sprecher nicht erkannt",
+  "Polishing failed": "Überarbeitung fehlgeschlagen",
 } as const

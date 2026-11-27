@@ -1,6 +1,5 @@
 "use client"
 
-import { TopicIcon } from "@/components/topic-icons"
 import { Mascot } from "@/components/mascot"
 import { TranscriptionDeleteButton } from "@/components/transcription-delete-button"
 import { Spinner } from "@/components/panelui/spinner"
@@ -8,11 +7,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import {
-  AudioLines,
-  Bot,
   Mic,
-  MonitorUp,
-  Tv,
   Check,
   CircleCheck,
   ListChecks,
@@ -22,7 +17,6 @@ import {
   FileText,
   Search,
   Upload,
-  WifiOff,
 } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
 import { Alert } from "@/components/panelui/alert"
@@ -40,6 +34,7 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { workspacePath } from "@/lib/workspace-routes"
 import { TopicSubscriptionsButton } from "@/components/topic-subscriptions"
+import { LiveTranscriptionList } from "@/components/live-transcription-list"
 import {
   VIDEO_LIBRARY_PAGE_SIZE,
   videoLibraryDuration,
@@ -48,72 +43,12 @@ import {
   videoLibraryPending,
   videoLibraryStep,
   videoLibraryFilter,
+  liveLibrarySource,
+  type LiveLibrarySource,
   VIDEO_LIBRARY_FILTERS,
   type VideoTranscriptionLibraryItem,
   type VideoTranscriptionLibraryPage,
 } from "@/lib/video-transcription-library"
-
-const liveSourceIcons: Record<string, typeof AudioLines> = {
-  stream: Tv,
-  browser: Mic,
-  "browser-system": MonitorUp,
-  "meeting-bot": Bot,
-}
-
-/** A small tile that says what a live session captures, instead of an empty preview. */
-/** Stream trouble at a glance: down right now, ended early, or dropped on the way. */
-function StreamHealthBadge({ item }: { item: VideoTranscriptionLibraryItem }) {
-  const { t } = useTranslations()
-  if (item.streamStatus === "reconnecting")
-    return (
-      <Badge size="sm" variant="warning">
-        <WifiOff aria-hidden="true" className="size-3" />
-        {t("Stream interrupted")}
-      </Badge>
-    )
-  if (item.streamStatus === "failed" || item.streamEndReason === "aborted")
-    return (
-      <Badge size="sm" variant="destructive">
-        <WifiOff aria-hidden="true" className="size-3" />
-        {item.streamStatus === "failed"
-          ? t("Capture failed")
-          : t("Ended early")}
-      </Badge>
-    )
-  if (item.outageCount)
-    return (
-      <Badge size="sm" variant="outline">
-        <WifiOff aria-hidden="true" className="size-3" />
-        {t(item.outageCount === 1 ? "Dropped once" : "Dropped {value0} times", {
-          value0: item.outageCount,
-        })}
-      </Badge>
-    )
-  return null
-}
-
-function LiveSourceIcon({
-  kind,
-  status,
-}: {
-  kind?: string
-  status: VideoTranscriptionLibraryItem["status"]
-}) {
-  const Icon = (kind && liveSourceIcons[kind]) || AudioLines
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground",
-        status === "live" && "bg-primary/10 text-primary",
-        status === "waiting" &&
-          "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-      )}
-    >
-      <Icon className="size-5" />
-    </span>
-  )
-}
 
 function statusTone(
   status: VideoTranscriptionLibraryItem["status"]
@@ -164,11 +99,14 @@ export function VideoTranscriptionLibrary({
   const requestedFilter = videoLibraryFilter(params.get("status"))
   const filter =
     kind === "live" && requestedFilter === "cancelled" ? "all" : requestedFilter
+  const source =
+    kind === "live" ? liveLibrarySource(params.get("source")) : "all"
   const libraryPath = (
     page: number,
     query = "",
-    status: typeof filter = "all"
-  ) => videoLibraryPath(page, query, status, kind)
+    status: typeof filter = "all",
+    nextSource: LiveLibrarySource = source
+  ) => videoLibraryPath(page, query, status, kind, nextSource)
   const query = (params.get("query") ?? "").slice(0, 200).trim()
   const [search, setSearch] = useState({ basis: query, text: query })
   const searchText = search.basis === query ? search.text : query
@@ -180,6 +118,7 @@ export function VideoTranscriptionLibrary({
     page,
     query,
     filter,
+    source,
     retry,
     revision,
   ])
@@ -207,13 +146,13 @@ export function VideoTranscriptionLibrary({
     if (searchText.trim() === query) return
     const timer = window.setTimeout(
       () =>
-        router.replace(videoLibraryPath(1, searchText, filter, kind), {
+        router.replace(videoLibraryPath(1, searchText, filter, kind, source), {
           scroll: false,
         }),
       300
     )
     return () => window.clearTimeout(timer)
-  }, [searchText, query, filter, kind, router])
+  }, [searchText, query, filter, kind, source, router])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -226,6 +165,7 @@ export function VideoTranscriptionLibrary({
           pageSize: String(VIDEO_LIBRARY_PAGE_SIZE),
           query,
           status: filter,
+          ...(kind === "live" ? { source } : {}),
         })
         const result = await api.get<VideoTranscriptionLibraryPage>(
           `/api/v1/transcription/${kind === "live" ? "live-library" : "videos"}?${searchParams}`,
@@ -233,9 +173,10 @@ export function VideoTranscriptionLibrary({
         )
         if (!active) return
         if (result.page !== page) {
-          router.replace(videoLibraryPath(result.page, query, filter, kind), {
-            scroll: false,
-          })
+          router.replace(
+            videoLibraryPath(result.page, query, filter, kind, source),
+            { scroll: false }
+          )
           return
         }
         setState({ key: requestKey, data: result, error: "" })
@@ -259,7 +200,7 @@ export function VideoTranscriptionLibrary({
       controller.abort()
       if (timer) clearTimeout(timer)
     }
-  }, [page, query, filter, kind, requestKey, router])
+  }, [page, query, filter, kind, source, requestKey, router])
 
   const toggleSelected = (id: string) =>
     setSelection({
@@ -306,13 +247,6 @@ export function VideoTranscriptionLibrary({
   const pageCount = data
     ? Math.max(1, Math.ceil(data.total / data.pageSize))
     : 1
-  const scheduleFormatter = new Intl.DateTimeFormat(locale, {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
   const dateFormatter = new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
@@ -358,26 +292,84 @@ export function VideoTranscriptionLibrary({
             }
           />
         </Input.Group>
-        <Chip.Group
-          aria-label={t("Filter recordings")}
-          multiple={false}
-          onValueChange={(value) => {
-            const next = videoLibraryFilter((value[0] as string) ?? "all")
-            router.push(libraryPath(1, searchText, next), { scroll: false })
-          }}
-          value={[filter]}
-        >
-          {VIDEO_LIBRARY_FILTERS.filter(
-            (value) => kind !== "live" || value !== "cancelled"
-          )
-            .filter(
+        {kind === "live" ? (
+          <>
+            <Chip.Group
+              aria-label={t("Kind of session")}
+              multiple={false}
+              onValueChange={(value) => {
+                const next = liveLibrarySource((value[0] as string) ?? "all")
+                router.push(libraryPath(1, searchText, filter, next), {
+                  scroll: false,
+                })
+              }}
+              value={[source]}
+            >
+              {(
+                [
+                  ["all", "All"],
+                  ["meetings", "Meetings"],
+                  ["streams", "Livestreams"],
+                ] as const
+              ).map(([value, label]) => (
+                <Chip color="primary" key={value} size="sm" value={value}>
+                  <span className="inline-flex items-center gap-1.5">
+                    {t(label)}
+                    {data ? (
+                      <span className="text-muted-foreground tabular-nums">
+                        {value === "all"
+                          ? (data.counts.meetings ?? 0) +
+                            (data.counts.streams ?? 0)
+                          : (data.counts[value] ?? 0)}
+                      </span>
+                    ) : null}
+                  </span>
+                </Chip>
+              ))}
+            </Chip.Group>
+            <Chip.Group
+              aria-label={t("Filter recordings")}
+              multiple={false}
+              onValueChange={(value) => {
+                const next = videoLibraryFilter((value[0] as string) ?? "all")
+                router.push(libraryPath(1, searchText, next), { scroll: false })
+              }}
+              value={filter === "open" || filter === "failed" ? [filter] : []}
+            >
+              <Chip color="primary" size="sm" value="open">
+                {t("Only open")}
+              </Chip>
+              {filter === "failed" || (data?.counts.failed ?? 0) > 0 ? (
+                <Chip color="destructive" size="sm" value="failed">
+                  <span className="inline-flex items-center gap-1.5">
+                    {t("Needs attention")}
+                    {data ? (
+                      <span className="text-muted-foreground tabular-nums">
+                        {data.counts.failed}
+                      </span>
+                    ) : null}
+                  </span>
+                </Chip>
+              ) : null}
+            </Chip.Group>
+          </>
+        ) : (
+          <Chip.Group
+            aria-label={t("Filter recordings")}
+            multiple={false}
+            onValueChange={(value) => {
+              const next = videoLibraryFilter((value[0] as string) ?? "all")
+              router.push(libraryPath(1, searchText, next), { scroll: false })
+            }}
+            value={[filter]}
+          >
+            {VIDEO_LIBRARY_FILTERS.filter(
               (value) =>
                 value === "all" ||
                 value === filter ||
                 !data ||
                 data.counts[value] > 0
-            )
-            .map((value) => (
+            ).map((value) => (
               <Chip
                 color={FILTER_TONES[value]}
                 key={value}
@@ -394,7 +386,8 @@ export function VideoTranscriptionLibrary({
                 </span>
               </Chip>
             ))}
-        </Chip.Group>
+          </Chip.Group>
+        )}
         {data?.items.length ? (
           <Button
             className="sm:ml-auto"
@@ -485,7 +478,24 @@ export function VideoTranscriptionLibrary({
           </Button>
         </Alert>
       ) : null}
-      {loading ? (
+      {loading && kind === "live" ? (
+        <Card
+          role="status"
+          aria-label={t("Loading recordings…")}
+          className="gap-0 p-0"
+        >
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="flex items-center gap-3 px-4 py-3">
+              <Skeleton className="size-9 rounded-lg motion-reduce:animate-none" />
+              <div className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-3.5 w-2/5 motion-reduce:animate-none" />
+                <Skeleton className="h-3 w-3/5 motion-reduce:animate-none" />
+              </div>
+            </div>
+          ))}
+        </Card>
+      ) : null}
+      {loading && kind !== "live" ? (
         <div
           role="status"
           aria-label={t("Loading recordings…")}
@@ -505,195 +515,146 @@ export function VideoTranscriptionLibrary({
       ) : null}
       {data?.items.length ? (
         <>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-5">
-            {data.items.map((item) => (
-              <div key={item.id} className="group relative min-w-0">
-                {selecting ? (
-                  <span className="absolute top-3 left-3 z-10 flex size-5 items-center justify-center drop-shadow-sm">
-                    <Checkbox
-                      aria-label={t("Select {value0}", {
-                        value0: item.title.trim() || item.fileName,
-                      })}
-                      checked={selectedIds.includes(item.id)}
-                      onCheckedChange={() => toggleSelected(item.id)}
-                      tabIndex={-1}
-                    />
-                  </span>
-                ) : null}
-                <Card
-                  className={cn(
-                    "h-full gap-0 overflow-hidden p-0 transition-shadow group-hover:shadow-md",
-                    item.doneAt && "opacity-70",
-                    selecting &&
-                      selectedIds.includes(item.id) &&
-                      "ring-2 ring-primary"
-                  )}
-                >
-                  {kind === "live" ? null : (
+          {kind === "live" ? (
+            <LiveTranscriptionList
+              items={data.items}
+              onChanged={() => setRetry((value) => value + 1)}
+              onToggleSelected={toggleSelected}
+              selectedIds={selectedIds}
+              selecting={selecting}
+            />
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-5">
+              {data.items.map((item) => (
+                <div key={item.id} className="group relative min-w-0">
+                  {selecting ? (
+                    <span className="absolute top-3 left-3 z-10 flex size-5 items-center justify-center drop-shadow-sm">
+                      <Checkbox
+                        aria-label={t("Select {value0}", {
+                          value0: item.title.trim() || item.fileName,
+                        })}
+                        checked={selectedIds.includes(item.id)}
+                        onCheckedChange={() => toggleSelected(item.id)}
+                        tabIndex={-1}
+                      />
+                    </span>
+                  ) : null}
+                  <Card
+                    className={cn(
+                      "h-full gap-0 overflow-hidden p-0 transition-shadow group-hover:shadow-md",
+                      item.doneAt && "opacity-70",
+                      selecting &&
+                        selectedIds.includes(item.id) &&
+                        "ring-2 ring-primary"
+                    )}
+                  >
                     <VideoTranscriptionThumbnail
                       url={item.thumbnailUrl}
                       scope={scope}
                     />
-                  )}
-                  <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
-                    <div className="flex min-w-0 items-start gap-3">
-                      {kind === "live" ? (
-                        <LiveSourceIcon
-                          kind={item.sourceKind}
-                          status={item.status}
-                        />
-                      ) : null}
-                      <h2
-                        className="min-w-0 flex-1 text-base leading-6 font-medium group-hover:underline"
-                        title={item.fileName}
-                      >
-                        <Link
-                          href={workspacePath(
-                            kind === "live"
-                              ? "transcription"
-                              : "video-transcription",
-                            null,
-                            item.id
-                          )}
-                          prefetch={false}
-                          aria-label={t(
-                            selecting ? "Select {value0}" : "Open {value0}",
-                            {
-                              value0:
-                                item.title.trim() ||
+                    <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <h2
+                          className="min-w-0 flex-1 text-base leading-6 font-medium group-hover:underline"
+                          title={item.fileName}
+                        >
+                          <Link
+                            href={workspacePath(
+                              "video-transcription",
+                              null,
+                              item.id
+                            )}
+                            prefetch={false}
+                            aria-label={t(
+                              selecting ? "Select {value0}" : "Open {value0}",
+                              {
+                                value0:
+                                  item.title.trim() ||
+                                  item.fileName ||
+                                  t("Live transcription"),
+                              }
+                            )}
+                            onClick={(event) => {
+                              if (!selecting) return
+                              event.preventDefault()
+                              toggleSelected(item.id)
+                            }}
+                            className="outline-none after:absolute after:inset-0 after:rounded-[22px] focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                          >
+                            <span className="line-clamp-2 break-words">
+                              {item.title.trim() ||
                                 item.fileName ||
-                                t("Live transcription"),
-                            }
-                          )}
-                          onClick={(event) => {
-                            if (!selecting) return
-                            event.preventDefault()
-                            toggleSelected(item.id)
-                          }}
-                          className="outline-none after:absolute after:inset-0 after:rounded-[22px] focus-visible:after:ring-2 focus-visible:after:ring-ring"
-                        >
-                          <span className="line-clamp-2 break-words">
-                            {item.title.trim() ||
-                              item.fileName ||
-                              t("Live transcription")}
-                          </span>
-                        </Link>
-                      </h2>
-                      {!selecting ? (
-                        <div className="relative z-20 -mt-1 -mr-2 shrink-0">
-                          <TranscriptionDeleteButton
-                            iconOnly
-                            ids={[item.id]}
-                            onDeleted={() => setRetry((value) => value + 1)}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                      {kind === "live" && item.sourceName ? (
-                        <>
-                          <span className="truncate">{item.sourceName}</span>
-                          <span aria-hidden="true">·</span>
-                        </>
-                      ) : null}
-                      {kind === "live" && item.scheduledStartAt ? (
-                        <time
-                          className="font-medium text-foreground"
-                          dateTime={item.scheduledStartAt}
-                        >
-                          {t("Starts {value0}", {
-                            value0: scheduleFormatter.format(
-                              new Date(item.scheduledStartAt)
-                            ),
-                          })}
-                        </time>
-                      ) : (
+                                t("Live transcription")}
+                            </span>
+                          </Link>
+                        </h2>
+                        {!selecting ? (
+                          <div className="relative z-20 -mt-1 -mr-2 shrink-0">
+                            <TranscriptionDeleteButton
+                              iconOnly
+                              ids={[item.id]}
+                              onDeleted={() => setRetry((value) => value + 1)}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                         <time dateTime={item.createdAt}>
                           {dateFormatter.format(new Date(item.createdAt))}
                         </time>
-                      )}
-                      {videoLibraryDuration(item.durationMs) ? (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="tabular-nums">
-                            {videoLibraryDuration(item.durationMs)}
-                          </span>
-                        </>
-                      ) : null}
-                    </div>
-                    {kind === "live" && item.topicsTotal ? (
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1.5">
-                            <TopicIcon
-                              aria-hidden="true"
-                              className="size-3.5"
-                            />
-                            {t("Topics")}
-                          </span>
-                          <span className="tabular-nums">
-                            {t("{value0} of {value1} finished", {
-                              value0: item.topicsDone ?? 0,
-                              value1: item.topicsTotal,
-                            })}
-                          </span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-[width]"
-                            style={{
-                              width: `${Math.round(((item.topicsDone ?? 0) / item.topicsTotal) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="mt-auto flex min-w-0 flex-wrap items-center gap-2">
-                      <Badge
-                        className="max-w-full min-w-0 break-words whitespace-normal"
-                        dot={
-                          !(
-                            videoLibraryPending(item.status) &&
-                            !["live", "paused", "waiting"].includes(item.status)
-                          )
-                        }
-                        variant={statusTone(item.status)}
-                      >
-                        {videoLibraryPending(item.status) &&
-                        !["live", "paused", "waiting"].includes(item.status) ? (
-                          <Spinner className="size-3" />
+                        {videoLibraryDuration(item.durationMs) ? (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="tabular-nums">
+                              {videoLibraryDuration(item.durationMs)}
+                            </span>
+                          </>
                         ) : null}
-                        {kind === "live" &&
-                        item.status === "waiting" &&
-                        item.scheduledStartAt
-                          ? t("Scheduled")
-                          : t(videoLibraryStep(item))}
-                      </Badge>
-                      {item.doneAt ? (
-                        <Badge size="sm" variant="success">
-                          <Check aria-hidden="true" className="size-3" />
-                          {t("Done")}
-                        </Badge>
-                      ) : null}
-                      {item.hasSummary ? (
+                      </div>
+                      <div className="mt-auto flex min-w-0 flex-wrap items-center gap-2">
                         <Badge
-                          className="max-w-full break-words whitespace-normal"
-                          size="sm"
-                          variant="outline"
+                          className="max-w-full min-w-0 break-words whitespace-normal"
+                          dot={
+                            !(
+                              videoLibraryPending(item.status) &&
+                              !["live", "paused", "waiting"].includes(
+                                item.status
+                              )
+                            )
+                          }
+                          variant={statusTone(item.status)}
                         >
-                          <FileText aria-hidden="true" className="size-3" />
-                          {t("With summary")}
+                          {videoLibraryPending(item.status) &&
+                          !["live", "paused", "waiting"].includes(
+                            item.status
+                          ) ? (
+                            <Spinner className="size-3" />
+                          ) : null}
+                          {t(videoLibraryStep(item))}
                         </Badge>
-                      ) : null}
-                      {kind === "live" ? (
-                        <StreamHealthBadge item={item} />
-                      ) : null}
+                        {item.doneAt ? (
+                          <Badge size="sm" variant="success">
+                            <Check aria-hidden="true" className="size-3" />
+                            {t("Done")}
+                          </Badge>
+                        ) : null}
+                        {item.hasSummary ? (
+                          <Badge
+                            className="max-w-full break-words whitespace-normal"
+                            size="sm"
+                            variant="outline"
+                          >
+                            <FileText aria-hidden="true" className="size-3" />
+                            {t("With summary")}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                </Card>
-              </div>
-            ))}
-          </div>
+                  </Card>
+                </div>
+              ))}
+            </div>
+          )}
           {pageCount > 1 ? (
             <nav
               aria-label={t("Recording pages")}
@@ -744,14 +705,14 @@ export function VideoTranscriptionLibrary({
             <div className="flex flex-col gap-1">
               <p className="font-medium">
                 {t(
-                  query || filter !== "all"
+                  query || filter !== "all" || source !== "all"
                     ? "No recordings found"
                     : "Your first recording starts here"
                 )}
               </p>
               <p className="max-w-sm text-sm text-muted-foreground">
                 {t(
-                  query || filter !== "all"
+                  query || filter !== "all" || source !== "all"
                     ? "Try a different name or clear the search."
                     : kind === "live"
                       ? "Start a live session to capture a conversation and create a summary."
@@ -759,12 +720,14 @@ export function VideoTranscriptionLibrary({
                 )}
               </p>
             </div>
-            {query || filter !== "all" ? (
+            {query || filter !== "all" || source !== "all" ? (
               <Button
                 variant="secondary"
                 onClick={() => {
                   setSearch({ basis: query, text: "" })
-                  router.replace(libraryPath(1), { scroll: false })
+                  router.replace(libraryPath(1, "", "all", "all"), {
+                    scroll: false,
+                  })
                 }}
               >
                 {t("Clear filters")}

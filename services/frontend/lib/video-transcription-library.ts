@@ -32,10 +32,15 @@ export type VideoTranscriptionLibraryItem = {
   streamStatus?: string
   streamEndReason?: string
   outageCount?: number
+  /** Live sessions: what it was about, and how many voices were told apart. */
+  excerpt?: string
+  speakerCount?: number
 }
 
 export type VideoTranscriptionLibraryPage = {
-  counts: Record<VideoLibraryFilter, number>
+  /** Live sessions also count meetings and livestreams for the source filter. */
+  counts: Record<VideoLibraryFilter, number> &
+    Partial<Record<LiveLibrarySource, number>>
   items: VideoTranscriptionLibraryItem[]
   total: number
   page: number
@@ -63,13 +68,23 @@ export function videoLibraryFilter(value: string | null): VideoLibraryFilter {
     ? (value as VideoLibraryFilter)
     : "all"
 }
+export const LIVE_LIBRARY_SOURCES = ["all", "meetings", "streams"] as const
+export type LiveLibrarySource = (typeof LIVE_LIBRARY_SOURCES)[number]
+export function liveLibrarySource(value: string | null): LiveLibrarySource {
+  return LIVE_LIBRARY_SOURCES.includes(value as LiveLibrarySource)
+    ? (value as LiveLibrarySource)
+    : "all"
+}
+
 export function videoLibraryPath(
   page: number,
   query = "",
   status: VideoLibraryFilter = "all",
-  kind: "video" | "live" = "video"
+  kind: "video" | "live" = "video",
+  source: LiveLibrarySource = "all"
 ) {
   const params = new URLSearchParams()
+  if (kind === "live" && source !== "all") params.set("source", source)
   if (status !== "all") params.set("status", status)
   if (page > 1) params.set("page", String(page))
   if (query.trim()) params.set("query", query.trim())
@@ -154,4 +169,52 @@ export function videoLibraryStep(item: VideoTranscriptionLibraryItem) {
         ? "Waiting to start…"
         : "Transcribing…"
   }
+}
+
+export type LiveLibraryGroupKey =
+  "now" | "scheduled" | "today" | "yesterday" | "week" | `month:${string}`
+
+export type LiveLibraryGroup = {
+  key: LiveLibraryGroupKey
+  items: VideoTranscriptionLibraryItem[]
+}
+
+/**
+ * Orders live sessions the way people look for them: what is running now, what is
+ * coming up, then by day (today, yesterday, the last seven days) and by month. The
+ * order within a group is kept.
+ */
+export function liveLibraryGroups(
+  items: VideoTranscriptionLibraryItem[],
+  now = new Date()
+): LiveLibraryGroup[] {
+  const startOfDay = (value: Date) =>
+    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const today = startOfDay(now)
+  const day = 24 * 60 * 60 * 1000
+  const keyOf = (item: VideoTranscriptionLibraryItem): LiveLibraryGroupKey => {
+    if (item.status === "live" || item.status === "paused") return "now"
+    if (item.status === "waiting") return "scheduled"
+    const created = new Date(item.createdAt)
+    const started = startOfDay(created)
+    if (started >= today) return "today"
+    if (started >= today - day) return "yesterday"
+    if (started >= today - 6 * day) return "week"
+    return `month:${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}`
+  }
+  const groups: LiveLibraryGroup[] = []
+  for (const item of items) {
+    const key = keyOf(item)
+    const group = groups.find((candidate) => candidate.key === key)
+    if (group) group.items.push(item)
+    else groups.push({ key, items: [item] })
+  }
+  const rank = (key: LiveLibraryGroupKey) =>
+    ["now", "scheduled", "today", "yesterday", "week"].indexOf(key)
+  return groups.sort((a, b) => {
+    const ra = rank(a.key)
+    const rb = rank(b.key)
+    if (ra >= 0 || rb >= 0) return (ra < 0 ? 99 : ra) - (rb < 0 ? 99 : rb)
+    return a.key < b.key ? 1 : a.key > b.key ? -1 : 0
+  })
 }
