@@ -27,6 +27,8 @@ jobs:
       pyannote_image: ${{ steps.filter.outputs.pyannote_image }}
       code_runner: ${{ steps.filter.outputs.code_runner }}
       code_runner_image: ${{ steps.filter.outputs.code_runner_image }}
+      meeting_bot: ${{ steps.filter.outputs.meeting_bot }}
+      meeting_bot_image: ${{ steps.filter.outputs.meeting_bot_image }}
       chart: ${{ steps.filter.outputs.chart }}
     steps:
       - uses: actions/checkout@v7
@@ -72,6 +74,14 @@ jobs:
               - 'services/code-runner/app.py'
               - 'services/code-runner/bootstrap.py'
               - 'services/code-runner/tests/**'
+            meeting_bot:
+              - 'services/meeting-bot/**'
+              - '.github/workflows/check-image-build.yml'
+            meeting_bot_image:
+              - 'services/meeting-bot/Dockerfile'
+              - 'services/meeting-bot/requirements.txt'
+              - 'services/meeting-bot/meeting_bot/**'
+              - 'services/meeting-bot/tests/**'
             chart:
               - 'charts/**'
               - '.github/workflows/check-image-build.yml'
@@ -416,6 +426,46 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
             aquasec/trivy:0.76.1 image --scanners vuln \
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-code-runner:ci
+
+  meeting-bot-test:
+    name: Meeting Bot — Tests
+    needs: changes
+    if: needs.changes.outputs.meeting_bot == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install dependencies and Chromium
+        working-directory: services/meeting-bot
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps --only-shell chromium
+      - name: Run tests (a local stand-in meeting and JustAI; nothing external)
+        working-directory: services/meeting-bot
+        run: python -m unittest discover -s tests -t . -v
+
+  meeting-bot-image-build:
+    name: Meeting Bot — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.meeting_bot_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: services/meeting-bot
+          file: services/meeting-bot/Dockerfile
+          push: false
+          load: true
+          tags: justai-meeting-bot:ci
+          cache-from: type=gha,scope=meeting-bot
+          cache-to: type=gha,scope=meeting-bot,mode=max
+      - name: Run the tests in the image as its non-root user
+        run: docker run --rm --entrypoint python justai-meeting-bot:ci -m unittest discover -s tests -t . -v
 
   chart-checks:
     name: Helm Chart — Lint and Tests

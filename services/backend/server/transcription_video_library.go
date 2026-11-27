@@ -38,6 +38,10 @@ type videoTranscriptionLibraryItem struct {
 	StreamStatus    string `json:"streamStatus,omitempty"`
 	StreamEndReason string `json:"streamEndReason,omitempty"`
 	OutageCount     int    `json:"outageCount,omitempty"`
+	// Excerpt says what a live session was about: the summary's first line, or the
+	// transcript's first words. SpeakerCount counts the voices told apart.
+	Excerpt      string `json:"excerpt,omitempty"`
+	SpeakerCount int    `json:"speakerCount,omitempty"`
 }
 
 func videoLibraryPageValues(c *gin.Context) (int, int, error) {

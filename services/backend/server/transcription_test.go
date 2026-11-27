@@ -108,12 +108,14 @@ func TestTranscriptionModeKeepsRealtimeAndChunkedTransportsDistinct(t *testing.T
 
 func TestTranscriptionIngressNormalizesBotPlatformsAndBearerTokens(t *testing.T) {
 	for input, expected := range map[string]string{
-		"":                "generic",
-		"custom":          "generic",
-		"zoom":            "zoom",
-		"google meet":     "google-meet",
-		"teams":           "microsoft-teams",
-		"microsoft-teams": "microsoft-teams",
+		"":                     "generic",
+		"custom":               "generic",
+		"zoom":                 "zoom",
+		"google meet":          "google-meet",
+		"teams":                "microsoft-teams",
+		"microsoft-teams":      "microsoft-teams",
+		"cms":                  "cisco-meeting-server",
+		"Cisco Meeting Server": "cisco-meeting-server",
 	} {
 		if got := normalizeBotPlatform(input); got != expected {
 			t.Fatalf("normalizeBotPlatform(%q) = %q, want %q", input, got, expected)

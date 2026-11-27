@@ -550,6 +550,9 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 						resultErr = sendErr
 						break
 					}
+				} else if skipper, ok := stream.(provider.SilenceSkipper); ok {
+					// Keep the provider's offsets on the stream's clock through pauses.
+					skipper.SkipSilence(pcm16)
 				}
 			}
 		}

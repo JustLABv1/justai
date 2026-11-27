@@ -1,0 +1,74 @@
+{{- if and .Values.meetingBot.enabled .Values.meetingBot.networkPolicy.enabled }}
+{{- $backendPort := ternary .Values.monolith.service.backendPort .Values.backend.service.port (eq .Values.deploymentMode "monolith") -}}
+# The bot browses meeting pages from the internet: only the JustAI backend may
+# connect to it, and it may reach DNS, the backend and the public internet, but no
+# private address range (cluster services, cloud metadata, the internal network).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "justai.fullname" . }}-meeting-bot
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: meeting-bot
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "justai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: meeting-bot
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "justai.selectorLabels" . | nindent 14 }}
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - backend
+                  - monolith
+      ports:
+        - protocol: TCP
+          port: 8091
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "justai.selectorLabels" . | nindent 14 }}
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - backend
+                  - monolith
+      ports:
+        - protocol: TCP
+          port: {{ $backendPort }}
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+            {{- with .Values.meetingBot.networkPolicy.blockedCidrs }}
+            except:
+              {{- range . }}
+              - {{ . | quote }}
+              {{- end }}
+            {{- end }}
+        - ipBlock:
+            cidr: "::/0"
+            {{- with .Values.meetingBot.networkPolicy.blockedCidrsV6 }}
+            except:
+              {{- range . }}
+              - {{ . | quote }}
+              {{- end }}
+            {{- end }}
+    {{- with .Values.meetingBot.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

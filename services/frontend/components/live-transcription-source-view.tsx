@@ -521,6 +521,16 @@ function CaptureConnectionCard({
         : [
             ["Adapter", t(formatTransportStatus(transportStatus))],
             [t("Platform"), formatPlatform(source?.platform)],
+            ...(source?.botJoinStatus
+              ? [
+                  [
+                    "Bot",
+                    source.botJoinStatus === "failed" && source.botJoinError
+                      ? `${t("Could not join")}: ${source.botJoinError}`
+                      : t(formatBotJoinStatus(source.botJoinStatus)),
+                  ],
+                ]
+              : []),
             [
               "Ingress",
               sourceConnected ? t("Receiving audio") : t("Waiting for bot"),
@@ -659,6 +669,19 @@ function getCaptureStatus(
   }
   if (source?.status === "stopped" || source?.transportStatus === "stopped") {
     return { key: "stopped", label: "Stopped", variant: "secondary" }
+  }
+  if (mode === "meeting-bot" && source?.botJoinStatus === "failed") {
+    return {
+      key: "failed",
+      label: "Bot could not join",
+      variant: "destructive",
+    }
+  }
+  if (
+    mode === "meeting-bot" &&
+    ["starting", "connecting", "joining"].includes(source?.botJoinStatus ?? "")
+  ) {
+    return { key: "reconnecting", label: "Bot is joining", variant: "outline" }
   }
   if (source?.transportStatus === "scheduled") {
     return { key: "scheduled", label: "Scheduled", variant: "outline" }
@@ -822,6 +845,23 @@ function getTransportValue(
   return "Shared audio track"
 }
 
+function formatBotJoinStatus(value?: string) {
+  switch (value) {
+    case "starting":
+    case "connecting":
+    case "joining":
+      return "Joining the meeting"
+    case "in_call":
+      return "In the meeting"
+    case "ended":
+      return "Left the meeting"
+    case "failed":
+      return "Could not join"
+    default:
+      return "Unknown"
+  }
+}
+
 function formatTransportStatus(value?: string) {
   switch (value) {
     case "scheduled":
@@ -872,6 +912,8 @@ function formatPlatform(value?: string) {
       return "Google Meet"
     case "microsoft-teams":
       return "Microsoft Teams"
+    case "cisco-meeting-server":
+      return "Cisco Meeting Server"
     case "generic":
       return "Custom adapter"
     default:

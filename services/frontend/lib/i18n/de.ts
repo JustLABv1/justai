@@ -5606,4 +5606,50 @@ export const de = {
     "An dieser Stelle ist keine Rede einem Sprecher zugeordnet. Wähle einen Moment, in dem die Person spricht.",
   "this speaker already has a manually assigned name; rename them in the speaker list instead":
     "Dieser Sprecher hat bereits einen manuell vergebenen Namen. Ändere ihn stattdessen in der Sprecherliste.",
+  "The bot could not join the meeting: {value0}":
+    "Der Bot konnte der Besprechung nicht beitreten: {value0}",
+  "unknown error": "unbekannter Fehler",
+  "Join the meeting automatically": "Bot tritt der Besprechung automatisch bei",
+  "JustAI’s bot joins as a visible guest and transcribes what the other participants say. Use it only with the organizer’s consent.":
+    "Der JustAI-Bot tritt als sichtbarer Gast bei und transkribiert, was die anderen Teilnehmenden sagen. Nur mit Zustimmung der Organisation verwenden.",
+  "Meeting ID": "Meeting-ID",
+  Passcode: "Kenncode",
+  "Only passed to the bot for joining; not stored.":
+    "Wird nur zum Beitreten an den Bot übergeben und nicht gespeichert.",
+  "The bot opens this link to join the meeting.":
+    "Über diesen Link tritt der Bot der Besprechung bei.",
+  "Bot could not join": "Bot konnte nicht beitreten",
+  "Bot is joining": "Bot tritt bei",
+  "Joining the meeting": "Tritt der Besprechung bei",
+  "In the meeting": "In der Besprechung",
+  "Left the meeting": "Hat die Besprechung verlassen",
+  "Separate speakers again": "Sprecher neu erkennen",
+  "Separate speakers again?": "Sprecher neu erkennen?",
+  "The speakers are recognized again from the recording. The current speakers and the names given to them are removed; edited text stays.":
+    "Die Sprecher werden aus der Aufnahme neu erkannt. Die bisherigen Sprecher und ihre vergebenen Namen werden entfernt; bearbeiteter Text bleibt erhalten.",
+  "Speakers are being recognized…": "Sprecher werden erkannt…",
+  "Telling the voices in the recording apart":
+    "Stimmen in der Aufnahme werden getrennt",
+  "{value0} of {value1} text blocks ready":
+    "{value0} von {value1} Textblöcken fertig",
+  "The transcript is saved. Retry the step or skip it to finish.":
+    "Das Transkript ist gespeichert. Versuche den Schritt erneut oder überspringe ihn, um abzuschließen.",
+  "The transcript is ready to read and edit while this runs in the background.":
+    "Du kannst das Transkript schon lesen und bearbeiten, während das im Hintergrund läuft.",
+  "Speaker separation did not finish":
+    "Die Sprechertrennung wurde nicht abgeschlossen",
+  "This step did not finish": "Dieser Schritt wurde nicht abgeschlossen",
+  "Meeting {value0}": "Besprechung {value0}",
+  "The room starts first, then JustAI's bot joins the meeting as a visible guest and transcribes what the others say.":
+    "Zuerst wird der Raum gestartet. Danach tritt der JustAI-Bot der Besprechung als sichtbarer Gast bei und transkribiert, was die anderen sagen.",
+  "Live now": "Läuft gerade",
+  "Earlier this week": "Diese Woche",
+  "Kind of session": "Art der Sitzung",
+  Meetings: "Besprechungen",
+  Livestreams: "Livestreams",
+  "Only open": "Nur offene",
+  "{value0} of {value1} topics": "{value0} von {value1} Themen",
+  "Post-processing…": "Wird nachbearbeitet…",
+  "Speakers not recognized": "Sprecher nicht erkannt",
+  "Polishing failed": "Überarbeitung fehlgeschlagen",
 } as const

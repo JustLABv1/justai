@@ -335,6 +335,96 @@ codeRunner:
     timeoutSeconds: 5
     failureThreshold: 3
 
+# Optional meeting bot (services/meeting-bot): joins browser meetings (built for
+# the Cisco Meeting Server web app) as a visible guest and forwards the other
+# participants' audio to a live transcription. With it enabled, adding a meeting-bot
+# source with "join automatically" makes the bot join; stopping the source or the
+# session makes it leave. Only join meetings whose organizer agrees.
+#
+# The bot runs headless Chromium. It needs outbound internet access to the meeting
+# servers (HTTPS and WebRTC media over UDP) and to the backend; nothing else may
+# connect to it. Bots live in the service's memory, so it always runs exactly one
+# replica and is replaced (not rolled) on upgrades, which ends running bots.
+meetingBot:
+  enabled: false
+  image:
+    repository: ghcr.io/justlabv1/justai
+    pullPolicy: IfNotPresent
+    # Release workflows publish meeting-bot images with this tag convention.
+    # Empty follows meeting-bot-<chart appVersion>.
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8091
+  # Bots that may be in meetings at the same time. Each needs roughly 0.5-1 CPU
+  # and 500-800 MiB; size resources accordingly.
+  maxBots: 2
+  # Name the other participants see.
+  botName: "JustAI Transkription (Bot)"
+  # "card": the bot's camera shows the JustAI logo and a note that the conversation
+  # is transcribed, and stays on so everyone sees a bot is listening. "off": a black
+  # picture, and the bot switches its camera off. The microphone is always muted.
+  camera: card
+  locale: de-DE
+  # Seconds to get in (a waiting room counts), and when a bot leaves by itself.
+  joinTimeoutSeconds: 600
+  maxMinutes: 240
+  aloneMinutes: 2
+  silenceMinutes: 30
+  networkPolicy:
+    enabled: true
+    # Egress goes to the internet except these ranges, so a meeting link cannot be
+    # used to reach cluster or internal services. The backend stays reachable.
+    blockedCidrs:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 100.64.0.0/10
+      - 169.254.0.0/16
+      - 127.0.0.0/8
+    blockedCidrsV6:
+      - fc00::/7
+      - fe80::/10
+      - ::1/128
+    # Additional NetworkPolicy egress rules, for example an HTTP proxy or an
+    # on-premise meeting server inside a blocked range.
+    extraEgress: []
+  podAnnotations: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # Writable scratch space for Chromium's profile and caches.
+  tmpVolume:
+    sizeLimit: 1Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  resources:
+    limits:
+      cpu: 2
+      memory: 3Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  livenessProbe:
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
 ingress:
   enabled: true
   className: ""
@@ -433,6 +523,7 @@ secrets:
     pyannoteServiceToken: ""
     streamRelayToken: ""
     codeRunnerToken: ""
+    meetingBotToken: ""
     metricsToken: ""
     backendHttpProxy: ""
     backendHttpsProxy: ""
@@ -482,6 +573,9 @@ secrets:
     codeRunnerToken:
       name: ""
       key: code-runner-token
+    meetingBotToken:
+      name: ""
+      key: meeting-bot-token
     backendHttpProxy:
       name: ""
       key: backend-http-proxy

@@ -104,9 +104,11 @@ type ChunkedStream struct {
 	bufferMu      sync.Mutex
 	buffer        []byte
 	bufferStartMs int64
-	resetNext     bool
-	committed     bool
-	closed        bool
+	// skippedSamples carries the part of skipped silence shorter than a millisecond.
+	skippedSamples int64
+	resetNext      bool
+	committed      bool
+	closed         bool
 
 	closeOnce      sync.Once
 	closeJobsOnce  sync.Once
@@ -119,6 +121,37 @@ type ChunkedStream struct {
 
 func (s *ChunkedStream) ForwardSilence() bool {
 	return false
+}
+
+// SilenceSkipper is a stream whose offsets count only the audio it receives. The
+// caller reports the silence it kept back, so offsets stay on the capture's clock and
+// line up with its recording.
+type SilenceSkipper interface {
+	SkipSilence(pcm16 []byte)
+}
+
+// SkipSilence advances the stream's clock past 16 kHz PCM16 silence that was not sent.
+// A remainder too short to transcribe on its own is dropped with it: after a pause it
+// has no correct place in the next utterance.
+func (s *ChunkedStream) SkipSilence(pcm16 []byte) {
+	s.bufferMu.Lock()
+	defer s.bufferMu.Unlock()
+	if s.closed || s.committed {
+		return
+	}
+	samples := int64(len(pcm16) / 2)
+	if len(s.buffer) > 0 {
+		if len(s.buffer) >= s.minimumBytes {
+			// Not expected after a committed turn; keep the timing exact with real silence.
+			s.buffer = append(s.buffer, make([]byte, samples*2)...)
+			return
+		}
+		samples += int64(len(s.buffer) / 2)
+		s.buffer = s.buffer[:0]
+	}
+	s.skippedSamples += samples
+	s.bufferStartMs += s.skippedSamples * 1000 / 16000
+	s.skippedSamples %= 16
 }
 
 func OpenChunked(ctx context.Context, endpoint Endpoint, model, language string, options ChunkedOptions) (*ChunkedStream, error) {

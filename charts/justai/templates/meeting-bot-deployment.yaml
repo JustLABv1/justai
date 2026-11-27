@@ -1,0 +1,121 @@
+{{- if .Values.meetingBot.enabled }}
+{{- include "justai.validateSecretRefs" . -}}
+{{- include "justai.validateMeetingBot" . -}}
+{{- $imageTag := .Values.meetingBot.image.tag | default (printf "meeting-bot-%s" .Chart.AppVersion) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "justai.fullname" . }}-meeting-bot
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: meeting-bot
+spec:
+  # Running bots live in the service's memory: one replica, replaced rather than
+  # rolled, so the backend always reaches the pod that runs its bots.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "justai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: meeting-bot
+  template:
+    metadata:
+      labels:
+        {{- include "justai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: meeting-bot
+      {{- with .Values.meetingBot.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      # The browser opens pages from the internet: no Kubernetes credentials and no
+      # service environment variables.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # Bots leave their meetings and finalise the transcript on shutdown.
+      terminationGracePeriodSeconds: 40
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.meetingBot.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: meeting-bot
+          image: "{{ .Values.meetingBot.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.meetingBot.image.pullPolicy }}
+          args: ["serve"]
+          {{- with .Values.meetingBot.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8091
+              protocol: TCP
+          env:
+            - name: MEETING_BOT_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "justai.secretRefName" (dict "root" . "ref" "meetingBotToken") | quote }}
+                  key: {{ include "justai.secretRefKey" (dict "root" . "ref" "meetingBotToken") | quote }}
+            - name: JUSTAI_URL
+              value: {{ include "justai.backendInternalURL" . | quote }}
+            - name: MEETING_BOT_PORT
+              value: "8091"
+            - name: MEETING_BOT_MAX_BOTS
+              value: {{ .Values.meetingBot.maxBots | quote }}
+            - name: BOT_NAME
+              value: {{ .Values.meetingBot.botName | quote }}
+            - name: BOT_CAMERA
+              value: {{ .Values.meetingBot.camera | quote }}
+            - name: BOT_LOCALE
+              value: {{ .Values.meetingBot.locale | quote }}
+            - name: BOT_JOIN_TIMEOUT_SECONDS
+              value: {{ .Values.meetingBot.joinTimeoutSeconds | quote }}
+            - name: BOT_MAX_MINUTES
+              value: {{ .Values.meetingBot.maxMinutes | quote }}
+            - name: BOT_ALONE_MINUTES
+              value: {{ .Values.meetingBot.aloneMinutes | quote }}
+            - name: BOT_SILENCE_MINUTES
+              value: {{ .Values.meetingBot.silenceMinutes | quote }}
+            # Chromium writes its profile below HOME; the root file system is read-only.
+            - name: HOME
+              value: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.meetingBot.readinessProbe | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.meetingBot.livenessProbe | nindent 12 }}
+          {{- with .Values.meetingBot.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.meetingBot.tmpVolume.sizeLimit | quote }}
+      {{- with .Values.meetingBot.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.meetingBot.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.meetingBot.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

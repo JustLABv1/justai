@@ -78,7 +78,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "justai.validateSecretRefs" -}}
 {{- $root := . -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "codeRunnerToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "codeRunnerToken" "meetingBotToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $_ := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- end }}
 {{- end }}
@@ -112,7 +112,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $root := . -}}
 {{- $generatedName := printf "%s-secrets" (include "justai.fullname" $root) -}}
 {{- $seen := dict -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "codeRunnerToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "codeRunnerToken" "meetingBotToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $name := include "justai.secretRefName" (dict "root" $root "ref" $refName) -}}
 {{- $key := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- if eq $name $generatedName }}
@@ -265,6 +265,49 @@ app.kubernetes.io/instance: {{ .Release.Name }}
     secretKeyRef:
       name: {{ include "justai.secretRefName" (dict "root" . "ref" "codeRunnerToken") | quote }}
       key: {{ include "justai.secretRefKey" (dict "root" . "ref" "codeRunnerToken") | quote }}
+{{- end }}
+{{- end }}
+
+{{/* The meeting-bot service and the backend share one token; both read it from the Secret. */}}
+{{- define "justai.validateMeetingBot" -}}
+{{- if .Values.meetingBot.enabled -}}
+{{- $ref := .Values.secrets.refs.meetingBotToken -}}
+{{- $data := .Values.secrets.data.meetingBotToken | default "" -}}
+{{- $external := or $ref.name .Values.secrets.existingSecret .Values.secrets.vault.enabled -}}
+{{- if and (not $external) (not .Values.secrets.create) -}}
+{{- fail "meetingBot.enabled requires secrets.refs.meetingBotToken.name, secrets.existingSecret, Vault, or secrets.create=true with secrets.data.meetingBotToken" -}}
+{{- end -}}
+{{- if and (not $external) .Values.secrets.create (lt (len (trim $data)) 32) -}}
+{{- fail "secrets.data.meetingBotToken must contain at least 32 characters when creating the meeting bot token Secret" -}}
+{{- end -}}
+{{- if or (lt (int .Values.meetingBot.maxBots) 1) (gt (int .Values.meetingBot.maxBots) 20) -}}
+{{- fail "meetingBot.maxBots must be between 1 and 20" -}}
+{{- end -}}
+{{- if not (has .Values.meetingBot.camera (list "card" "off")) -}}
+{{- fail "meetingBot.camera must be card or off" -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* The backend's address inside the cluster, in either deployment mode. */}}
+{{- define "justai.backendInternalURL" -}}
+{{- if eq .Values.deploymentMode "monolith" -}}
+{{- printf "http://%s:%d" (include "justai.fullname" .) (.Values.monolith.service.backendPort | int) -}}
+{{- else -}}
+{{- printf "http://%s-backend:%d" (include "justai.fullname" .) (.Values.backend.service.port | int) -}}
+{{- end -}}
+{{- end }}
+
+{{/* Backend settings that let meeting bots join automatically. */}}
+{{- define "justai.meetingBotEnv" -}}
+{{- if .Values.meetingBot.enabled }}
+- name: JUSTAI_MEETING_BOT_URL
+  value: {{ printf "http://%s-meeting-bot:%d" (include "justai.fullname" .) (.Values.meetingBot.service.port | int) | quote }}
+- name: JUSTAI_MEETING_BOT_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "justai.secretRefName" (dict "root" . "ref" "meetingBotToken") | quote }}
+      key: {{ include "justai.secretRefKey" (dict "root" . "ref" "meetingBotToken") | quote }}
 {{- end }}
 {{- end }}
 

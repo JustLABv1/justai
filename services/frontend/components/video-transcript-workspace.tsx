@@ -28,6 +28,7 @@ import {
   GitBranch,
   GitMerge,
   ImageIcon,
+  ListChecks,
   MessageSquarePlus,
   MoreHorizontal,
   Pause,
@@ -117,6 +118,7 @@ import {
   joinTranscriptText,
 } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
+import type { ReactNode } from "react"
 import type {
   AgentRun,
   AgentWorkflow,
@@ -163,6 +165,16 @@ export type TranscriptWorkspaceProps = {
   hideAskAction?: boolean
   onError: (value: string) => void
   mediaKind?: TranscriptWorkspaceMediaKind
+  /**
+   * Post-processing progress while it runs or needs attention. It gets its own
+   * side panel tab, which then opens first.
+   */
+  processingStatus?: ReactNode
+  /** Live sessions can separate their speakers again from the recording. */
+  speakerSeparation?: {
+    running: boolean
+    onRunAgain: () => void
+  }
 }
 
 /**
@@ -174,7 +186,8 @@ export type VideoTranscriptSnapshot = TranscriptWorkspaceSnapshot
 type VideoTranscriptWorkspaceProps = TranscriptWorkspaceProps
 
 type TranscriptMode = "verbatim" | "polished" | "edited"
-type WorkspaceView = "review" | "insights" | "speakers" | "details"
+type WorkspaceView =
+  "review" | "insights" | "speakers" | "details" | "processing"
 
 type AnnotationTarget = {
   segmentId: string
@@ -497,6 +510,8 @@ export function TranscriptWorkspace({
   onRenameSpeaker,
   onStartChat,
   hideAskAction = false,
+  processingStatus,
+  speakerSeparation,
   onError,
   mediaKind = "video",
 }: VideoTranscriptWorkspaceProps) {
@@ -515,7 +530,13 @@ export function TranscriptWorkspace({
         ? "polished"
         : "verbatim"
   )
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("insights")
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(
+    processingStatus ? "processing" : "insights"
+  )
+  // When processing finishes its tab goes away; the speakers show what it found.
+  if (workspaceView === "processing" && !processingStatus) {
+    setWorkspaceView("speakers")
+  }
   const [captionRun, setCaptionRun] = useState<CaptionRun | null>(null)
   const [selectedCaptionImage, setSelectedCaptionImage] = useState<{
     runId: string
@@ -2479,7 +2500,8 @@ export function TranscriptWorkspace({
             </Workbench.InspectorTrigger>
           </Workbench.Bar>
           <Workbench.Canvas className="p-0!">
-            <div className="flex h-full min-h-0 flex-col p-3">
+            {/* The canvas centres its content; the transcript takes its full width. */}
+            <div className="flex h-full min-h-0 w-full flex-col p-3">
               <Card
                 className={cn(
                   "flex h-full min-h-[24rem] min-w-0 flex-col overflow-hidden shadow-none",
@@ -3130,7 +3152,8 @@ export function TranscriptWorkspace({
                 } else if (
                   page === "insights" ||
                   page === "speakers" ||
-                  page === "details"
+                  page === "details" ||
+                  page === "processing"
                 ) {
                   setWorkspaceView(page)
                 }
@@ -3138,6 +3161,14 @@ export function TranscriptWorkspace({
               value={inspectorPage}
             >
               <Inspector.Rail>
+                {processingStatus ? (
+                  <Inspector.Tab
+                    label={t("Transcript post-processing")}
+                    value="processing"
+                  >
+                    <ListChecks />
+                  </Inspector.Tab>
+                ) : null}
                 <Inspector.Tab label={t("Summary")} value="insights">
                   <Sparkles />
                 </Inspector.Tab>
@@ -3538,6 +3569,11 @@ export function TranscriptWorkspace({
                     />
                   </Card>
                 </Inspector.Page>
+                {processingStatus ? (
+                  <Inspector.Page value="processing">
+                    <div className="shrink-0 p-3">{processingStatus}</div>
+                  </Inspector.Page>
+                ) : null}
                 <Inspector.Page value="speakers">
                   {speakerSummaries.length > 0 ? (
                     <Card
@@ -3577,6 +3613,18 @@ export function TranscriptWorkspace({
                             >
                               <GitMerge />
                             </Button>
+                            {speakerSeparation ? (
+                              <Button
+                                aria-label={t("Separate speakers again")}
+                                disabled={speakerSeparation.running}
+                                onClick={speakerSeparation.onRunAgain}
+                                size="icon-sm"
+                                title={t("Separate speakers again")}
+                                variant="outline"
+                              >
+                                <RefreshCw />
+                              </Button>
+                            ) : null}
                           </div>
                         </div>
                         <CardDescription>
@@ -3825,13 +3873,29 @@ export function TranscriptWorkspace({
                           {t("Speakers")}
                         </CardTitle>
                         <CardDescription>
-                          {t("There are no speaker names yet.")}
+                          {speakerSeparation?.running
+                            ? t("Speakers are being recognized…")
+                            : t("There are no speaker names yet.")}
                         </CardDescription>
                       </CardHeader>
-                      <CardContent className="px-4 pb-4 text-xs text-muted-foreground">
-                        {t(
-                          "You can still read, edit, and download the conversation."
+                      <CardContent className="flex flex-col items-start gap-3 px-4 pb-4 text-xs text-muted-foreground">
+                        {speakerSeparation?.running ? (
+                          <Spinner />
+                        ) : (
+                          t(
+                            "You can still read, edit, and download the conversation."
+                          )
                         )}
+                        {speakerSeparation && !speakerSeparation.running ? (
+                          <Button
+                            onClick={speakerSeparation.onRunAgain}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <RefreshCw data-icon="inline-start" />
+                            {t("Separate speakers again")}
+                          </Button>
+                        ) : null}
                       </CardContent>
                     </Card>
                   ) : null}

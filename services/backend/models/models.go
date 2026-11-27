@@ -451,14 +451,19 @@ type TranscriptionSession struct {
 }
 
 type TranscriptionSource struct {
-	ID               uuid.UUID  `json:"id"`
-	SessionID        uuid.UUID  `json:"sessionId"`
-	Name             string     `json:"name"`
-	Kind             string     `json:"kind"`
-	DeviceLabel      string     `json:"deviceLabel,omitempty"`
-	Protocol         string     `json:"protocol,omitempty"`
-	Platform         string     `json:"platform,omitempty"`
-	TransportStatus  string     `json:"transportStatus,omitempty"`
+	ID              uuid.UUID `json:"id"`
+	SessionID       uuid.UUID `json:"sessionId"`
+	Name            string    `json:"name"`
+	Kind            string    `json:"kind"`
+	DeviceLabel     string    `json:"deviceLabel,omitempty"`
+	Protocol        string    `json:"protocol,omitempty"`
+	Platform        string    `json:"platform,omitempty"`
+	TransportStatus string    `json:"transportStatus,omitempty"`
+	// BotJoinStatus and BotJoinError: what the meeting-bot service reports for a bot
+	// that joined the meeting automatically (starting, connecting, joining, in_call,
+	// ended, failed).
+	BotJoinStatus    string     `json:"botJoinStatus,omitempty"`
+	BotJoinError     string     `json:"botJoinError,omitempty"`
 	ReconnectCount   int        `json:"reconnectCount,omitempty"`
 	LastError        string     `json:"lastError,omitempty"`
 	Status           string     `json:"status"`

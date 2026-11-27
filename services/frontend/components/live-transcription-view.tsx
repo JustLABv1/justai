@@ -47,6 +47,7 @@ import {
   type StreamSchedule,
 } from "@/components/livestream-setup"
 import { LiveTranscriptProcessingPanel } from "@/components/live-transcript-processing-panel"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
@@ -194,9 +195,29 @@ const liveSessionSourceOptionsMessages: Array<{
   },
 ]
 
+function botPlatformLabel(
+  platform: string,
+  t: (key: string, values?: Record<string, string | number>) => string
+) {
+  switch (platform) {
+    case "zoom":
+      return "Zoom"
+    case "google-meet":
+      return "Google Meet"
+    case "microsoft-teams":
+      return "Microsoft Teams"
+    case "cisco-meeting-server":
+      return "Cisco Meeting Server"
+    default:
+      return t("Meeting bot")
+  }
+}
+
 type BotSetup = {
   source: TranscriptionSource
   bot?: { platform?: string; status?: string }
+  /** Present when the meeting-bot service was asked to join the meeting. */
+  botJoin?: { status?: string; error?: string } | null
   token: string
   protocol: string
   ticketPath: string
@@ -315,6 +336,17 @@ export function LiveTranscriptionView({
   const [title, setTitle] = useState("Room session")
   const [titleEdited, setTitleEdited] = useState(false)
   const [language, setLanguage] = useState("auto")
+  const botPlatformItems = useMemo(
+    () =>
+      [
+        "generic",
+        "zoom",
+        "google-meet",
+        "microsoft-teams",
+        "cisco-meeting-server",
+      ].map((value) => ({ value, label: botPlatformLabel(value, t) })),
+    [t]
+  )
   const languageItems = useMemo(
     () =>
       languageItemsFor(language).map((item) => ({
@@ -325,6 +357,8 @@ export function LiveTranscriptionView({
   )
   const [recordAudio, setRecordAudio] = useState(false)
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
+  // Set once the user switches speaker separation themselves; no preset after that.
+  const [speakerChoiceMade, setSpeakerChoiceMade] = useState(false)
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
     useState("")
   const [selectedGrammarEndpoint, setSelectedGrammarEndpoint] = useState("")
@@ -468,26 +502,131 @@ export function LiveTranscriptionView({
       {streamURL.trim() ? (
         <>
           {streamCheckFeedback}
-          <Field>
-            <FieldLabel>{t("Source name")}</FieldLabel>
-            <Input
-              id="stream-source-name"
-              onChange={(event) => setStreamName(event.target.value)}
-              placeholder={streamNameSuggestion}
-              value={streamName}
-            />
-          </Field>
+          {/* A session with one source needs no name for it; adding a second
+              source to a running session does. */}
+          {snapshot ? (
+            <Field>
+              <FieldLabel>{t("Source name")}</FieldLabel>
+              <Input
+                id="stream-source-name"
+                onChange={(event) => setStreamName(event.target.value)}
+                placeholder={streamNameSuggestion}
+                value={streamName}
+              />
+            </Field>
+          ) : null}
         </>
       ) : null}
     </>
   )
 
   const [botDialogOpen, setBotDialogOpen] = useState(false)
-  const [botName, setBotName] = useState(t("Meeting bot"))
+  // Empty: the source is named after its platform ("Cisco Meeting Server").
+  const [botName, setBotName] = useState("")
   const [botPlatform, setBotPlatform] = useState("generic")
   const [botMeetingURL, setBotMeetingURL] = useState("")
+  const [botAutoJoin, setBotAutoJoin] = useState(true)
+  const [botMeetingId, setBotMeetingId] = useState("")
+  const [botPasscode, setBotPasscode] = useState("")
+  const [meetingBotAvailable, setMeetingBotAvailable] = useState(false)
+  useEffect(() => {
+    let active = true
+    api
+      .get<{ available?: boolean }>("/api/v1/transcription/meeting-bot")
+      .then((result) => {
+        if (active) setMeetingBotAvailable(Boolean(result.available))
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+  // The bot service joins browser meetings (Cisco Meeting Server and similar).
+  const botCanJoin =
+    meetingBotAvailable &&
+    (botPlatform === "cisco-meeting-server" || botPlatform === "generic")
+  const botJoins = botCanJoin && botAutoJoin
+  const botSourcePayload = () => ({
+    name: botName.trim() || botPlatformLabel(botPlatform, t),
+    platform: botPlatform,
+    meetingUrl: botMeetingURL.trim() || undefined,
+    ...(botJoins
+      ? {
+          join: true,
+          meetingId: botMeetingId.trim() || undefined,
+          passcode: botPasscode || undefined,
+        }
+      : {}),
+  })
+  // A bot that joins needs no token handed to an adapter; a failed join is an error.
+  const afterBotSourceCreated = (setup: BotSetup) => {
+    setBotPasscode("")
+    if (!setup.botJoin) return true
+    if (setup.botJoin.status === "failed") {
+      setError(
+        t("The bot could not join the meeting: {value0}", {
+          value0: setup.botJoin.error || t("unknown error"),
+        })
+      )
+    }
+    return false
+  }
+  const botJoinFields = botCanJoin ? (
+    <>
+      <Field>
+        <div className="flex items-center justify-between gap-3">
+          <FieldLabel>{t("Join the meeting automatically")}</FieldLabel>
+          <Switch
+            aria-label={t("Join the meeting automatically")}
+            checked={botAutoJoin}
+            id="bot-auto-join"
+            onCheckedChange={(on) => setBotAutoJoin(Boolean(on))}
+          />
+        </div>
+        <FieldDescription>
+          {t(
+            "JustAI’s bot joins as a visible guest and transcribes what the other participants say. Use it only with the organizer’s consent."
+          )}
+        </FieldDescription>
+      </Field>
+      {botJoins ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel>
+              {t("Meeting ID")}{" "}
+              <span className="text-muted-foreground">{t("(optional)")}</span>
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="bot-meeting-id"
+              onChange={(event) => setBotMeetingId(event.target.value)}
+              value={botMeetingId}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>
+              {t("Passcode")}{" "}
+              <span className="text-muted-foreground">{t("(optional)")}</span>
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="bot-meeting-passcode"
+              onChange={(event) => setBotPasscode(event.target.value)}
+              type="password"
+              value={botPasscode}
+            />
+            <FieldDescription>
+              {t("Only passed to the bot for joining; not stored.")}
+            </FieldDescription>
+          </Field>
+        </div>
+      ) : null}
+    </>
+  ) : null
   const [botStarting, setBotStarting] = useState(false)
   const [botSetup, setBotSetup] = useState<BotSetup | null>(null)
+  const [rediarizeOpen, setRediarizeOpen] = useState(false)
+  const [rediarizing, setRediarizing] = useState(false)
   const [workspaceTimeMs, setWorkspaceTimeMs] = useState(0)
   const [workspaceDurationMs, setWorkspaceDurationMs] = useState(0)
   const [workspacePlaybackError, setWorkspacePlaybackError] = useState("")
@@ -815,6 +954,14 @@ export function LiveTranscriptionView({
                       typeof data.alert === "string"
                         ? data.alert
                         : source.alert,
+                    botJoinStatus:
+                      typeof data.botJoinStatus === "string"
+                        ? data.botJoinStatus
+                        : source.botJoinStatus,
+                    botJoinError:
+                      typeof data.botJoinError === "string"
+                        ? data.botJoinError
+                        : source.botJoinError,
                     // A moved plan or a changed topic selection reschedules the capture.
                     scheduledStartAt:
                       typeof data.scheduledStartAt === "string"
@@ -1654,11 +1801,7 @@ export function LiveTranscriptionView({
       ) {
         createdBotSetup = await api.post<BotSetup>(
           `/api/v1/transcription/sessions/${result.session.id}/bot-sources`,
-          {
-            name: botName.trim() || t("Meeting bot"),
-            platform: botPlatform,
-            meetingUrl: botMeetingURL.trim() || undefined,
-          }
+          botSourcePayload()
         )
         createdSource = {
           ...createdBotSetup.source,
@@ -1701,7 +1844,7 @@ export function LiveTranscriptionView({
           `/api/v1/transcription/sessions/${result.session.id}/resume`
         )
       }
-      if (createdBotSetup) {
+      if (createdBotSetup && afterBotSourceCreated(createdBotSetup)) {
         setBotSetup(createdBotSetup)
         setBotDialogOpen(true)
       }
@@ -2069,15 +2212,15 @@ export function LiveTranscriptionView({
     try {
       const result = await api.post<BotSetup>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/bot-sources`,
-        {
-          name: botName.trim() || t("Meeting bot"),
-          platform: botPlatform,
-          meetingUrl: botMeetingURL.trim() || undefined,
-        }
+        botSourcePayload()
       )
-      setBotSetup(result)
       setBotMeetingURL("")
-      setBotDialogOpen(true)
+      if (afterBotSourceCreated(result)) {
+        setBotSetup(result)
+        setBotDialogOpen(true)
+      } else {
+        setBotDialogOpen(false)
+      }
       const source = {
         ...result.source,
         platform: result.bot?.platform,
@@ -2182,7 +2325,34 @@ export function LiveTranscriptionView({
   const goToNextWizardStep = () => {
     if (!canContinueWizard || createStep >= lastWizardStep) return
     const next = wizardStepIds[createStep + 1]
-    // Name a livestream session after what it captures unless it was renamed.
+    // A bot that joins records for speaker separation; preselect it once.
+    if (
+      next === "options" &&
+      selectedWizardSource === "meeting-bot" &&
+      botJoins &&
+      !speakerChoiceMade &&
+      diarizationEndpoints[0]
+    ) {
+      setSelectedDiarizationEndpoint(diarizationEndpoints[0].id)
+    }
+    // Name a session after when and what it captures unless it was renamed.
+    if (
+      next === "options" &&
+      selectedWizardSource !== "stream" &&
+      !titleEdited
+    ) {
+      const when = new Intl.DateTimeFormat(locale, {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date())
+      setTitle(
+        selectedWizardSource === "meeting-bot"
+          ? t("Meeting {value0}", { value0: when })
+          : t("Recording {value0}", { value0: when })
+      )
+    }
     if (
       next === "options" &&
       selectedWizardSource === "stream" &&
@@ -2286,15 +2456,10 @@ export function LiveTranscriptionView({
               />
             </div>
           </div>
-          {snapshot.liveProcessing ? (
-            <LiveTranscriptProcessingPanel
-              snapshot={snapshot}
-              onChange={(next) => setSnapshot(next)}
-              onError={setError}
-            />
-          ) : null}
           <TranscriptWorkspace
             key={snapshot.session.id}
+            // "Ask AI" beside the transcript offers the same chat.
+            hideAskAction
             currentTimeMs={workspaceTimeMs}
             mediaKind={workspaceMediaKind}
             onCurrentTimeChange={setWorkspaceTimeMs}
@@ -2309,10 +2474,65 @@ export function LiveTranscriptionView({
             }
             onVideoDurationChange={setWorkspaceDurationMs}
             onVideoPlaybackError={setWorkspacePlaybackError}
+            processingStatus={
+              snapshot.liveProcessing &&
+              snapshot.session.startedAt &&
+              snapshot.liveProcessing.status !== "completed" ? (
+                <LiveTranscriptProcessingPanel
+                  snapshot={snapshot}
+                  onChange={(next) => setSnapshot(next)}
+                  onError={setError}
+                />
+              ) : undefined
+            }
+            speakerSeparation={
+              snapshot.liveProcessing && snapshot.session.diarizationEndpointId
+                ? {
+                    running:
+                      rediarizing ||
+                      ["queued", "processing"].includes(
+                        snapshot.liveProcessing.status
+                      ),
+                    onRunAgain: () => setRediarizeOpen(true),
+                  }
+                : undefined
+            }
             snapshot={snapshot}
             videoDurationMs={workspaceDurationMs}
             videoPlaybackError={workspacePlaybackError}
             videoRef={workspaceVideoRef}
+          />
+          <ConfirmActionDialog
+            open={rediarizeOpen}
+            title={t("Separate speakers again?")}
+            description={t(
+              "The speakers are recognized again from the recording. The current speakers and the names given to them are removed; edited text stays."
+            )}
+            confirmLabel={t("Separate speakers again")}
+            pending={rediarizing}
+            onOpenChange={setRediarizeOpen}
+            onConfirm={async () => {
+              setRediarizing(true)
+              try {
+                await api.post(
+                  `/api/v1/transcription/sessions/${snapshot.session.id}/processing?action=rediarize`
+                )
+                setSnapshot(
+                  await api.get<Snapshot>(
+                    `/api/v1/transcription/sessions/${snapshot.session.id}`
+                  )
+                )
+                setRediarizeOpen(false)
+              } catch (caught) {
+                setError(
+                  caught instanceof Error
+                    ? caught.message
+                    : t("Processing could not be updated.")
+                )
+              } finally {
+                setRediarizing(false)
+              }
+            }}
           />
         </>
       ) : snapshot && !createOpen ? (
@@ -2652,16 +2872,9 @@ export function LiveTranscriptionView({
               ) : (
                 <FieldGroup>
                   <Field>
-                    <FieldLabel>{t("Source name")}</FieldLabel>
-                    <Input
-                      id="session-bot-name"
-                      onChange={(event) => setBotName(event.target.value)}
-                      value={botName}
-                    />
-                  </Field>
-                  <Field>
                     <FieldLabel>{t("Meeting platform")}</FieldLabel>
                     <Select
+                      items={botPlatformItems}
                       onValueChange={(value) =>
                         setBotPlatform(value ?? "generic")
                       }
@@ -2685,6 +2898,9 @@ export function LiveTranscriptionView({
                           <SelectItem value="microsoft-teams">
                             Microsoft Teams
                           </SelectItem>
+                          <SelectItem value="cisco-meeting-server">
+                            Cisco Meeting Server
+                          </SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -2692,9 +2908,11 @@ export function LiveTranscriptionView({
                   <Field>
                     <FieldLabel>
                       {t("Meeting URL")}{" "}
-                      <span className="text-muted-foreground">
-                        {t("(optional)")}
-                      </span>
+                      {botJoins ? null : (
+                        <span className="text-muted-foreground">
+                          {t("(optional)")}
+                        </span>
+                      )}
                     </FieldLabel>
                     <Input
                       id="session-bot-url"
@@ -2704,11 +2922,14 @@ export function LiveTranscriptionView({
                       value={botMeetingURL}
                     />
                     <FieldDescription>
-                      {t(
-                        "Stored encrypted for your adapter. JustAI will not sign in to a third-party meeting for you."
-                      )}
+                      {botJoins
+                        ? t("The bot opens this link to join the meeting.")
+                        : t(
+                            "Stored encrypted for your adapter. JustAI will not sign in to a third-party meeting for you."
+                          )}
                     </FieldDescription>
                   </Field>
+                  {botJoinFields}
                 </FieldGroup>
               )}
             </div>
@@ -2774,11 +2995,12 @@ export function LiveTranscriptionView({
                           disabled={diarizationEndpoints.length === 0}
                           aria-label={t("Separate speakers")}
                           id="session-option-speakers"
-                          onCheckedChange={(on) =>
+                          onCheckedChange={(on) => {
+                            setSpeakerChoiceMade(true)
                             setSelectedDiarizationEndpoint(
                               on ? (diarizationEndpoints[0]?.id ?? "") : ""
                             )
-                          }
+                          }}
                         />
                       </Frame.Actions>
                     </Frame.Row>
@@ -3071,9 +3293,13 @@ export function LiveTranscriptionView({
                           "The browser opens its native share picker. Choose the tab or window and enable Share audio."
                         )
                       : selectedWizardSource === "meeting-bot"
-                        ? t(
-                            "The room starts first, then JustAI shows a one-time ingest token for your adapter. It does not automatically join the third-party meeting."
-                          )
+                        ? botJoins
+                          ? t(
+                              "The room starts first, then JustAI's bot joins the meeting as a visible guest and transcribes what the others say."
+                            )
+                          : t(
+                              "The room starts first, then JustAI shows a one-time ingest token for your adapter. It does not automatically join the third-party meeting."
+                            )
                         : t(
                             "The browser asks for microphone permission, then audio begins flowing into the room."
                           )}
@@ -3258,12 +3484,14 @@ export function LiveTranscriptionView({
                     <Input
                       id="bot-source-name"
                       onChange={(event) => setBotName(event.target.value)}
+                      placeholder={botPlatformLabel(botPlatform, t)}
                       value={botName}
                     />
                   </Field>
                   <Field>
                     <FieldLabel>{t("Meeting platform")}</FieldLabel>
                     <Select
+                      items={botPlatformItems}
                       onValueChange={(value) =>
                         setBotPlatform(value ?? "generic")
                       }
@@ -3287,6 +3515,9 @@ export function LiveTranscriptionView({
                           <SelectItem value="microsoft-teams">
                             Microsoft Teams
                           </SelectItem>
+                          <SelectItem value="cisco-meeting-server">
+                            Cisco Meeting Server
+                          </SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -3294,9 +3525,11 @@ export function LiveTranscriptionView({
                   <Field>
                     <FieldLabel>
                       {t("Meeting URL")}{" "}
-                      <span className="text-muted-foreground">
-                        {t("(optional)")}
-                      </span>
+                      {botJoins ? null : (
+                        <span className="text-muted-foreground">
+                          {t("(optional)")}
+                        </span>
+                      )}
                     </FieldLabel>
                     <Input
                       id="bot-meeting-url"
@@ -3306,11 +3539,14 @@ export function LiveTranscriptionView({
                       value={botMeetingURL}
                     />
                     <FieldDescription>
-                      {t(
-                        "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
-                      )}
+                      {botJoins
+                        ? t("The bot opens this link to join the meeting.")
+                        : t(
+                            "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
+                          )}
                     </FieldDescription>
                   </Field>
+                  {botJoinFields}
                 </FieldGroup>
               </DialogBody>
               <DialogFooter>
