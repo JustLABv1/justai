@@ -1257,7 +1257,7 @@ export function VideoTranscriptionView({
       : t("Cancel transcription")
 
   return (
-    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && <ToastFeedback message={error} type={"destructive"} />}
 
       {!sessionId && !snapshot && !createOpen ? (

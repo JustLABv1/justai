@@ -12,6 +12,7 @@ import {
 
 import {
   Activity,
+  ArrowDown,
   AudioLines,
   Bot,
   CalendarClock,
@@ -33,7 +34,15 @@ import {
   X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { useMemo, useState, type ReactNode } from "react"
+import {
+  Fragment,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 
 import type { LiveTranscriptionOrbitProps } from "@/components/live-transcription-orbit"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
@@ -41,7 +50,7 @@ import { Badge } from "@/components/panelui/badge"
 import { ScheduledCaptureCard } from "@/components/scheduled-capture-card"
 import { StreamHealthNotice } from "@/components/stream-health"
 import { ViewLinkButton } from "@/components/transcription-view-link"
-import type { TranscriptionTopic } from "@/lib/types"
+import type { TranscriptionSegment, TranscriptionTopic } from "@/lib/types"
 import { Button } from "@/components/panelui/button"
 import { RealtimeConnectionStatus } from "@/components/realtime-connection-status"
 import type { SSEConnectionState } from "@/lib/sse-transport"
@@ -155,16 +164,80 @@ export function LiveTranscriptionConversationView({
       snapshot.sources[0],
     [config.kind, snapshot.sources]
   )
-  const lines = useMemo(
-    () => groupTranscriptionSegments(snapshot.segments),
-    [snapshot.segments]
-  )
+  const topicsOnlyCapture =
+    snapshot.sources.length > 0 &&
+    snapshot.sources.every((source) => source.captureScope === "topics")
+  // With "selected topics only", capture pauses between the items, so the lines of
+  // each recorded item form a block of their own, separated where capture paused.
+  const blocks = useMemo(() => {
+    const recorded = topicsOnlyCapture
+      ? topics
+          .filter(
+            (topic) =>
+              topic.starred &&
+              topic.status !== "planned" &&
+              topic.detectedBy !== "missed" &&
+              topic.startedOffsetMs != null
+          )
+          .sort((a, b) => a.startedOffsetMs! - b.startedOffsetMs!)
+      : []
+    const buckets: {
+      topic?: TranscriptionTopic
+      segments: TranscriptionSegment[]
+    }[] = [
+      { segments: [] },
+      ...recorded.map((topic) => ({ topic, segments: [] })),
+    ]
+    for (const segment of snapshot.segments) {
+      let index = 0
+      recorded.forEach((topic, topicIndex) => {
+        if (segment.startOffsetMs >= topic.startedOffsetMs!)
+          index = topicIndex + 1
+      })
+      buckets[index].segments.push(segment)
+    }
+    return buckets
+      .map((bucket) => ({
+        topic: bucket.topic,
+        lines: groupTranscriptionSegments(bucket.segments),
+      }))
+      .filter((block) => block.lines.length > 0)
+  }, [snapshot.segments, topics, topicsOnlyCapture])
+  const lines = useMemo(() => blocks.flatMap((block) => block.lines), [blocks])
   const live = snapshot.session.status === "live"
   const waitingForTopic =
     live &&
-    snapshot.sources.length > 0 &&
-    snapshot.sources.every((source) => source.captureScope === "topics") &&
+    topicsOnlyCapture &&
     !topics.some((topic) => topic.starred && topic.status === "active")
+
+  // Follow the newest line until the reader scrolls up; scrolling back down to the
+  // end (or the button) resumes following.
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const followRef = useRef(true)
+  const [following, setFollowing] = useState(true)
+  // An instant jump: a smooth one would report "not at the end" while it runs.
+  const scrollToLatest = useCallback(() => {
+    const viewport = transcriptRef.current
+    if (!viewport) return
+    followRef.current = true
+    setFollowing(true)
+    viewport.scrollTop = viewport.scrollHeight
+  }, [])
+  const onTranscriptScroll = () => {
+    const viewport = transcriptRef.current
+    if (!viewport) return
+    const atEnd =
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 48
+    if (atEnd !== followRef.current) {
+      followRef.current = atEnd
+      setFollowing(atEnd)
+    }
+  }
+  useLayoutEffect(() => {
+    const viewport = transcriptRef.current
+    if (viewport && followRef.current)
+      viewport.scrollTop = viewport.scrollHeight
+  }, [lines, partial, waitingForTopic])
   const nextTopic = waitingForTopic
     ? topics
         .filter((topic) => topic.starred && topic.status === "planned")
@@ -237,7 +310,7 @@ export function LiveTranscriptionConversationView({
   if (scheduled)
     return (
       <Workbench
-        className="h-[max(32rem,calc(100dvh-8rem))]"
+        className="min-h-[32rem] flex-1"
         compactBelow={840}
         inspectorWidth={384}
         focusShortcut={false}
@@ -518,141 +591,168 @@ export function LiveTranscriptionConversationView({
         )}
       </div>
       <div
-        aria-label={t("Transcript")}
-        className={`divide-y overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${mode === "stream" ? "min-h-0 flex-1" : "max-h-[min(55dvh,32rem)]"}`}
-        role="region"
-        tabIndex={
-          lines.length > 0 || (partial && !waitingForTopic) ? 0 : undefined
-        }
+        className={`relative flex min-w-0 flex-col ${mode === "stream" ? "min-h-0 flex-1" : ""}`}
       >
-        {waitingForTopic && (
-          <div
-            className={
-              lines.length === 0
-                ? "flex min-h-full flex-col items-center justify-center gap-4 px-4 py-8 text-center"
-                : "flex items-center gap-3 py-4"
-            }
-            role="status"
-          >
-            <Mascot
-              state="sleeping"
-              size={lines.length === 0 ? 88 : 40}
-              fallback={
-                <CalendarClock
-                  aria-hidden="true"
-                  className="size-6 shrink-0 text-muted-foreground"
-                />
-              }
-            />
-            <div className="max-w-md">
-              {nextTopic && (
-                <p className="text-sm font-medium">{nextTopic.title}</p>
-              )}
-              {plannedTime && (
-                <p className="text-sm">
-                  {t("Planned for {value0} (Berlin time)", {
-                    value0: plannedTime,
-                  })}
-                </p>
-              )}
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t("Transcription begins when a selected topic is called.")}
-              </p>
-            </div>
-          </div>
-        )}
-        {lines.length === 0 && !partial && !waitingForTopic ? (
-          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-            <div className="relative grid size-24 place-items-center rounded-full border border-primary/20 bg-primary/5 text-primary shadow-[0_0_0_12px_hsl(var(--primary)/0.035)]">
-              <span className="absolute inset-[-7px] rounded-full border border-primary/20 motion-safe:animate-pulse" />
-              <AudioLines className="size-7" />
-            </div>
-            <h3 className="mt-6 text-sm font-semibold">
-              {t("Listening for the first words")}
-            </h3>
-            <p className="mt-2 max-w-sm text-xs leading-5 text-muted-foreground">
-              {isMicRoom
-                ? t(
-                    "When someone in the room speaks, their words will appear here in real time."
-                  )
-                : t(
-                    "{value0} is ready. The transcript starts as soon as audio arrives.",
-                    { value0: config.label }
-                  )}
-            </p>
-            <div className="mt-6 flex flex-wrap justify-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-muted-foreground">
-                <span
-                  className={
-                    hasSignal
-                      ? "size-1.5 rounded-full bg-emerald-500"
-                      : "size-1.5 rounded-full bg-amber-500"
-                  }
-                />{" "}
-                {hasSignal ? t("Audio detected") : t("Room is quiet")}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-muted-foreground">
-                <SourceIcon className="size-3.5" />{" "}
-                {primarySource?.deviceLabel || config.label}
-              </span>
-            </div>
-            {isMicRoom ? (
-              <div
-                className="mt-5 flex items-center -space-x-2"
-                aria-label={t("{value0} people in the room", {
-                  value0: snapshot.speakers.length || 1,
-                })}
-              >
-                {(snapshot.speakers.length
-                  ? snapshot.speakers
-                  : [{ id: user.id, displayName: user.displayName }]
-                )
-                  .slice(0, 4)
-                  .map((speaker, index) => {
-                    const name =
-                      speaker.displayName ||
-                      ("label" in speaker ? speaker.label : "") ||
-                      `Speaker ${index + 1}`
-                    return (
-                      <span
-                        className="grid size-7 place-items-center rounded-full border-2 border-background bg-muted text-[9px] font-semibold"
-                        key={speaker.id}
-                      >
-                        {initials(name)}
-                      </span>
-                    )
-                  })}
+        <div
+          aria-label={t("Transcript")}
+          className={`divide-y overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${mode === "stream" ? "min-h-0 flex-1" : "max-h-[min(55dvh,32rem)]"}`}
+          onScroll={onTranscriptScroll}
+          ref={transcriptRef}
+          role="region"
+          tabIndex={
+            lines.length > 0 || (partial && !waitingForTopic) ? 0 : undefined
+          }
+        >
+          {lines.length === 0 && !partial && !waitingForTopic ? (
+            <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+              <div className="relative grid size-24 place-items-center rounded-full border border-primary/20 bg-primary/5 text-primary shadow-[0_0_0_12px_hsl(var(--primary)/0.035)]">
+                <span className="absolute inset-[-7px] rounded-full border border-primary/20 motion-safe:animate-pulse" />
+                <AudioLines className="size-7" />
               </div>
-            ) : null}
-          </div>
-        ) : (
-          lines.map((line) => (
-            <article
-              className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 py-4"
-              key={line.id}
-            >
-              <time className="pt-0.5 text-xs text-muted-foreground">
-                {formatOffset(line.startOffsetMs)}
-              </time>
-              <p className="text-sm leading-6 wrap-anywhere">
-                <span className="mr-2 font-semibold text-foreground">
-                  {t(speakerName(snapshot, line.speakerKey))}
+              <h3 className="mt-6 text-sm font-semibold">
+                {t("Listening for the first words")}
+              </h3>
+              <p className="mt-2 max-w-sm text-xs leading-5 text-muted-foreground">
+                {isMicRoom
+                  ? t(
+                      "When someone in the room speaks, their words will appear here in real time."
+                    )
+                  : t(
+                      "{value0} is ready. The transcript starts as soon as audio arrives.",
+                      { value0: config.label }
+                    )}
+              </p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-muted-foreground">
+                  <span
+                    className={
+                      hasSignal
+                        ? "size-1.5 rounded-full bg-emerald-500"
+                        : "size-1.5 rounded-full bg-amber-500"
+                    }
+                  />{" "}
+                  {hasSignal ? t("Audio detected") : t("Room is quiet")}
                 </span>
-                {line.text}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-muted-foreground">
+                  <SourceIcon className="size-3.5" />{" "}
+                  {primarySource?.deviceLabel || config.label}
+                </span>
+              </div>
+              {isMicRoom ? (
+                <div
+                  className="mt-5 flex items-center -space-x-2"
+                  aria-label={t("{value0} people in the room", {
+                    value0: snapshot.speakers.length || 1,
+                  })}
+                >
+                  {(snapshot.speakers.length
+                    ? snapshot.speakers
+                    : [{ id: user.id, displayName: user.displayName }]
+                  )
+                    .slice(0, 4)
+                    .map((speaker, index) => {
+                      const name =
+                        speaker.displayName ||
+                        ("label" in speaker ? speaker.label : "") ||
+                        `Speaker ${index + 1}`
+                      return (
+                        <span
+                          className="grid size-7 place-items-center rounded-full border-2 border-background bg-muted text-[9px] font-semibold"
+                          key={speaker.id}
+                        >
+                          {initials(name)}
+                        </span>
+                      )
+                    })}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            blocks.map((block, blockIndex) => (
+              <Fragment key={block.topic?.id ?? "before-topics"}>
+                {blockIndex > 0 ? (
+                  <TopicPauseDivider title={block.topic?.title} />
+                ) : block.topic ? (
+                  <p className="py-3 text-xs font-medium text-muted-foreground">
+                    {block.topic.title}
+                  </p>
+                ) : null}
+                {block.lines.map((line) => (
+                  <article
+                    className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 py-4"
+                    key={line.id}
+                  >
+                    <time className="pt-0.5 text-xs text-muted-foreground">
+                      {formatOffset(line.startOffsetMs)}
+                    </time>
+                    <p className="text-sm leading-6 wrap-anywhere">
+                      <span className="mr-2 font-semibold text-foreground">
+                        {t(speakerName(snapshot, line.speakerKey))}
+                      </span>
+                      {line.text}
+                    </p>
+                  </article>
+                ))}
+              </Fragment>
+            ))
+          )}
+          {partial && !waitingForTopic ? (
+            <article className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 py-4 text-muted-foreground">
+              <time className="pt-0.5 text-xs">{t("Live")}</time>
+              <p className="text-sm leading-6 wrap-anywhere">
+                <span className="mr-2 font-semibold">
+                  {partialSourceId ? t("Speaker") : t("Listening")}
+                </span>
+                {partial}
               </p>
             </article>
-          ))
-        )}
-        {partial && !waitingForTopic ? (
-          <article className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 py-4 text-muted-foreground">
-            <time className="pt-0.5 text-xs">{t("Live")}</time>
-            <p className="text-sm leading-6 wrap-anywhere">
-              <span className="mr-2 font-semibold">
-                {partialSourceId ? t("Speaker") : t("Listening")}
-              </span>
-              {partial}
-            </p>
-          </article>
+          ) : null}
+          {waitingForTopic && (
+            <div
+              className={
+                lines.length === 0
+                  ? "flex min-h-full flex-col items-center justify-center gap-4 px-4 py-8 text-center"
+                  : "flex items-center gap-3 py-4"
+              }
+              role="status"
+            >
+              <Mascot
+                state="sleeping"
+                size={lines.length === 0 ? 88 : 40}
+                fallback={
+                  <CalendarClock
+                    aria-hidden="true"
+                    className="size-6 shrink-0 text-muted-foreground"
+                  />
+                }
+              />
+              <div className="max-w-md">
+                {nextTopic && (
+                  <p className="text-sm font-medium">{nextTopic.title}</p>
+                )}
+                {plannedTime && (
+                  <p className="text-sm">
+                    {t("Planned for {value0} (Berlin time)", {
+                      value0: plannedTime,
+                    })}
+                  </p>
+                )}
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("Transcription begins when a selected topic is called.")}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+        {!following && lines.length > 0 ? (
+          <Button
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-md"
+            onClick={scrollToLatest}
+            size="sm"
+            variant="secondary"
+          >
+            <ArrowDown data-icon="inline-start" /> {t("Jump to latest")}
+          </Button>
         ) : null}
       </div>
     </section>
@@ -902,7 +1002,7 @@ export function LiveTranscriptionConversationView({
 
     return (
       <Workbench
-        className="h-[max(32rem,calc(100dvh-8rem))]"
+        className="min-h-[32rem] flex-1"
         compactBelow={840}
         focus={focus}
         onFocusChange={setFocus}
@@ -975,4 +1075,27 @@ function initials(name: string) {
 function formatOffset(offset: number) {
   const seconds = Math.max(0, Math.floor(offset / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+/** Marks where capture paused between two selected agenda items. */
+function TopicPauseDivider({ title }: { title?: string }) {
+  const { t } = useTranslations()
+  return (
+    <div className="flex items-center gap-3 py-4" role="separator">
+      <Mascot
+        state="sleeping"
+        size={32}
+        fallback={
+          <CalendarClock
+            aria-hidden="true"
+            className="size-5 shrink-0 text-muted-foreground"
+          />
+        }
+      />
+      <div className="min-w-0 text-sm">
+        <p className="text-muted-foreground">{t("Paused between topics")}</p>
+        {title ? <p className="font-medium">{title}</p> : null}
+      </div>
+    </div>
+  )
 }
