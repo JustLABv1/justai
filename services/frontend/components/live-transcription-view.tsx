@@ -1095,7 +1095,7 @@ export function LiveTranscriptionView({
           setError("Received an invalid event from the transcription server.")
         }
       }
-      await new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve) => {
         socket.onopen = () => {
           opened = true
           if (openTimer !== null) window.clearTimeout(openTimer)
@@ -1109,19 +1109,12 @@ export function LiveTranscriptionView({
             resolve()
             return
           }
-          if (opened || retry > 0) {
-            scheduleReconnect()
-            resolve()
-            return
-          }
-          reject(new Error("The live transcription connection closed."))
+          // A stream that drops, or never gets ready, is retried like any other
+          // interruption; the ticket request above already rejected real errors.
+          scheduleReconnect()
+          resolve()
         }
-        openTimer = window.setTimeout(() => {
-          socket.close()
-          reject(
-            new Error("The live transcription socket took too long to connect.")
-          )
-        }, 15_000)
+        openTimer = window.setTimeout(() => socket.close(), 15_000)
       })
       if (!isCurrent() || socket.readyState !== SSETransport.OPEN) {
         socket.close()
