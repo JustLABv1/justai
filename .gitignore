@@ -97,3 +97,7 @@ csv-files/
 # Document template processor local test state
 services/backend/server/templates/__pycache__/
 .venv-templates/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
