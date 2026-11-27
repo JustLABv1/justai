@@ -588,6 +588,9 @@ func (m *TranscriptionManager) topicFinished(sessionID, topicID uuid.UUID) {
 		// end may miss the last lines, so an untouched copy is rebuilt here.
 		if _, err := m.app.syncTopicTranscript(ctx, topicID, true); err == nil {
 			m.broadcastTopic(sessionID, topicID)
+			// The sitting is separated by speaker only after capture ends; the item
+			// gets its speakers now.
+			m.diarizeTopicTranscriptLater(sessionID, topicID)
 		} else if !errors.Is(err, errTopicNotRecorded) {
 			slog.Warn("topic transcript failed", "topicId", topicID, "error", err)
 		}

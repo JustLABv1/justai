@@ -2764,6 +2764,8 @@ export const de = {
   "Waiting for topic": "Wartet auf Themenbeginn",
   "Planned for {value0} (Berlin time)":
     "Geplant für {value0} Uhr (Berliner Zeit)",
+  "Paused between topics": "Pause zwischen den Themen",
+  "Jump to latest": "Zur aktuellen Stelle",
   "Transcription begins when a selected topic is called.":
     "Die Transkription beginnt, sobald ein ausgewähltes Thema aufgerufen wird.",
   "Scheduled topic monitoring": "Warten auf Themenbeginn",

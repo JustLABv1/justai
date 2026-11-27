@@ -245,6 +245,12 @@ func (m *TranscriptionManager) nameSpeakersFromAnnouncements(ctx context.Context
 	if !m.isParliamentSession(ctx, sessionID) {
 		return nil
 	}
+	return m.nameSpeakersFromTurns(ctx, sessionID)
+}
+
+// nameSpeakersFromTurns is nameSpeakersFromAnnouncements for a transcript known to be
+// a parliament debate, such as an agenda item's own transcript.
+func (m *TranscriptionManager) nameSpeakersFromTurns(ctx context.Context, sessionID uuid.UUID) error {
 	segments, err := loadTranscriptionSegments(ctx, m.DB, sessionID)
 	if err != nil {
 		return err

@@ -32,6 +32,15 @@ func topicTranscriptTitle(topicTitle, label, sessionTitle string) string {
 	return title
 }
 
+// topicTranscriptTouchedQuery: has anybody worked on a topic transcript ($1) since it
+// was copied ($2)?
+const topicTranscriptTouchedQuery = `SELECT
+	EXISTS (SELECT 1 FROM transcription_sessions WHERE id = $1 AND (updated_at > $2 OR done_at IS NOT NULL OR archived_at IS NOT NULL))
+	OR EXISTS (SELECT 1 FROM transcription_segments WHERE session_id = $1 AND updated_at > $2)
+	OR EXISTS (SELECT 1 FROM transcription_speakers WHERE session_id = $1 AND updated_at > $2)
+	OR EXISTS (SELECT 1 FROM transcription_insights WHERE session_id = $1)
+	OR EXISTS (SELECT 1 FROM transcription_annotations WHERE session_id = $1)`
+
 // syncTopicTranscript gives a finished topic its own transcript: a completed session
 // holding a copy of the topic's lines (offsets start at zero) and its speakers. It is
 // created once. With refresh, an existing copy is rebuilt from the sitting (for example
@@ -64,12 +73,7 @@ func (a *App) syncTopicTranscript(ctx context.Context, topicID uuid.UUID, refres
 			return copyID.UUID, nil
 		}
 		var touched bool
-		if err := tx.QueryRowContext(ctx, `SELECT
-			EXISTS (SELECT 1 FROM transcription_sessions WHERE id = $1 AND (updated_at > $2 OR done_at IS NOT NULL OR archived_at IS NOT NULL))
-			OR EXISTS (SELECT 1 FROM transcription_segments WHERE session_id = $1 AND updated_at > $2)
-			OR EXISTS (SELECT 1 FROM transcription_speakers WHERE session_id = $1 AND updated_at > $2)
-			OR EXISTS (SELECT 1 FROM transcription_insights WHERE session_id = $1)
-			OR EXISTS (SELECT 1 FROM transcription_annotations WHERE session_id = $1)`, copyID.UUID, syncedAt.Time).Scan(&touched); err != nil {
+		if err := tx.QueryRowContext(ctx, topicTranscriptTouchedQuery, copyID.UUID, syncedAt.Time).Scan(&touched); err != nil {
 			return uuid.Nil, err
 		}
 		if touched {
