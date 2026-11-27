@@ -5639,4 +5639,7 @@ export const de = {
   "Speaker separation did not finish":
     "Die Sprechertrennung wurde nicht abgeschlossen",
   "This step did not finish": "Dieser Schritt wurde nicht abgeschlossen",
+  "Meeting {value0}": "Besprechung {value0}",
+  "The room starts first, then JustAI's bot joins the meeting as a visible guest and transcribes what the others say.":
+    "Zuerst wird der Raum gestartet. Danach tritt der JustAI-Bot der Besprechung als sichtbarer Gast bei und transkribiert, was die anderen sagen.",
 } as const

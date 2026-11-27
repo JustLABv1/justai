@@ -195,6 +195,24 @@ const liveSessionSourceOptionsMessages: Array<{
   },
 ]
 
+function botPlatformLabel(
+  platform: string,
+  t: (key: string, values?: Record<string, string | number>) => string
+) {
+  switch (platform) {
+    case "zoom":
+      return "Zoom"
+    case "google-meet":
+      return "Google Meet"
+    case "microsoft-teams":
+      return "Microsoft Teams"
+    case "cisco-meeting-server":
+      return "Cisco Meeting Server"
+    default:
+      return t("Meeting bot")
+  }
+}
+
 type BotSetup = {
   source: TranscriptionSource
   bot?: { platform?: string; status?: string }
@@ -318,6 +336,17 @@ export function LiveTranscriptionView({
   const [title, setTitle] = useState("Room session")
   const [titleEdited, setTitleEdited] = useState(false)
   const [language, setLanguage] = useState("auto")
+  const botPlatformItems = useMemo(
+    () =>
+      [
+        "generic",
+        "zoom",
+        "google-meet",
+        "microsoft-teams",
+        "cisco-meeting-server",
+      ].map((value) => ({ value, label: botPlatformLabel(value, t) })),
+    [t]
+  )
   const languageItems = useMemo(
     () =>
       languageItemsFor(language).map((item) => ({
@@ -328,6 +357,8 @@ export function LiveTranscriptionView({
   )
   const [recordAudio, setRecordAudio] = useState(false)
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
+  // Set once the user switches speaker separation themselves; no preset after that.
+  const [speakerChoiceMade, setSpeakerChoiceMade] = useState(false)
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
     useState("")
   const [selectedGrammarEndpoint, setSelectedGrammarEndpoint] = useState("")
@@ -471,22 +502,27 @@ export function LiveTranscriptionView({
       {streamURL.trim() ? (
         <>
           {streamCheckFeedback}
-          <Field>
-            <FieldLabel>{t("Source name")}</FieldLabel>
-            <Input
-              id="stream-source-name"
-              onChange={(event) => setStreamName(event.target.value)}
-              placeholder={streamNameSuggestion}
-              value={streamName}
-            />
-          </Field>
+          {/* A session with one source needs no name for it; adding a second
+              source to a running session does. */}
+          {snapshot ? (
+            <Field>
+              <FieldLabel>{t("Source name")}</FieldLabel>
+              <Input
+                id="stream-source-name"
+                onChange={(event) => setStreamName(event.target.value)}
+                placeholder={streamNameSuggestion}
+                value={streamName}
+              />
+            </Field>
+          ) : null}
         </>
       ) : null}
     </>
   )
 
   const [botDialogOpen, setBotDialogOpen] = useState(false)
-  const [botName, setBotName] = useState(t("Meeting bot"))
+  // Empty: the source is named after its platform ("Cisco Meeting Server").
+  const [botName, setBotName] = useState("")
   const [botPlatform, setBotPlatform] = useState("generic")
   const [botMeetingURL, setBotMeetingURL] = useState("")
   const [botAutoJoin, setBotAutoJoin] = useState(true)
@@ -511,7 +547,7 @@ export function LiveTranscriptionView({
     (botPlatform === "cisco-meeting-server" || botPlatform === "generic")
   const botJoins = botCanJoin && botAutoJoin
   const botSourcePayload = () => ({
-    name: botName.trim() || t("Meeting bot"),
+    name: botName.trim() || botPlatformLabel(botPlatform, t),
     platform: botPlatform,
     meetingUrl: botMeetingURL.trim() || undefined,
     ...(botJoins
@@ -2289,7 +2325,34 @@ export function LiveTranscriptionView({
   const goToNextWizardStep = () => {
     if (!canContinueWizard || createStep >= lastWizardStep) return
     const next = wizardStepIds[createStep + 1]
-    // Name a livestream session after what it captures unless it was renamed.
+    // A bot that joins records for speaker separation; preselect it once.
+    if (
+      next === "options" &&
+      selectedWizardSource === "meeting-bot" &&
+      botJoins &&
+      !speakerChoiceMade &&
+      diarizationEndpoints[0]
+    ) {
+      setSelectedDiarizationEndpoint(diarizationEndpoints[0].id)
+    }
+    // Name a session after when and what it captures unless it was renamed.
+    if (
+      next === "options" &&
+      selectedWizardSource !== "stream" &&
+      !titleEdited
+    ) {
+      const when = new Intl.DateTimeFormat(locale, {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date())
+      setTitle(
+        selectedWizardSource === "meeting-bot"
+          ? t("Meeting {value0}", { value0: when })
+          : t("Recording {value0}", { value0: when })
+      )
+    }
     if (
       next === "options" &&
       selectedWizardSource === "stream" &&
@@ -2809,16 +2872,9 @@ export function LiveTranscriptionView({
               ) : (
                 <FieldGroup>
                   <Field>
-                    <FieldLabel>{t("Source name")}</FieldLabel>
-                    <Input
-                      id="session-bot-name"
-                      onChange={(event) => setBotName(event.target.value)}
-                      value={botName}
-                    />
-                  </Field>
-                  <Field>
                     <FieldLabel>{t("Meeting platform")}</FieldLabel>
                     <Select
+                      items={botPlatformItems}
                       onValueChange={(value) =>
                         setBotPlatform(value ?? "generic")
                       }
@@ -2939,11 +2995,12 @@ export function LiveTranscriptionView({
                           disabled={diarizationEndpoints.length === 0}
                           aria-label={t("Separate speakers")}
                           id="session-option-speakers"
-                          onCheckedChange={(on) =>
+                          onCheckedChange={(on) => {
+                            setSpeakerChoiceMade(true)
                             setSelectedDiarizationEndpoint(
                               on ? (diarizationEndpoints[0]?.id ?? "") : ""
                             )
-                          }
+                          }}
                         />
                       </Frame.Actions>
                     </Frame.Row>
@@ -3236,9 +3293,13 @@ export function LiveTranscriptionView({
                           "The browser opens its native share picker. Choose the tab or window and enable Share audio."
                         )
                       : selectedWizardSource === "meeting-bot"
-                        ? t(
-                            "The room starts first, then JustAI shows a one-time ingest token for your adapter. It does not automatically join the third-party meeting."
-                          )
+                        ? botJoins
+                          ? t(
+                              "The room starts first, then JustAI's bot joins the meeting as a visible guest and transcribes what the others say."
+                            )
+                          : t(
+                              "The room starts first, then JustAI shows a one-time ingest token for your adapter. It does not automatically join the third-party meeting."
+                            )
                         : t(
                             "The browser asks for microphone permission, then audio begins flowing into the room."
                           )}
@@ -3423,12 +3484,14 @@ export function LiveTranscriptionView({
                     <Input
                       id="bot-source-name"
                       onChange={(event) => setBotName(event.target.value)}
+                      placeholder={botPlatformLabel(botPlatform, t)}
                       value={botName}
                     />
                   </Field>
                   <Field>
                     <FieldLabel>{t("Meeting platform")}</FieldLabel>
                     <Select
+                      items={botPlatformItems}
                       onValueChange={(value) =>
                         setBotPlatform(value ?? "generic")
                       }
