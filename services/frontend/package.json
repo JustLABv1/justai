@@ -41,7 +41,7 @@
     "img-fx": "^0.5.1",
     "katex": "^0.19.1",
     "lexical": "^0.53.0",
-    "lucide-react": "^1.79.0",
+    "lucide-react": "^1.80.0",
     "mermaid": "^12.3.0",
     "motion": "^14.14.0",
     "next": "16.4.6",
@@ -64,7 +64,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",
     "@types/katex": "^0.16.8",
-    "@types/node": "^26.6.7",
+    "@types/node": "^26.6.10",
     "@types/react": "^19.3.1",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9",
