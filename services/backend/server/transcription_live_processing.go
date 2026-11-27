@@ -434,13 +434,17 @@ func (a *App) controlLiveProcessing(c *gin.Context) {
 		return
 	}
 	action := c.Query("action")
+	if action == "rediarize" {
+		a.rediarizeLiveSession(c, id)
+		return
+	}
 	var result sql.Result
 	if action == "skip" {
 		result, err = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='queued',failure_notified_at=NULL,diarization_status=CASE WHEN stage='diarization' THEN 'skipped' ELSE diarization_status END,polish_status=CASE WHEN stage='grammar' THEN 'skipped' ELSE polish_status END,error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1 AND status='failed'`, id)
 	} else if action == "retry" {
 		result, err = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='queued',failure_notified_at=NULL,error_message='',lease_until=NULL,updated_at=now() WHERE session_id=$1 AND status='failed'`, id)
 	} else {
-		writeError(c, 400, fmt.Errorf("choose retry or skip"))
+		writeError(c, 400, fmt.Errorf("choose retry, skip or rediarize"))
 		return
 	}
 	if err != nil {
@@ -455,6 +459,61 @@ func (a *App) controlLiveProcessing(c *gin.Context) {
 	if action == "skip" {
 		_, _ = a.DB.ExecContext(c, `UPDATE transcription_sessions SET polish_status='not_requested',updated_at=now() WHERE id=$1 AND EXISTS(SELECT 1 FROM transcription_live_processing WHERE session_id=$1 AND stage='grammar' AND polish_status='skipped')`, id)
 	}
+	p, err := loadLiveProcessing(c, a.DB, id)
+	if err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	c.JSON(200, gin.H{"liveProcessing": p})
+}
+
+// rediarizeLiveSession separates the speakers of a finished live session again, for
+// example after a better diarization model or a fix to the recording. The speakers
+// of the previous run are removed with their names, since a new run numbers voices
+// afresh and a kept name could land on someone else; edited text stays. Polishing
+// is not repeated.
+func (a *App) rediarizeLiveSession(c *gin.Context, id uuid.UUID) {
+	var hasEndpoint, hasRecording bool
+	if err := a.DB.QueryRowContext(c, `SELECT s.diarization_endpoint_id IS NOT NULL,
+		EXISTS (SELECT 1 FROM transcription_recordings r WHERE r.session_id = s.id AND r.completed_at IS NOT NULL AND r.bytes > 44)
+		FROM transcription_sessions s WHERE s.id = $1`, id).Scan(&hasEndpoint, &hasRecording); err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	if !hasEndpoint {
+		writeError(c, 409, fmt.Errorf("this session has no speaker separation endpoint"))
+		return
+	}
+	if !hasRecording {
+		writeError(c, 409, fmt.Errorf("this session has no audio recording to separate speakers in"))
+		return
+	}
+	tx, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(c, `UPDATE transcription_live_processing SET status='queued', stage='diarization', diarization_status='queued', error_message='', failure_notified_at=NULL, lease_until=NULL, updated_at=now()
+		WHERE session_id=$1 AND status IN ('completed','failed')`, id)
+	if err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		writeError(c, 409, fmt.Errorf("speakers can be separated again only once processing has finished"))
+		return
+	}
+	// Segments lose their speaker through ON DELETE SET NULL.
+	if _, err = tx.ExecContext(c, `DELETE FROM transcription_speakers WHERE session_id=$1`, id); err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	a.Live.broadcast(id, "transcription.processing", ginData{"refresh": true})
 	p, err := loadLiveProcessing(c, a.DB, id)
 	if err != nil {
 		writeError(c, 500, err)

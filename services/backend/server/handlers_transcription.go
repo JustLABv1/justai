@@ -1281,6 +1281,11 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 					}
 				}
 			}
+			// The provider's offsets must keep counting through the pause, or the
+			// transcript drifts away from the recording.
+			if skipper, ok := stream.(provider.SilenceSkipper); ok {
+				skipper.SkipSilence(pcm16)
+			}
 			continue
 		}
 		if err := stream.SendPCM(ctx, pcm, frame.SampleRate); err != nil {

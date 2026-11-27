@@ -673,3 +673,76 @@ func TestParseHTTPTranscriptionEvent(t *testing.T) {
 		t.Fatalf("unexpected delta event: value=%q replace=%v err=%v", value, replace, err)
 	}
 }
+
+// The capture keeps silence back from the chunked provider; the offsets must still
+// count it, or the transcript drifts away from the recording (session fb96f10c:
+// 45.6 s of audio, transcript offsets ending at 19.2 s).
+func TestChunkedStreamOffsetsCountSkippedSilence(t *testing.T) {
+	streamContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &ChunkedStream{
+		windowBytes:  durationBytes(2500 * time.Millisecond),
+		overlapBytes: durationBytes(500 * time.Millisecond),
+		minimumBytes: durationBytes(100 * time.Millisecond),
+		ctx:          streamContext,
+		cancel:       cancel,
+		jobs:         make(chan chunkedAudio, 8),
+		events:       make(chan RealtimeEvent, 1),
+	}
+	next := func() chunkedAudio {
+		t.Helper()
+		select {
+		case job := <-stream.jobs:
+			return job
+		case <-time.After(time.Second):
+			t.Fatal("no chunk was queued")
+			return chunkedAudio{}
+		}
+	}
+	silence := func(d time.Duration) {
+		// In 100 ms frames, as the capture sends them.
+		for i := time.Duration(0); i < d; i += 100 * time.Millisecond {
+			stream.SkipSilence(make([]byte, durationBytes(100*time.Millisecond)))
+		}
+	}
+
+	silence(1500 * time.Millisecond) // before anybody speaks
+	if err := stream.SendPCM(nil, speechPCM(2500*time.Millisecond), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if job := next(); job.startOffsetMs != 1500 || job.endOffsetMs != 4000 {
+		t.Fatalf("first chunk %d-%d ms, want 1500-4000", job.startOffsetMs, job.endOffsetMs)
+	}
+	if err := stream.CommitTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if job := next(); job.startOffsetMs != 3500 || job.endOffsetMs != 4000 {
+		t.Fatalf("turn tail %d-%d ms, want 3500-4000", job.startOffsetMs, job.endOffsetMs)
+	}
+	silence(3 * time.Second)
+	if err := stream.SendPCM(nil, speechPCM(2500*time.Millisecond), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if job := next(); job.startOffsetMs != 7000 || job.endOffsetMs != 9500 {
+		t.Fatalf("after the pause %d-%d ms, want 7000-9500", job.startOffsetMs, job.endOffsetMs)
+	}
+
+	// A remainder too short to transcribe is dropped with the pause, not glued on.
+	if err := stream.CommitTurn(); err != nil {
+		t.Fatal(err)
+	}
+	next()
+	if err := stream.SendPCM(nil, speechPCM(50*time.Millisecond), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.CommitTurn(); err != nil { // below the 100 ms minimum: stays buffered
+		t.Fatal(err)
+	}
+	silence(time.Second)
+	if err := stream.SendPCM(nil, speechPCM(2500*time.Millisecond), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if job := next(); job.startOffsetMs != 10550 || len(job.pcm) != durationBytes(2500*time.Millisecond) {
+		t.Fatalf("after a dropped remainder: start %d ms, %d bytes", job.startOffsetMs, len(job.pcm))
+	}
+}

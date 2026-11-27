@@ -47,6 +47,7 @@ import {
   type StreamSchedule,
 } from "@/components/livestream-setup"
 import { LiveTranscriptProcessingPanel } from "@/components/live-transcript-processing-panel"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
@@ -588,6 +589,8 @@ export function LiveTranscriptionView({
   ) : null
   const [botStarting, setBotStarting] = useState(false)
   const [botSetup, setBotSetup] = useState<BotSetup | null>(null)
+  const [rediarizeOpen, setRediarizeOpen] = useState(false)
+  const [rediarizing, setRediarizing] = useState(false)
   const [workspaceTimeMs, setWorkspaceTimeMs] = useState(0)
   const [workspaceDurationMs, setWorkspaceDurationMs] = useState(0)
   const [workspacePlaybackError, setWorkspacePlaybackError] = useState("")
@@ -2390,15 +2393,10 @@ export function LiveTranscriptionView({
               />
             </div>
           </div>
-          {snapshot.liveProcessing ? (
-            <LiveTranscriptProcessingPanel
-              snapshot={snapshot}
-              onChange={(next) => setSnapshot(next)}
-              onError={setError}
-            />
-          ) : null}
           <TranscriptWorkspace
             key={snapshot.session.id}
+            // "Ask AI" beside the transcript offers the same chat.
+            hideAskAction
             currentTimeMs={workspaceTimeMs}
             mediaKind={workspaceMediaKind}
             onCurrentTimeChange={setWorkspaceTimeMs}
@@ -2413,10 +2411,65 @@ export function LiveTranscriptionView({
             }
             onVideoDurationChange={setWorkspaceDurationMs}
             onVideoPlaybackError={setWorkspacePlaybackError}
+            processingStatus={
+              snapshot.liveProcessing &&
+              snapshot.session.startedAt &&
+              snapshot.liveProcessing.status !== "completed" ? (
+                <LiveTranscriptProcessingPanel
+                  snapshot={snapshot}
+                  onChange={(next) => setSnapshot(next)}
+                  onError={setError}
+                />
+              ) : undefined
+            }
+            speakerSeparation={
+              snapshot.liveProcessing && snapshot.session.diarizationEndpointId
+                ? {
+                    running:
+                      rediarizing ||
+                      ["queued", "processing"].includes(
+                        snapshot.liveProcessing.status
+                      ),
+                    onRunAgain: () => setRediarizeOpen(true),
+                  }
+                : undefined
+            }
             snapshot={snapshot}
             videoDurationMs={workspaceDurationMs}
             videoPlaybackError={workspacePlaybackError}
             videoRef={workspaceVideoRef}
+          />
+          <ConfirmActionDialog
+            open={rediarizeOpen}
+            title={t("Separate speakers again?")}
+            description={t(
+              "The speakers are recognized again from the recording. The current speakers and the names given to them are removed; edited text stays."
+            )}
+            confirmLabel={t("Separate speakers again")}
+            pending={rediarizing}
+            onOpenChange={setRediarizeOpen}
+            onConfirm={async () => {
+              setRediarizing(true)
+              try {
+                await api.post(
+                  `/api/v1/transcription/sessions/${snapshot.session.id}/processing?action=rediarize`
+                )
+                setSnapshot(
+                  await api.get<Snapshot>(
+                    `/api/v1/transcription/sessions/${snapshot.session.id}`
+                  )
+                )
+                setRediarizeOpen(false)
+              } catch (caught) {
+                setError(
+                  caught instanceof Error
+                    ? caught.message
+                    : t("Processing could not be updated.")
+                )
+              } finally {
+                setRediarizing(false)
+              }
+            }}
           />
         </>
       ) : snapshot && !createOpen ? (

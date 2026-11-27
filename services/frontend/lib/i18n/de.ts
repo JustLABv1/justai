@@ -5623,4 +5623,20 @@ export const de = {
   "Joining the meeting": "Tritt der Besprechung bei",
   "In the meeting": "In der Besprechung",
   "Left the meeting": "Hat die Besprechung verlassen",
+  "Separate speakers again": "Sprecher neu erkennen",
+  "Separate speakers again?": "Sprecher neu erkennen?",
+  "The speakers are recognized again from the recording. The current speakers and the names given to them are removed; edited text stays.":
+    "Die Sprecher werden aus der Aufnahme neu erkannt. Die bisherigen Sprecher und ihre vergebenen Namen werden entfernt; bearbeiteter Text bleibt erhalten.",
+  "Speakers are being recognized…": "Sprecher werden erkannt…",
+  "Telling the voices in the recording apart":
+    "Stimmen in der Aufnahme werden getrennt",
+  "{value0} of {value1} text blocks ready":
+    "{value0} von {value1} Textblöcken fertig",
+  "The transcript is saved. Retry the step or skip it to finish.":
+    "Das Transkript ist gespeichert. Versuche den Schritt erneut oder überspringe ihn, um abzuschließen.",
+  "The transcript is ready to read and edit while this runs in the background.":
+    "Du kannst das Transkript schon lesen und bearbeiten, während das im Hintergrund läuft.",
+  "Speaker separation did not finish":
+    "Die Sprechertrennung wurde nicht abgeschlossen",
+  "This step did not finish": "Dieser Schritt wurde nicht abgeschlossen",
 } as const
