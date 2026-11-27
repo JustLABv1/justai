@@ -192,7 +192,7 @@ func (m *TranscriptionManager) proposeTopicBoundary(ctx context.Context, topicID
 		return nil
 	}
 	lines = window
-	at := lines[answer.Line-1].StartMs
+	at := lines[callStartLine(lines, answer.Line-1)].StartMs
 	if at <= from || at <= *topic.StartedOffsetMs {
 		return nil
 	}
@@ -210,6 +210,28 @@ func (m *TranscriptionManager) proposeTopicBoundary(ctx context.Context, topicID
 		m.broadcastTopic(topic.SessionID, topicID)
 	}
 	return nil
+}
+
+// topicCallReach is how far before the chosen line a call may have begun.
+const topicCallReach = 15_000
+
+// callStartLine moves a boundary the model put on the line naming the item ("60
+// Allgemeine Finanzverwaltung.") back to the line where the chair began the call
+// ("Ich rufe die Einzelpläne 32 Bundesschuld und"), so the item's transcript starts
+// with its call.
+func callStartLine(lines []topicAILine, i int) int {
+	if opensTopicCall(lines[i].Text) {
+		return i
+	}
+	for j := i - 1; j >= max(0, i-2); j-- {
+		if lines[j+1].StartMs-lines[j].StartMs > topicCallReach {
+			break
+		}
+		if opensTopicCall(lines[j].Text) {
+			return j
+		}
+	}
+	return i
 }
 
 // followingTopics are the next planned items after the topic, in agenda order.

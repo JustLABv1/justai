@@ -156,7 +156,7 @@ func (a *App) exportTranscriptionTopics(c *gin.Context) {
 	fmt.Fprintf(&b, "# %s\n\n", title)
 	written := 0
 	for _, topic := range topics {
-		if topic.StartedOffsetMs == nil || topic.DetectedBy == "missed" {
+		if topic.StartedOffsetMs == nil || topic.DetectedBy == "missed" || !topic.Recorded {
 			continue
 		}
 		var rows []transcriptionExportRow

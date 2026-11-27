@@ -28,8 +28,9 @@ var (
 	// A vote on an item ("Wir kommen zur Abstimmung über den Einzelplan 10") ends it.
 	topicVote = regexp.MustCompile(`^[[:punct:]\s]*abstimmung\b`)
 	topicEPL  = regexp.MustCompile(`\beinzelpl(?:an|ans|äne|änen)\s+((?:\d{1,2}(?:\s*(?:,|und|bis)\s*)?)+)`)
-	topicTOP  = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
-	topicZP   = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
+	// The chair reads Roman item numbers out as "Römisch 2", and the recognizer writes them that way.
+	topicTOP = regexp.MustCompile(`\b(?:tagesordnungspunkt(?:e|en)?|top)\s+((?:römisch\s+)?(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*(?:römisch\s+)?(?:\d+|[ivx]+)\b(?:\s*[a-z]\b)?)*)`)
+	topicZP  = regexp.MustCompile(`\bzusatzpunkt(?:e|en)?\s+((?:\d+)\b(?:\s*[a-z]\b)?(?:\s*(?:,|und|bis)\s*\d+\b(?:\s*[a-z]\b)?)*)`)
 	// The chair closes the sitting ("Ich schließe die Sitzung"), says the agenda is done
 	// ("Wir sind nun am Ende unserer heutigen Tagesordnung") or calls the next sitting
 	// ("Ich berufe die nächste Sitzung ... ein"). Speech recognition often writes
@@ -59,7 +60,8 @@ func intersects(a, b []int) bool {
 // listNumbers reads "08 und 20", "2 a bis 2 c" or "II, III" into numbers.
 func listNumbers(raw string) []int {
 	var out []int
-	for _, part := range regexp.MustCompile(`[^0-9a-z]+`).Split(strings.ToLower(raw), -1) {
+	raw = strings.ReplaceAll(strings.ToLower(raw), "römisch", " ")
+	for _, part := range regexp.MustCompile(`[^0-9a-z]+`).Split(raw, -1) {
 		if part == "" {
 			continue
 		}
@@ -105,6 +107,25 @@ func (b *topicCallBuffer) candidate(text string, startMs, endMs int64) string {
 	return candidate
 }
 
+func namedNumbers(re *regexp.Regexp, text string) []int {
+	var out []int
+	for _, m := range re.FindAllStringSubmatch(text, -1) {
+		out = append(out, listNumbers(m[1])...)
+	}
+	return out
+}
+
+// opensTopicCall reports a line holding the chair's call of an item (not a vote), so a
+// boundary found on the following line can start where the call began.
+func opensTopicCall(text string) bool {
+	lower := strings.ToLower(text)
+	if unfinishedTopicCall.MatchString(lower) {
+		return true // "... Wir kommen" with the rest on the next line
+	}
+	calls := topicTrigger.FindAllStringIndex(lower, -1)
+	return len(calls) > 0 && !topicVote.MatchString(lower[calls[len(calls)-1][1]:])
+}
+
 // detectTopicAnnouncement finds which unfinished agenda item the chair just called up.
 // It returns the index into topics, or -1. Items already done are never matched again,
 // which keeps a repeated mention (for example after a recess) from reopening them.
@@ -120,16 +141,9 @@ func detectTopicAnnouncement(text string, topics []topicRef) int {
 	if topicVote.MatchString(lower) {
 		return -1
 	}
-	var epl, top, zp []int
-	if m := topicEPL.FindStringSubmatch(lower); m != nil {
-		epl = listNumbers(m[1])
-	}
-	if m := topicTOP.FindStringSubmatch(lower); m != nil {
-		top = listNumbers(m[1])
-	}
-	if m := topicZP.FindStringSubmatch(lower); m != nil {
-		zp = listNumbers(m[1])
-	}
+	// Every number named after the call counts: the chair sometimes corrects a slip
+	// ("Tagesordnungspunkt 4, die Tagesordnungspunkte Römisch 2 und Römisch 3").
+	epl, top, zp := namedNumbers(topicEPL, lower), namedNumbers(topicTOP, lower), namedNumbers(topicZP, lower)
 	for i, t := range topics {
 		if t.Status == "done" {
 			continue

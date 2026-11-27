@@ -65,11 +65,27 @@ function formatOffset(ms?: number) {
   return `${h}:${pad(m)}:${pad(s)}`
 }
 
-/** The topic passed without being captured, so it has no transcript. */
+/**
+ * The topic passed without being captured, so it has no transcript. With "only
+ * selected topics" an unselected item is called up while the capture runs and gets a
+ * time range, but no lines.
+ */
 function notRecorded(topic: TranscriptionTopic) {
   return (
     topic.status === "done" &&
-    (topic.detectedBy === "missed" || topic.startedOffsetMs == null)
+    (topic.detectedBy === "missed" ||
+      topic.startedOffsetMs == null ||
+      topic.recorded === false)
+  )
+}
+
+/** A running item that is not being recorded ("only selected topics"). */
+function notBeingRecorded(topic: TranscriptionTopic, topicsOnly: boolean) {
+  return (
+    topic.status === "active" &&
+    topicsOnly &&
+    !topic.starred &&
+    topic.recorded === false
   )
 }
 
@@ -131,7 +147,8 @@ export function LiveTranscriptionTopics({
       .filter(
         (topic) =>
           (topic.status === "active" || topic.status === "done") &&
-          !notRecorded(topic)
+          topic.detectedBy !== "missed" &&
+          topic.startedOffsetMs != null
       )
       .map((topic) => topic.order)
   )
@@ -546,7 +563,9 @@ export function LiveTranscriptionTopics({
                     <Square data-icon="inline-start" /> {t("Finish")}
                   </Button>
                 ) : null}
-                {topic.status !== "planned" && !notRecorded(topic) ? (
+                {topic.status !== "planned" &&
+                !notRecorded(topic) &&
+                !notBeingRecorded(topic, topicsOnly) ? (
                   <Button
                     disabled={busyId === topic.id}
                     onClick={() => openTranscript(topic)}

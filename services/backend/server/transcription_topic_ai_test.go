@@ -48,3 +48,22 @@ func TestAskTopicBoundaryReadsTheModelAnswer(t *testing.T) {
 		t.Fatalf("prompt:\n%s", prompt)
 	}
 }
+
+// Sitting of 27 Nov 2026: the model chose the line naming the item, one after the call.
+func TestCallStartLineMovesToTheCall(t *testing.T) {
+	lines := []topicAILine{
+		{StartMs: 0, Text: "Der Einzelplan 23 ist damit angenommen."},
+		{StartMs: 4000, Text: "Ich rufe die Einzelpläne 32 Bundesschuld und Einzelplan"},
+		{StartMs: 8000, Text: "60 Allgemeine Finanzverwaltung. mit den Beschlussempfehlungen"},
+		{StartMs: 40000, Text: "Wir kommen zur Abstimmung über den Einzelplan 60."},
+	}
+	for chosen, want := range map[int]int{2: 1, 1: 1, 0: 0, 3: 3} {
+		if got := callStartLine(lines, chosen); got != want {
+			t.Errorf("line %d: got %d, want %d", chosen, got, want)
+		}
+	}
+	far := []topicAILine{{StartMs: 0, Text: "Ich rufe den Einzelplan"}, {StartMs: 60000, Text: "60 Allgemeine Finanzverwaltung."}}
+	if got := callStartLine(far, 1); got != 1 {
+		t.Errorf("a call a minute earlier was taken: %d", got)
+	}
+}

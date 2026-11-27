@@ -36,6 +36,9 @@ func TestDetectTopicAnnouncement(t *testing.T) {
 		{"Kommen wir zu Umwelt, Klimaschutz und Naturschutz.", 4},
 		{"Der Einzelplan 10 ist damit angenommen. Wir kommen jetzt zum Einzelplan 15.", 2},
 		{"Kommen wir damit zum Tagesordnungspunkt 3.", 5},
+		// Sitting of 27 Nov 2026, as transcribed: a slip, then Roman numbers read out.
+		{"Ich rufe auf die Tagesordnungspunkt 4. die Tagesordnungspunkte Römisch 2 und Römisch 3. Zweite und dritte Beratung", 5},
+		{"Ich rufe den Tagesordnungspunkt Römisch III auf.", 5},
 		// Not announcements.
 		{"Das war ein Zwischenruf aus der Fraktion, den ich rügen muss.", -1},
 		{"Der Einzelplan 15 ist ein wichtiger Haushalt für uns alle.", -1},
@@ -124,6 +127,19 @@ func TestCallSplitAfterWirKommen(t *testing.T) {
 		got := detectTopicAnnouncement(pending.candidate(text, int64(i)*2000, int64(i)*2000+2000), topics)
 		if want := map[bool]int{true: 1, false: -1}[i == 2]; got != want {
 			t.Fatalf("line %q: got %d, want %d", text, got, want)
+		}
+	}
+}
+
+func TestOpensTopicCall(t *testing.T) {
+	for text, want := range map[string]bool{
+		"Ich rufe die Einzelpläne 32 Bundesschuld und":                  true,
+		"ist damit angenommen. Wir kommen":                              true,
+		"Wir kommen zur Abstimmung über den Einzelplan 60.":             false,
+		"60 Allgemeine Finanzverwaltung. mit den Beschlussempfehlungen": false,
+	} {
+		if got := opensTopicCall(text); got != want {
+			t.Errorf("%q: got %v, want %v", text, got, want)
 		}
 	}
 }
