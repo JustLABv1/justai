@@ -72,13 +72,18 @@ func (m *TranscriptionManager) startConfiguredStreamSources(ctx context.Context)
 				if startMode == "when_live" {
 					next = "watching"
 				}
-				result, updateErr := m.DB.ExecContext(ctx, `UPDATE transcription_stream_sources SET status = $2, updated_at = now() WHERE source_id = $1 AND status = 'scheduled' AND scheduled_start_at <= now()`, sourceID, next)
+				// What was said while waiting ("paused until 12:08", "the plan moved the
+				// start") is out of date once the capture runs.
+				var hadAlert bool
+				updateErr := m.DB.QueryRowContext(ctx, `UPDATE transcription_stream_sources stream SET status = $2, alert = '', updated_at = now()
+					FROM (SELECT alert FROM transcription_stream_sources WHERE source_id = $1 FOR UPDATE) previous
+					WHERE stream.source_id = $1 AND stream.status = 'scheduled' AND stream.scheduled_start_at <= now()
+					RETURNING previous.alert <> ''`, sourceID, next).Scan(&hadAlert)
 				if updateErr != nil {
-					continue
+					continue // not due or claimed elsewhere (sql.ErrNoRows), or a database error
 				}
-				claimed, _ := result.RowsAffected()
-				if claimed == 0 {
-					continue
+				if hadAlert {
+					m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "alert": ""})
 				}
 				if next == "pending" {
 					m.app.activateTranscriptionIngressSession(sessionID)

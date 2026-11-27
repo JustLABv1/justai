@@ -19,7 +19,14 @@ import (
 	"justai-backend/provider"
 )
 
-const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at, transcript_session_id, boundary_status, boundary_topic_id, boundary_offset_ms, boundary_quote, boundary_reason, boundary_deadline`
+const topicColumns = `id, session_id, source_id, topic_key, sort_order, kind, label, title, planned_start_at, planned_end_at, status, started_offset_ms, ended_offset_ms, detected_by, starred, summary, summary_status, summary_error, updated_at, original_start_at, plan_changed_at, transcript_session_id, boundary_status, boundary_topic_id, boundary_offset_ms, boundary_quote, boundary_reason, boundary_deadline, ` + topicRecordedColumn
+
+// topicRecordedColumn: a topic has lines of its own. An item called up while only other
+// topics were being recorded gets offsets but no lines.
+const topicRecordedColumn = `transcription_topics.started_offset_ms IS NOT NULL AND EXISTS (SELECT 1 FROM transcription_segments s
+	WHERE s.session_id = transcription_topics.session_id AND s.canonical AND s.start_offset_ms >= transcription_topics.started_offset_ms
+	AND (transcription_topics.ended_offset_ms IS NULL OR s.start_offset_ms < transcription_topics.ended_offset_ms)
+	AND (transcription_topics.source_id IS NULL OR s.source_id IS NULL OR s.source_id = transcription_topics.source_id))`
 
 func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	var t models.TranscriptionTopic
@@ -28,7 +35,7 @@ func scanTopic(scan func(...any) error) (models.TranscriptionTopic, error) {
 	var boundaryStatus, boundaryQuote, boundaryReason string
 	var boundaryDeadline sql.NullTime
 	var plannedStart, plannedEnd, originalStart, planChanged sql.NullTime
-	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged, &transcript, &boundaryStatus, &boundaryTopic, &boundaryOffset, &boundaryQuote, &boundaryReason, &boundaryDeadline); err != nil {
+	if err := scan(&t.ID, &t.SessionID, &source, &t.Key, &t.Order, &t.Kind, &t.Label, &t.Title, &plannedStart, &plannedEnd, &t.Status, &start, &end, &t.DetectedBy, &t.Starred, &t.Summary, &t.SummaryStatus, &t.SummaryError, &t.UpdatedAt, &originalStart, &planChanged, &transcript, &boundaryStatus, &boundaryTopic, &boundaryOffset, &boundaryQuote, &boundaryReason, &boundaryDeadline, &t.Recorded); err != nil {
 		return t, err
 	}
 	if source.Valid {

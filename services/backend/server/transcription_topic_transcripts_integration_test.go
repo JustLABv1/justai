@@ -266,3 +266,42 @@ func TestTopicBoundaryProposalDecisionsIntegration(t *testing.T) {
 		}
 	})
 }
+
+// "Only selected topics": an unselected item called up while the capture ran gets a
+// time range but no lines, and must not look recorded.
+func TestTopicRecordedFlagIntegration(t *testing.T) {
+	ctx := context.Background()
+	db := backupTestDatabase(t, ctx)
+	userID, orgID, sessionID, sourceID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	recordedID, skippedID := uuid.New(), uuid.New()
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO users (id, email, display_name) VALUES ($1, 'ada@example.com', 'Ada')`, []any{userID}},
+		{`INSERT INTO organizations (id, name, slug) VALUES ($1, 'Lab', 'lab')`, []any{orgID}},
+		{`INSERT INTO transcription_sessions (id, user_id, organization_id, title, status, started_at) VALUES ($1, $2, $3, '113. Sitzung', 'live', '2026-11-27T09:00:00Z')`, []any{sessionID, userID, orgID}},
+		{`INSERT INTO transcription_sources (id, session_id, name, kind) VALUES ($1, $2, 'Bundestag', 'stream')`, []any{sourceID, sessionID}},
+		{`INSERT INTO transcription_segments (session_id, source_id, text, start_offset_ms, end_offset_ms) VALUES ($1, $2, 'Ich rufe die Einzelpläne 32 und 60 auf', 70000, 72000)`, []any{sessionID, sourceID}},
+		{`INSERT INTO transcription_topics (id, session_id, source_id, topic_key, title, label, status, started_offset_ms, ended_offset_ms, detected_by, starred) VALUES
+			($1, $3, $4, 'epl12', 'Verkehr', 'EPL 12', 'done', 0, 70000, 'announcement', FALSE),
+			($2, $3, $4, 'epl32', 'Bundesschuld', 'EPL 32, 60', 'done', 70000, 90000, 'announcement', TRUE)`, []any{skippedID, recordedID, sessionID, sourceID}},
+	} {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	topics, err := loadTopics(ctx, db, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, topic := range topics {
+		if want := topic.ID == recordedID; topic.Recorded != want {
+			t.Errorf("%s: recorded = %v, want %v", topic.Title, topic.Recorded, want)
+		}
+	}
+	a := &App{DB: db}
+	if _, err := a.syncTopicTranscript(ctx, skippedID, false); err != errTopicNotRecorded {
+		t.Fatalf("unrecorded topic: err = %v", err)
+	}
+}

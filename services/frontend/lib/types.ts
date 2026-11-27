@@ -933,6 +933,8 @@ export type TranscriptionTopic = {
   summaryError?: string
   /** The topic's own transcript, made once the topic finished. */
   transcriptSessionId?: string
+  /** The topic has transcript lines; items called up while only other topics were recorded have none. */
+  recorded?: boolean
   /** An AI suggestion, waiting for the user, that a later item began inside this one. */
   boundaryProposal?: TopicBoundaryProposal
   updatedAt: string

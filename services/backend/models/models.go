@@ -860,6 +860,9 @@ type TranscriptionTopic struct {
 	SummaryError    string     `json:"summaryError,omitempty"`
 	// TranscriptSessionID is the topic's own transcript, made once the topic finished.
 	TranscriptSessionID *uuid.UUID `json:"transcriptSessionId,omitempty"`
+	// Recorded: the topic has transcript lines. Items called up while only other topics
+	// were being recorded have none.
+	Recorded bool `json:"recorded"`
 	// BoundaryProposal is an AI suggestion, waiting for the user, that a later agenda
 	// item began inside this topic.
 	BoundaryProposal *TopicBoundaryProposal `json:"boundaryProposal,omitempty"`
