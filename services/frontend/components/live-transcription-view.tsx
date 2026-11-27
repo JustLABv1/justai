@@ -204,6 +204,33 @@ type BotSetup = {
   warning: string
 }
 
+// Browsers only allow getDisplayMedia while the click that asked for it is
+// still "active". Callers must start this before their first await, then hand
+// the stream to startCapture, which takes ownership of it.
+function requestDisplayAudio(): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getDisplayMedia)
+    return Promise.reject(
+      new Error(
+        "This browser does not support browser tab or system audio capture."
+      )
+    )
+  return navigator.mediaDevices
+    .getDisplayMedia({ video: true, audio: true })
+    .then((displayStream) => {
+      if (displayStream.getAudioTracks().length === 0) {
+        stopMediaStream(displayStream)
+        throw new Error(
+          "The selected tab or screen did not share audio. Enable Share audio and try again."
+        )
+      }
+      return displayStream
+    })
+}
+
+function stopMediaStream(stream: MediaStream | null | undefined) {
+  stream?.getTracks().forEach((track) => track.stop())
+}
+
 export function LiveTranscriptionView({
   sessionId,
   sessions,
@@ -1143,19 +1170,14 @@ export function LiveTranscriptionView({
       socket: SSETransport,
       session: TranscriptionSession,
       source: TranscriptionSource,
-      attempt: number
+      attempt: number,
+      preparedDisplayStream: MediaStream | null
     ) => {
       const systemAudio = source.kind === "browser-system"
-      if (
-        systemAudio
-          ? !navigator.mediaDevices?.getDisplayMedia
-          : !navigator.mediaDevices?.getUserMedia
-      )
-        throw new Error(
-          systemAudio
-            ? "This browser does not support browser tab or system audio capture."
-            : "This browser does not support microphone capture."
-        )
+      if (!systemAudio) stopMediaStream(preparedDisplayStream)
+      if (!systemAudio && !navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser does not support microphone capture.")
+      }
       const isCurrent = () =>
         captureAttemptRef.current === attempt &&
         captureSocketRef.current === socket &&
@@ -1186,18 +1208,10 @@ export function LiveTranscriptionView({
         context = null
       }
       if (systemAudio) {
-        displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        })
+        // Without a prepared stream this only works while the triggering
+        // click is still active, e.g. when no network round trip came first.
+        displayStream = preparedDisplayStream ?? (await requestDisplayAudio())
         const audioTracks = displayStream.getAudioTracks()
-        if (audioTracks.length === 0) {
-          displayStream.getTracks().forEach((track) => track.stop())
-          displayStream = null
-          throw new Error(
-            "The selected tab or screen did not share audio. Enable Share audio and try again."
-          )
-        }
         captureDisplayStreamRef.current = displayStream
         stream = new MediaStream(audioTracks)
         const stopWhenCaptureEnds = () => {
@@ -1363,113 +1377,125 @@ export function LiveTranscriptionView({
   )
 
   const startCapture = useCallback(
-    async (session: TranscriptionSession, source: TranscriptionSource) => {
-      closeCapture()
-      const attempt = captureAttemptRef.current
-      const ticketResponse = await api.post<{ ticket: string }>(
-        "/api/v1/stream-tickets",
-        {
-          kind: "transcription-capture",
-          sessionId: session.id,
-          sourceId: source.id,
-        }
-      )
-      if (captureAttemptRef.current !== attempt) return
-      captureSourceIdRef.current = source.id
-      const socket = new SSETransport(
-        eventStreamURL("/api/v1/streams/transcription", ticketResponse.ticket)
-      )
-      socket.onconnectionstatechange = (next) => {
-        setTransportStatus(next)
-        if (next.state === "reconnecting" || next.audioQuality !== "good")
-          setInterruptionAt(new Date())
-      }
-      socket.ontransporterror = (transportError) => {
-        if (
-          !["stream_reconnecting", "audio_backpressure"].includes(
-            transportError.code
-          )
+    async (
+      session: TranscriptionSession,
+      source: TranscriptionSource,
+      displayStream: MediaStream | null = null
+    ) => {
+      // Owned here until beginAudio takes it; every earlier exit stops it.
+      let pendingDisplay = displayStream
+      try {
+        closeCapture()
+        const attempt = captureAttemptRef.current
+        const ticketResponse = await api.post<{ ticket: string }>(
+          "/api/v1/stream-tickets",
+          {
+            kind: "transcription-capture",
+            sessionId: session.id,
+            sourceId: source.id,
+          }
         )
-          setError(transportError.message)
-      }
-      captureSocketRef.current = socket
-      socket.onmessage = (message) => {
         if (captureAttemptRef.current !== attempt) return
-        try {
-          handleSocketEvent(JSON.parse(message.data) as SocketEvent)
-        } catch {
-          setError(
-            "Received an invalid capture event from the transcription server."
+        captureSourceIdRef.current = source.id
+        const socket = new SSETransport(
+          eventStreamURL("/api/v1/streams/transcription", ticketResponse.ticket)
+        )
+        socket.onconnectionstatechange = (next) => {
+          setTransportStatus(next)
+          if (next.state === "reconnecting" || next.audioQuality !== "good")
+            setInterruptionAt(new Date())
+        }
+        socket.ontransporterror = (transportError) => {
+          if (
+            !["stream_reconnecting", "audio_backpressure"].includes(
+              transportError.code
+            )
           )
+            setError(transportError.message)
         }
-      }
-      socket.onerror = () => {
-        if (captureAttemptRef.current === attempt) {
-          setError("The audio capture connection could not be established.")
+        captureSocketRef.current = socket
+        socket.onmessage = (message) => {
+          if (captureAttemptRef.current !== attempt) return
+          try {
+            handleSocketEvent(JSON.parse(message.data) as SocketEvent)
+          } catch {
+            setError(
+              "Received an invalid capture event from the transcription server."
+            )
+          }
         }
-      }
-      let socketOpened = false
-      let rejectOpen: ((reason?: unknown) => void) | null = null
-      let openTimer: number | null = null
-      await new Promise<void>((resolve, reject) => {
-        rejectOpen = reject
-        socket.onopen = () => {
-          socketOpened = true
-          rejectOpen = null
-          if (openTimer !== null) window.clearTimeout(openTimer)
-          resolve()
+        socket.onerror = () => {
+          if (captureAttemptRef.current === attempt) {
+            setError("The audio capture connection could not be established.")
+          }
+        }
+        let socketOpened = false
+        let rejectOpen: ((reason?: unknown) => void) | null = null
+        let openTimer: number | null = null
+        await new Promise<void>((resolve, reject) => {
+          rejectOpen = reject
+          socket.onopen = () => {
+            socketOpened = true
+            rejectOpen = null
+            if (openTimer !== null) window.clearTimeout(openTimer)
+            resolve()
+          }
+          socket.onclose = () => {
+            if (openTimer !== null) window.clearTimeout(openTimer)
+            if (captureSocketRef.current === socket)
+              captureSocketRef.current = null
+            if (captureAttemptRef.current !== attempt) {
+              resolve()
+              return
+            }
+            if (!socketOpened) {
+              rejectOpen?.(
+                new Error(
+                  "The audio capture connection closed before connecting."
+                )
+              )
+              return
+            }
+            reject(new Error("The audio capture connection closed."))
+          }
+          openTimer = window.setTimeout(() => {
+            socket.close()
+            reject(
+              new Error("The audio capture socket took too long to connect.")
+            )
+          }, 15_000)
+        })
+        if (
+          captureAttemptRef.current !== attempt ||
+          socket.readyState !== SSETransport.OPEN
+        ) {
+          socket.close()
+          return
         }
         socket.onclose = () => {
-          if (openTimer !== null) window.clearTimeout(openTimer)
-          if (captureSocketRef.current === socket)
-            captureSocketRef.current = null
-          if (captureAttemptRef.current !== attempt) {
-            resolve()
-            return
-          }
-          if (!socketOpened) {
-            rejectOpen?.(
-              new Error(
-                "The audio capture connection closed before connecting."
-              )
-            )
-            return
-          }
-          reject(new Error("The audio capture connection closed."))
-        }
-        openTimer = window.setTimeout(() => {
-          socket.close()
-          reject(
-            new Error("The audio capture socket took too long to connect.")
+          if (captureAttemptRef.current !== attempt) return
+          closeCapture()
+          setError(
+            "The audio capture connection dropped. Restart audio to reconnect."
           )
-        }, 15_000)
-      })
-      if (
-        captureAttemptRef.current !== attempt ||
-        socket.readyState !== SSETransport.OPEN
-      ) {
-        socket.close()
-        return
-      }
-      socket.onclose = () => {
-        if (captureAttemptRef.current !== attempt) return
-        closeCapture()
-        setError(
-          "The audio capture connection dropped. Restart audio to reconnect."
+        }
+        socket.send(
+          JSON.stringify({
+            type: "transcription.start",
+            sessionId: session.id,
+            sourceId: source.id,
+          })
         )
-      }
-      socket.send(
-        JSON.stringify({
-          type: "transcription.start",
-          sessionId: session.id,
-          sourceId: source.id,
-        })
-      )
-      try {
-        await beginAudio(socket, session, source, attempt)
-      } catch (caught) {
-        if (captureAttemptRef.current === attempt) closeCapture()
-        throw caught
+        const prepared = pendingDisplay
+        pendingDisplay = null
+        try {
+          await beginAudio(socket, session, source, attempt, prepared)
+        } catch (caught) {
+          if (captureAttemptRef.current === attempt) closeCapture()
+          throw caught
+        }
+      } finally {
+        stopMediaStream(pendingDisplay)
       }
     },
     [beginAudio, closeCapture, handleSocketEvent]
@@ -1586,7 +1612,12 @@ export function LiveTranscriptionView({
       return
     setStarting(true)
     setError("")
+    // Ask for the tab first, while the click still counts as a user gesture;
+    // the session requests below would otherwise use it up.
+    let pendingDisplay: MediaStream | null = null
     try {
+      if (captureMode === "system-audio")
+        pendingDisplay = await requestDisplayAudio()
       const result = await api.post<{
         session: TranscriptionSession
         joinCode: string
@@ -1670,7 +1701,9 @@ export function LiveTranscriptionView({
       }
       applySnapshot(nextSnapshot)
       if (createdSource && captureMode !== "external") {
-        await startCapture(sessionWithExternalSource, createdSource)
+        const display = pendingDisplay
+        pendingDisplay = null
+        await startCapture(sessionWithExternalSource, createdSource, display)
         await api.post(
           `/api/v1/transcription/sessions/${result.session.id}/resume`
         )
@@ -1687,22 +1720,31 @@ export function LiveTranscriptionView({
           : "The transcription session could not be started."
       )
     } finally {
+      stopMediaStream(pendingDisplay)
       setStarting(false)
     }
   }
 
-  const ensureCapture = async () => {
-    if (!snapshot || capturing) return
+  const ensureCapture = async (preparedDisplay: MediaStream | null = null) => {
+    let pendingDisplay = preparedDisplay
+    if (!snapshot || capturing) {
+      stopMediaStream(pendingDisplay)
+      return
+    }
     if (
       captureMode === "external" ||
       snapshot.sources.some(
         (source) => source.kind === "stream" || source.kind === "meeting-bot"
       )
     ) {
+      stopMediaStream(pendingDisplay)
       setError("Add a stream or meeting bot source to this room first.")
       return
     }
     try {
+      // Before any request, so the click still allows getDisplayMedia.
+      if (captureSourceKind === "browser-system" && !pendingDisplay)
+        pendingDisplay = await requestDisplayAudio()
       let source = snapshot.sources.find(
         (item) => item.kind === captureSourceKind
       )
@@ -1726,7 +1768,9 @@ export function LiveTranscriptionView({
             : current
         )
       }
-      await startCapture(snapshot.session, source)
+      const display = pendingDisplay
+      pendingDisplay = null
+      await startCapture(snapshot.session, source, display)
       await api.post(
         `/api/v1/transcription/sessions/${snapshot.session.id}/resume`
       )
@@ -1741,6 +1785,8 @@ export function LiveTranscriptionView({
           ? caught.message
           : "The audio capture could not be started."
       )
+    } finally {
+      stopMediaStream(pendingDisplay)
     }
   }
 
@@ -1749,9 +1795,18 @@ export function LiveTranscriptionView({
     const hasExternalSource = snapshot.sources.some(
       (source) => source.kind === "stream" || source.kind === "meeting-bot"
     )
+    let pendingDisplay: MediaStream | null = null
     try {
       const action = snapshot.session.status === "paused" ? "resume" : "pause"
       if (action === "pause" && !hasExternalSource) closeCapture()
+      // Resuming tab audio needs the picker before the resume request.
+      if (
+        action === "resume" &&
+        !hasExternalSource &&
+        !capturing &&
+        captureSourceKind === "browser-system"
+      )
+        pendingDisplay = await requestDisplayAudio()
       await api.post(
         `/api/v1/transcription/sessions/${snapshot.session.id}/${action}`
       )
@@ -1766,13 +1821,19 @@ export function LiveTranscriptionView({
             }
           : current
       )
-      if (action === "resume" && !hasExternalSource) await ensureCapture()
+      if (action === "resume" && !hasExternalSource) {
+        const display = pendingDisplay
+        pendingDisplay = null
+        await ensureCapture(display)
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
           : "The transcription session could not be updated."
       )
+    } finally {
+      stopMediaStream(pendingDisplay)
     }
   }
 
